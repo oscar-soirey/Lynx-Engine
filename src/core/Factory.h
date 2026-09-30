@@ -1,0 +1,83 @@
+#pragma once
+
+#include "Common.h"
+#include "../gameplay/Object.h"
+
+#include <functional>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+#define LYNX_MODULE_FUNCTION extern "C" __declspec(dllexport)
+
+// Utilise la factory locale créée dans LYNX_LINK_MODULE
+#define LYNX_MODULE_REGISTER(__class__) \
+    __factory__.emplace( \
+        #__class__, \
+        []() -> lynx::Object* { return new __class__(); } \
+    )
+
+#define LYNX_LINK_MODULE(__module_content__) \
+    extern "C" __declspec(dllexport) void FactoryRegisterClasses() \
+    { \
+        lynx::Factory __factory__; \
+        __module_content__; \
+        lynx::GetEngine()->GetFactory().InsertFactory(__factory__); \
+    } \
+    \
+    extern "C" __declspec(dllexport) void FactoryUnregisterClasses() \
+    { \
+    }
+
+namespace lynx
+{
+    using ObjectConstructor = std::function<Object*()>;
+    using Factory = std::unordered_map<std::string, ObjectConstructor>;
+
+    class LYNX_API FactoryObject
+    {
+    public:
+        FactoryObject() = default;
+        ~FactoryObject() = default;
+
+        void RegisterObject(const char* name, ObjectConstructor constr)
+        {
+            auto [it, inserted] = factory_.emplace(
+                name,
+                std::move(constr)
+            );
+
+            if (!inserted)
+            {
+                printf(
+                    "RegisterObject error: object %s already exists\n",
+                    name
+                );
+            }
+        }
+
+        std::optional<ObjectConstructor> GetObjectConstr(
+            const char* name
+        ) const
+        {
+            auto it = factory_.find(name);
+
+            if (it == factory_.end())
+                return std::nullopt;
+
+            return it->second;
+        }
+
+        void InsertFactory(const Factory& factory)
+        {
+            for (const auto& [name, constructor] : factory)
+            {
+                RegisterObject(name.c_str(), constructor);
+            }
+        }
+
+    private:
+        Factory factory_;
+    };
+}
