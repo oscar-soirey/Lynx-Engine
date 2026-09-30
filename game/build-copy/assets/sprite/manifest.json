@@ -1,0 +1,347 @@
+{
+  "format": "raw RGBA8",
+  "width": 128,
+  "height": 128,
+  "channels": 4,
+  "byte_order": "R,G,B,A",
+  "source": "uploaded spritesheet",
+  "animations": {
+    "idle": [
+      {
+        "index": 0,
+        "file": "idle_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "idle_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "idle_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "idle_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "idle_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "idle_05.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 6,
+        "file": "idle_06.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 7,
+        "file": "idle_07.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 8,
+        "file": "idle_08.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 9,
+        "file": "idle_09.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 10,
+        "file": "idle_10.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 11,
+        "file": "idle_11.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 12,
+        "file": "idle_12.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 13,
+        "file": "idle_13.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 14,
+        "file": "idle_14.rgba",
+        "bytes": 65536
+      }
+    ],
+    "run": [
+      {
+        "index": 0,
+        "file": "run_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "run_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "run_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "run_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "run_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "run_05.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 6,
+        "file": "run_06.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 7,
+        "file": "run_07.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 8,
+        "file": "run_08.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 9,
+        "file": "run_09.rgba",
+        "bytes": 65536
+      }
+    ],
+    "attack_swing": [
+      {
+        "index": 0,
+        "file": "attack_swing_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "attack_swing_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "attack_swing_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "attack_swing_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "attack_swing_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "attack_swing_05.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 6,
+        "file": "attack_swing_06.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 7,
+        "file": "attack_swing_07.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 8,
+        "file": "attack_swing_08.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 9,
+        "file": "attack_swing_09.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 10,
+        "file": "attack_swing_10.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 11,
+        "file": "attack_swing_11.rgba",
+        "bytes": 65536
+      }
+    ],
+    "attack_down": [
+      {
+        "index": 0,
+        "file": "attack_down_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "attack_down_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "attack_down_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "attack_down_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "attack_down_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "attack_down_05.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 6,
+        "file": "attack_down_06.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 7,
+        "file": "attack_down_07.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 8,
+        "file": "attack_down_08.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 9,
+        "file": "attack_down_09.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 10,
+        "file": "attack_down_10.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 11,
+        "file": "attack_down_11.rgba",
+        "bytes": 65536
+      }
+    ],
+    "attack_up": [
+      {
+        "index": 0,
+        "file": "attack_up_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "attack_up_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "attack_up_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "attack_up_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "attack_up_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "attack_up_05.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 6,
+        "file": "attack_up_06.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 7,
+        "file": "attack_up_07.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 8,
+        "file": "attack_up_08.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 9,
+        "file": "attack_up_09.rgba",
+        "bytes": 65536
+      }
+    ],
+    "effects": [
+      {
+        "index": 0,
+        "file": "effects_00.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 1,
+        "file": "effects_01.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 2,
+        "file": "effects_02.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 3,
+        "file": "effects_03.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 4,
+        "file": "effects_04.rgba",
+        "bytes": 65536
+      },
+      {
+        "index": 5,
+        "file": "effects_05.rgba",
+        "bytes": 65536
+      }
+    ]
+  }
+}

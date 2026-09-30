@@ -13,8 +13,12 @@
 #include <random>
 #include <unordered_set>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "Common.h"
+#include "audio/AudioCommon.h"
 #include "core/Private/SystemModule.h"
 #include "gameplay/Private/InputManager.h"
 
@@ -113,7 +117,6 @@ static void MouseMove(GLFWwindow*, double x, double y)
     haveLastMousePosition = true;
 }
 
-
 HRL_id scene;
 HRL_id editing_object;
 HRL_id gizmo;
@@ -142,9 +145,12 @@ static void MouseButtonCallback(
     int action,
     int mods)
 {
-    if (action == GLFW_PRESS)
+
+    auto io = ImGui::GetIO();
+
+    if (action == GLFW_PRESS && !io.KeyShift)
         lynx::InjectMouseButtonDown(button);
-    else if (action == GLFW_RELEASE)
+    else if (action == GLFW_RELEASE && !io.KeyShift)
         lynx::InjectMouseButtonUp(button);
 
     if (button == GLFW_MOUSE_BUTTON_LEFT &&
@@ -193,20 +199,27 @@ static void MouseButtonCallback(
 
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
-    lynx::InjectMouseWheel(static_cast<float>(yoffset));
+    auto io = ImGui::GetIO();
+
+    if (!io.KeyShift)
+        lynx::InjectMouseWheel(static_cast<float>(yoffset));
+
     camZ -= (float)yoffset*10;
 }
 
 
 void inject_keys_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    auto io = ImGui::GetIO();
     if (action == GLFW_PRESS)
     {
-        lynx::InjectKeyDown(key);
+        if (!io.KeyShift)
+            lynx::InjectKeyDown(key);
     }
     else if (action == GLFW_RELEASE)
     {
-        lynx::InjectKeyUp(key);
+        if (!io.KeyShift)
+            lynx::InjectKeyUp(key);
     }
 }
 
@@ -249,7 +262,7 @@ int main()
 
 
     // Désactiver la V-Sync
-    glfwSwapInterval(0);
+    //glfwSwapInterval(0);
 
     HRL_Init(HRL_OPENGL_33);
     HRL_InitContext(
@@ -319,6 +332,13 @@ int main()
 
     engine->CreateLevel("world.xml");
 
+    auto font_data = lynx::fs::ReadBinary("Ubuntu-Regular.ttf");
+    HRL_id hrlfont = HRL_CreateFont(reinterpret_cast<const char*>(font_data.data()), font_data.size());
+    HRL_SetDebugMeshInfoTextSize(scene, 32.f);
+    HRL_SetDebugMeshInfoFont(scene, hrlfont);
+    HRL_SetDebugMeshInfoTextColor(scene, 1, 0.2, 0.2, 1.0);
+	//HRL_AddScreenMessage(scene, 5.f, "Level loaded succesfully");
+
 
     //
 
@@ -348,19 +368,16 @@ int main()
         HRL_SetVoxelTypeColor(
             scene,
             type,
-            voxelColors[i][0],
-            voxelColors[i][1],
-            voxelColors[i][2],
-            voxelColors[i][3]
+            voxelData[i].color[0],
+            voxelData[i].color[1],
+            voxelData[i].color[2],
+            voxelData[i].color[3]
         );
 
         HRL_SetVoxelTypeCollisionFlags(
             scene,
                 type,
-                HRL_VOXEL_COLLISION_LEFT |
-                HRL_VOXEL_COLLISION_RIGHT |
-                HRL_VOXEL_COLLISION_TOP |
-                HRL_VOXEL_COLLISION_BOTTOM
+                voxelData[i].flags
         );
     }
 
@@ -380,6 +397,12 @@ int main()
 
 
     InitImGui(win);
+
+    lynx::SetMasterVolume(0.1f);
+
+    lynx::Audio2D ambient_cave("cave_ambience.mp3");
+    ambient_cave.looping = true;
+    ambient_cave.Play();
 
 
 
@@ -628,9 +651,34 @@ int main()
     // Main loop
     // ------------------------------------------------------------
 
+    bool f4_was_down = false;
+
     while (!glfwWindowShouldClose(win))
     {
         glfwPollEvents();
+
+        const bool f4_down = glfwGetKey(win, GLFW_KEY_F4) == GLFW_PRESS;
+        if (f4_down && !f4_was_down)
+        {
+            static bool show_collision_debug = false;
+            show_collision_debug = !show_collision_debug;
+
+#ifdef _WIN32
+            using SetCollisionDebugEnabledFn = void (*)(bool);
+            HMODULE game_dll = GetModuleHandleA("libGameExample.dll");
+            if (game_dll)
+            {
+                auto set_collision_debug =
+                    reinterpret_cast<SetCollisionDebugEnabledFn>(
+                        GetProcAddress(game_dll, "Game_SetCollisionDebugEnabled")
+                    );
+
+                if (set_collision_debug)
+                    set_collision_debug(show_collision_debug);
+            }
+#endif
+        }
+        f4_was_down = f4_down;
 
         // --------------------------------------------------------
         // Delta time
@@ -719,8 +767,11 @@ int main()
 
         auto io = ImGui::GetIO();
 
-        if (!isPlaying)
+        HRL_SetWidgetVisible(brush_preview_widget, HRL_FALSE);
+        if (!isPlaying || io.KeyShift)
         {
+            HRL_SetWidgetVisible(brush_preview_widget, HRL_TRUE);
+
             int winW, winH;
             glfwGetWindowSize(win, &winW, &winH);
             HRL_SetWidgetPosition(brush_preview_widget, mouseX/winW, mouseY/winH);
@@ -969,6 +1020,18 @@ int main()
         }
 
 
+        ImGui::Begin("Sound");
+
+        float master_volume = lynx::GetMasterVolume();
+        auto mv_changed = ImGui::SliderFloat("Master Volume", &master_volume, 0.f, 2.f);
+        if (mv_changed)
+        {
+            lynx::SetMasterVolume(master_volume);
+        }
+
+        ImGui::End();
+
+
         // --------------------------------------------------------
         // Viewport
         // --------------------------------------------------------
@@ -1121,10 +1184,10 @@ int main()
             int type = i + 1;
 
             ImVec4 color(
-                voxelColors[i][0],
-                voxelColors[i][1],
-                voxelColors[i][2],
-                voxelColors[i][3]
+                voxelData[i].color[0],
+                voxelData[i].color[1],
+                voxelData[i].color[2],
+                voxelData[i].color[3]
             );
 
             ImGui::PushID(type);

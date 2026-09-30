@@ -230,105 +230,105 @@ namespace lynx
   };
 
 
-  struct blend_space
-  {
-    struct sample
-    {
-        float position;
-        animation anim;
-    };
+	struct blend_space
+	{
+	    struct sample
+	    {
+	        float position;
+	        animation* anim;
+	    };
 
-    void add(float position, animation anim)
-    {
-        samples_.push_back({
-            position,
-            std::move(anim)
-        });
+	    void add(float position, animation& anim)
+	    {
+	        samples_.push_back({
+	            position,
+	            &anim
+	        });
 
-        std::sort(
-            samples_.begin(),
-            samples_.end(),
-            [](const sample& a, const sample& b)
-            {
-                return a.position < b.position;
-            }
-        );
-    }
+	        std::sort(
+	            samples_.begin(),
+	            samples_.end(),
+	            [](const sample& a, const sample& b)
+	            {
+	                return a.position < b.position;
+	            }
+	        );
+	    }
 
-    void set_value(float value)
-    {
-        value_ = value;
-    }
+	    void set_value(float value)
+	    {
+	        value_ = value;
+	    }
 
-    void on_finished(std::function<void()> callback)
-    {
-        finished_callback_ = std::move(callback);
-    }
+	    void on_finished(std::function<void()> callback)
+	    {
+	        finished_callback_ = std::move(callback);
+	    }
 
-    void restart()
-    {
-        for (auto& sample : samples_)
-            sample.anim.restart();
-    }
+	    void restart()
+	    {
+	        for (auto& sample : samples_)
+	            sample.anim->restart();
+	    }
 
-    void update(double dt)
-    {
-        if (samples_.empty())
-            return;
+	    void update(double dt)
+	    {
+	        if (samples_.empty())
+	            return;
 
-        animation* current = nullptr;
+	        animation* current = nullptr;
 
-        if (value_ <= samples_.front().position)
-        {
-            current = &samples_.front().anim;
-        }
-        else if (value_ >= samples_.back().position)
-        {
-            current = &samples_.back().anim;
-        }
-        else
-        {
-            for (size_t i = 0; i < samples_.size() - 1; ++i)
-            {
-                auto& a = samples_[i];
-                auto& b = samples_[i + 1];
+	        if (value_ <= samples_.front().position)
+	        {
+	            current = samples_.front().anim;
+	        }
+	        else if (value_ >= samples_.back().position)
+	        {
+	            current = samples_.back().anim;
+	        }
+	        else
+	        {
+	            for (size_t i = 0; i < samples_.size() - 1; ++i)
+	            {
+	                auto& a = samples_[i];
+	                auto& b = samples_[i + 1];
 
-                if (value_ >= a.position && value_ <= b.position)
-                {
-                    float alpha =
-                        (value_ - a.position) /
-                        (b.position - a.position);
+	                if (value_ >= a.position && value_ <= b.position)
+	                {
+	                    float alpha =
+	                        (value_ - a.position) /
+	                        (b.position - a.position);
 
-                    current = alpha < 0.5f
-                        ? &a.anim
-                        : &b.anim;
+	                    current = alpha < 0.5f
+	                        ? a.anim
+	                        : b.anim;
 
-                    break;
-                }
-            }
-        }
+	                    break;
+	                }
+	            }
+	        }
 
-        if (!current)
-            return;
+	        if (!current)
+	            return;
 
-        current->play();
+	        current->play();
 
-        bool was_finished = current->is_finished();
+	        bool was_finished = current->is_finished();
 
-        current->update(dt);
+	        current->update(dt);
 
-        if (!was_finished && current->is_finished())
-        {
-            if (finished_callback_)
-                finished_callback_();
-        }
-    }
+	        if (!was_finished && current->is_finished())
+	        {
+	            if (finished_callback_)
+	                finished_callback_();
+	        }
+	    }
 
-  private:
-    std::vector<sample> samples_;
+	private:
+	    std::vector<sample> samples_;
 
-    float value_ = 0.0f;
+	    float value_ = 0.0f;
 
-    std::function<void()> finished_callback_;
-  };
+	    std::function<void()> finished_callback_;
+	};
 }

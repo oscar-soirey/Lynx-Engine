@@ -3,7 +3,7 @@
 #include <Lynx.h>
 #include "hrl/hrl.h"
 
-#include "../Common.h"
+#include "../../Common.h"
 
 
 class BlockParticles
@@ -52,7 +52,7 @@ public:
 
         for (int i = 0; i < 4; ++i)
         {
-            const float* color = voxelColors[i];
+            const float* color = voxelData[i].color;
 
             CreateEmitter(
                 i,

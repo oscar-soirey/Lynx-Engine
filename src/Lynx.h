@@ -17,3 +17,7 @@
 #include "gameplay/Actor.h"
 #include "gameplay/Input.h"
 #include "gameplay/CameraShake.h"
+
+#include "audio/AudioSource.h"
+#include "audio/AudioListener.h"
+#include "audio/Audio2D.h"

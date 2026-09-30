@@ -9,6 +9,7 @@
 #include "Level.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/Private/InputManager.h"
+#include "audio/AudioCommon.h"
 #include "Private/SystemModule.h"
 
 
@@ -71,11 +72,13 @@ namespace lynx
 		fs::AssetSource asset_src = fs::AssetSource::Directory;
 		if (release) asset_src = fs::AssetSource::Archive;
 		fs::Init(asset_src);
+		InitializeAudio();
 	}
 
 	Engine::~Engine()
 	{
 		delete current_level_;
+		ShutdownAudio();
 		HRL_Shutdown();
 	}
 
@@ -85,12 +88,9 @@ namespace lynx
 		// Time dilation timer
 		// ========================================================
 
-		//printf("dt: %f", dt);
 		if (time_dilatation_timer_ > 0.0f)
 		{
-			printf("dt: %f, timer: %f", dt, time_dilatation_timer_);
 			time_dilatation_timer_ -= dt;
-			printf("dt: %f, timer: %f", dt, time_dilatation_timer_);
 
 			if (time_dilatation_timer_ <= 0.0f)
 			{

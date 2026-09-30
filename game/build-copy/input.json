@@ -1,72 +1,18 @@
 {
   "action-mappings": {
-    "Attack": [
-      "GAMEPAD_X",
-      "MOUSE_LEFT"
-    ],
-    "Jump": [
-      "GAMEPAD_A",
-      "32"
-    ]
+    "jump": ["32", "GAMEPAD_A"],
+    "attack": ["MOUSE_LEFT", "GAMEPAD_RIGHT_TRIGGER"]
   },
   "axis-mappings": {
-    "Move": [
-      {
-        "key": "65",
-        "scale": -1.0
-      },
-      {
-        "key": "68",
-        "scale": 1.0
-      },
-      {
-        "key": "GAMEPAD_LEFT_X",
-        "scale": 1.0
-      }
+    "move_x": [
+      {"key": "65", "scale": -1.0},
+      {"key": "68", "scale": 1.0},
+      {"key": "263", "scale": -1.0},
+      {"key": "262", "scale": 1.0},
+		{"key": "GAMEPAD_LEFT_X", "scale": 1.0}
     ],
-    "LookX": [
-      {
-        "key": "MOUSE_X",
-        "scale": 1.0
-      },
-      {
-        "key": "GAMEPAD_RIGHT_X",
-        "scale": 1.0
-      }
-    ],
-    "LookY": [
-      {
-        "key": "MOUSE_Y",
-        "scale": 1.0
-      },
-      {
-        "key": "GAMEPAD_RIGHT_Y",
-        "scale": 1.0
-      }
-    ],
-    "Zoom": [
-      {
-        "key": "MOUSE_WHEEL",
-        "scale": 1.0
-      }
-    ],
-    "Trigger": [
-      {
-        "key": "GAMEPAD_RIGHT_TRIGGER",
-        "scale": 1.0
-      }
-    ],
-    "LeftTrigger": [
-      {
-        "key": "GAMEPAD_LEFT_TRIGGER",
-        "scale": 1.0
-      }
-    ],
-    "RightTrigger": [
-      {
-        "key": "GAMEPAD_RIGHT_TRIGGER",
-        "scale": 1.0
-      }
-    ]
+	"look_x": [
+		{"key": "GAMEPAD_RIGHT_X", "scale": 1.0}
+	]
   }
 }

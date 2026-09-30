@@ -1,0 +1,1 @@
+vcpkg install openal-soft:x64-mingw-static

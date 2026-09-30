@@ -14,6 +14,8 @@ set(CXXE_COMPILER cxxe)
 include_directories(src)
 include_directories(third-party)
 
+find_package(OpenAL CONFIG REQUIRED)
+
 file(GLOB PHYSFS_SOURCE
 	"${CMAKE_SOURCE_DIR}/third-party/physfs/*.c"
 	"${CMAKE_SOURCE_DIR}/third-party/physfs/win/*.c"
@@ -38,6 +40,12 @@ add_library(Lynx SHARED
 		#src/gameplay/PlayerController.cpp
 		src/gameplay/Private/InputManager.cpp
 		src/gameplay/CameraShake.cpp
+
+		src/audio/AudioDecoder.cpp
+		src/audio/Audio2D.cpp
+		src/audio/AudioCommon.cpp
+		src/audio/AudioListener.cpp
+		src/audio/AudioSource.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -54,12 +62,17 @@ target_compile_definitions(Lynx
 target_link_libraries(Lynx PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/hrl/lib/libhrldll.dll.a"
 		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/glfw/lib/libglfw3.a"
+		OpenAL::OpenAL
 )
 
 
 ##Game example
 add_library(GameExample SHARED
-		game/Module.cpp
+		game/src/Module.cpp
+		game/src/GameClasses.cpp
+		game/src/Player.cpp
+		game/src/Ennemies/Ennemy.cpp
+		game/src/Ennemies/a.cpp
 )
 
 target_link_libraries(GameExample
