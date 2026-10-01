@@ -483,23 +483,13 @@ void Pawn::Move(float direction)
     {
         facing_right_ = false;
 
-        HRL_SetMeshScale(
-            sprite,
-            -std::abs(transform.scale.x) * relative_sprite_transform_.scale.x,
-            transform.scale.y * relative_sprite_transform_.scale.y,
-            1
-        );
+        transform.scale.x = -std::abs(transform.scale.x);
     }
     else if (direction > 0.f)
     {
         facing_right_ = true;
 
-        HRL_SetMeshScale(
-            sprite,
-            std::abs(transform.scale.x) * relative_sprite_transform_.scale.x,
-            transform.scale.y * relative_sprite_transform_.scale.y,
-            1
-        );
+        transform.scale.x = std::abs(transform.scale.x);
     }
 }
 

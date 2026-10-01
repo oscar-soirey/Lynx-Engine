@@ -1866,6 +1866,23 @@ static HRL_id brush_preview_widget = HRL_INVALID_ID;
 static std::string editor_save_data;
 
 static float cameraSpeed = 50.f;
+
+// Editor camera height limits and speed scaling.
+// The "Camera Speed" slider is the speed at kCameraSpeedRefZ ; the real speed
+// is proportional to the camera height (far = faster, close = slower).
+constexpr float kCameraMinZ = 20.f;
+constexpr float kCameraMaxZ = 1000.f;
+constexpr float kCameraSpeedRefZ = 200.f;
+
+static float ClampCameraZ(float z)
+{
+    return std::clamp(z, kCameraMinZ, kCameraMaxZ);
+}
+
+static float GetCameraSpeedForHeight()
+{
+    return cameraSpeed * (camZ / kCameraSpeedRefZ);
+}
 static int brushRadius = 3;
 static int brushVoxelType = 4;
 static float brushDensity = 1.f;
@@ -1996,149 +2013,6 @@ static void CycleGizmoMode()
 }
 
 
-// -----------------------------------------------------------------------------
-// Play snapshot
-// -----------------------------------------------------------------------------
-// Pressing Play captures the whole editable state (actors + voxel world).
-// Pressing Stop puts everything back exactly as it was before Play.
-//
-// - Actors : serialized in memory by lynx::Level and recreated on Stop (same
-//   path as loading a level, so all actor pointers change).
-// - Voxel world : written to a temp file (outside assets/, plain std::fstream)
-//   then kept in memory and reloaded on Stop.
-
-struct PlaySnapshot
-{
-    bool valid = false;
-
-    std::string level_data;
-    std::vector<unsigned char> voxel_data;
-
-    bool was_dirty = false;
-    size_t undo_history_size = 0;
-};
-
-static PlaySnapshot play_snapshot;
-
-// Set when the actors were recreated, so main() can refresh its own pointers.
-static bool level_restored_flag = false;
-
-
-static void CapturePlaySnapshot()
-{
-    play_snapshot = PlaySnapshot{};
-
-    if (!editor_level)
-        return;
-
-    play_snapshot.level_data =
-        editor_level->SerializeToString();
-
-    // Voxel world : HRL can only save to a file, so go through a temp file.
-    std::error_code error;
-
-    const std::filesystem::path temp_file =
-        std::filesystem::temp_directory_path(error) /
-        "lynx_play_snapshot.hrlv";
-
-    if (!error)
-    {
-        HRL_SaveVoxelWorldAllFile(
-            scene,
-            temp_file.string().c_str()
-        );
-
-        std::ifstream file(
-            temp_file,
-            std::ios::binary | std::ios::ate
-        );
-
-        if (file)
-        {
-            const std::streamsize size = file.tellg();
-
-            if (size > 0)
-            {
-                play_snapshot.voxel_data.resize(
-                    static_cast<size_t>(size)
-                );
-
-                file.seekg(0, std::ios::beg);
-
-                file.read(
-                    reinterpret_cast<char*>(
-                        play_snapshot.voxel_data.data()
-                    ),
-                    size
-                );
-            }
-        }
-
-        file.close();
-
-        std::filesystem::remove(temp_file, error);
-    }
-
-    if (play_snapshot.voxel_data.empty())
-    {
-        std::cerr
-            << "[PLAY] Could not snapshot the voxel world, "
-               "it will NOT be restored on Stop\n";
-    }
-
-    play_snapshot.was_dirty = editor_dirty;
-    play_snapshot.undo_history_size = editorUndoHistory.size();
-    play_snapshot.valid = true;
-}
-
-
-static void RestorePlaySnapshot()
-{
-    if (!play_snapshot.valid || !editor_level)
-        return;
-
-    // Selection points to actors that are about to be destroyed.
-    editing_actor = nullptr;
-    editing_object = HRL_INVALID_ID;
-
-    HRL_SetGizmoVisible(
-        gizmo,
-        HRL_FALSE
-    );
-
-    // Actors.
-    editor_level->RestoreFromString(
-        play_snapshot.level_data
-    );
-
-    // Voxel world.
-    if (!play_snapshot.voxel_data.empty())
-    {
-        HRL_LoadVoxelWorldBuffer(
-            scene,
-            play_snapshot.voxel_data.data(),
-            play_snapshot.voxel_data.size()
-        );
-    }
-
-    // Anything edited while playing (brush with Shift) is gone, along with
-    // its undo entries and its "unsaved changes" mark.
-    if (editorUndoHistory.size() > play_snapshot.undo_history_size)
-        editorUndoHistory.resize(play_snapshot.undo_history_size);
-
-    editor_dirty = play_snapshot.was_dirty;
-
-    brushPainting = false;
-    brushPaintedVoxels.clear();
-    currentStrokeChanges.clear();
-
-    play_snapshot = PlaySnapshot{};
-    level_restored_flag = true;
-
-    std::cout << "[PLAY] Editor state restored\n";
-}
-
-
 // Editor <-> Game. Used by the F3 shortcut and by the toolbar Play/Stop button.
 static void TogglePlayMode()
 {
@@ -2148,9 +2022,6 @@ static void TogglePlayMode()
     if (!isPlaying)
     {
         // EDITOR -> GAME
-        // Remember the editor state BEFORE anything runs.
-        CapturePlaySnapshot();
-
         // Clear editor selection and hide the gizmo in game mode.
         editing_object = HRL_INVALID_ID;
         editing_actor = nullptr;
@@ -2168,9 +2039,6 @@ static void TogglePlayMode()
     {
         // GAME -> EDITOR
         SetPlaying(editor_engine, editor_viewport, editor_camera, false);
-
-        // EndGame() has run on every actor : now reset the world.
-        RestorePlaySnapshot();
 
         std::cout << "[PLAY] Switched to EDITOR mode\n";
     }
@@ -2332,7 +2200,7 @@ static void LoadEditorCamera()
 
     camX = x;
     camY = y;
-    camZ = z;
+    camZ = ClampCameraZ(z);
 }
 
 
@@ -2545,9 +2413,9 @@ namespace editor
 
         InitImGui(win);
 
-        // The editor starts muted.
+        // The editor starts 0.5.
         lynx::SetMasterVolume(
-            0.f
+            0.5f
         );
 
 
@@ -2666,16 +2534,6 @@ namespace editor
     }
 
 
-    // True once after the actors were recreated by a Stop. main() uses it to
-    // refresh the actor pointers it keeps (player...).
-    bool ConsumeLevelRestored()
-    {
-        const bool restored = level_restored_flag;
-        level_restored_flag = false;
-        return restored;
-    }
-
-
     void OnLeftMousePress(GLFWwindow* window)
     {
         if (isPlaying)
@@ -2720,8 +2578,11 @@ namespace editor
     {
         if (!ImGui::GetIO().WantCaptureMouse)
         {
-            camZ -=
-                static_cast<float>(yoffset) * 10.f;
+            camZ =
+                ClampCameraZ(
+                    camZ -
+                    static_cast<float>(yoffset) * 10.f
+                );
         }
     }
 
@@ -2865,18 +2726,23 @@ namespace editor
             !io.KeyCtrl &&
             !io.WantTextInput)
         {
+            // Speed depends on the camera height : slow when close, fast when far.
+            const float moveSpeed = GetCameraSpeedForHeight();
+
             if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS)
-                camY += cameraSpeed * dt;
+                camY += moveSpeed * dt;
 
             if (!ctrl_down &&
                 glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS)
-                camY -= cameraSpeed * dt;
+                camY -= moveSpeed * dt;
 
             if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS)
-                camX += cameraSpeed * dt;
+                camX += moveSpeed * dt;
 
             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS)
-                camX -= cameraSpeed * dt;
+                camX -= moveSpeed * dt;
+
+            camZ = ClampCameraZ(camZ);
 
             HRL_SetCameraLocation(
                 camera,
@@ -4607,7 +4473,6 @@ namespace editor
     inline void Shutdown() {}
     inline bool BlockGameInput() { return false; }
     inline bool WantsMouse() { return false; }
-    inline bool ConsumeLevelRestored() { return false; }
     inline void OnLeftMousePress(GLFWwindow*) {}
     inline void OnScroll(double) {}
     inline void Tick(GLFWwindow*, float) {}
@@ -5167,7 +5032,7 @@ int main()
         gameplay_cam,
         gameplayCamX,
         gameplayCamY,
-        100.f
+        80.f
     );
 
 
@@ -5282,20 +5147,6 @@ int main()
         );
 
 
-        // The actors were recreated when the game stopped : refresh the player
-        // pointer and snap the gameplay camera on it.
-        if (editor::ConsumeLevelRestored())
-        {
-            if (auto* restored_player = level->GetActorFromID("Pawn"))
-            {
-                player = restored_player;
-
-                gameplayCamX = player->transform.location.x;
-                gameplayCamY = player->transform.location.y;
-            }
-        }
-
-
         // --------------------------------------------------------
         // Engine / HRL
         // --------------------------------------------------------
@@ -5359,7 +5210,7 @@ int main()
             gameplay_cam,
             shakenX,
             shakenY,
-            100.f
+            80.f
         );
 
 

@@ -3,8 +3,6 @@
 
 
 #include <vector>
-#include <string>
-#include <cstddef>
 #include "Common.h"
 
 namespace lynx
@@ -26,14 +24,6 @@ namespace lynx
 
 		void SaveToFile(const char* _path);
 
-		// In-memory snapshot of every actor (same XML format as SaveToFile).
-		std::string SerializeToString() const;
-
-		// Destroys every current actor, then recreates them from a string produced
-		// by SerializeToString(). Same path as loading a level file : properties
-		// are set BEFORE Init(). All Actor pointers obtained before are invalid.
-		void RestoreFromString(const std::string& _data);
-
 	private:
 		std::vector<Actor*> actors_;
 
@@ -41,7 +31,6 @@ namespace lynx
 		~Level();
 
 		void LoadFromFile(const char* _path, Engine* engine);
-		void LoadFromBuffer(const char* _data, size_t _size, Engine* engine);
 	};
 }
 

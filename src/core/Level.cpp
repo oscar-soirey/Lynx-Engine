@@ -26,17 +26,12 @@ namespace lynx
 
 	void Level::LoadFromFile(const char *_path, Engine* engine)
 	{
-		auto file_data = fs::ReadBinary(_path);
-
-		LoadFromBuffer(reinterpret_cast<const char*>(file_data.data()), file_data.size(), engine);
-	}
-
-	void Level::LoadFromBuffer(const char* _data, size_t _size, Engine* engine)
-	{
 		using namespace tinyxml2;
 
+		auto file_data = fs::ReadBinary(_path);
+
 		XMLDocument doc;
-		XMLError eResult = doc.Parse(_data, _size);
+		XMLError eResult = doc.Parse(reinterpret_cast<const char*>(file_data.data()), file_data.size());
 
 		if (eResult != XML_SUCCESS)
 		{
@@ -170,75 +165,43 @@ namespace lynx
 	Level::Level()=default;
 
 
-	namespace
-	{
-		// Builds the <Level> XML document describing every actor.
-		void BuildLevelDocument(tinyxml2::XMLDocument& doc, const std::vector<Actor*>& actors)
-		{
-			using namespace tinyxml2;
-
-			XMLElement* root = doc.NewElement("Level");
-			doc.InsertFirstChild(root);
-
-			for (Actor* actor : actors)
-			{
-				if (!actor)
-					continue;
-
-				// Le nom de la classe devient le nom de l'élément XML.
-				// C'est exactement ce que LoadFromFile() attend.
-				std::string type_name = ETypeName(*actor);
-
-				XMLElement* actor_element = doc.NewElement(type_name.c_str());
-
-				// Sauvegarde de toutes les propriétés.
-				const auto& properties = actor->GetProperties();
-
-				for (const auto& [name, prop] : properties)
-				{
-					// Convertit automatiquement int, float, bool, string,
-					// vec2, vec3, vec4 et transform en string.
-					std::string value = PropertyToString(prop);
-
-					actor_element->SetAttribute(
-							name.c_str(),
-							value.c_str()
-					);
-				}
-
-				root->InsertEndChild(actor_element);
-			}
-		}
-	}
-
-	std::string Level::SerializeToString() const
-	{
-		tinyxml2::XMLDocument doc;
-		BuildLevelDocument(doc, actors_);
-
-		tinyxml2::XMLPrinter printer;
-		doc.Print(&printer);
-
-		return std::string(printer.CStr());
-	}
-
-	void Level::RestoreFromString(const std::string& _data)
-	{
-		for (Actor* a : actors_)
-		{
-			delete a;
-		}
-		actors_.clear();
-
-		LoadFromBuffer(_data.data(), _data.size(), GetEngine());
-	}
-
 	void Level::SaveToFile(const char* _path)
 	{
 		using namespace tinyxml2;
 
 		XMLDocument doc;
-		BuildLevelDocument(doc, actors_);
+
+		XMLElement* root = doc.NewElement("Level");
+		doc.InsertFirstChild(root);
+
+		for (Actor* actor : actors_)
+		{
+			if (!actor)
+				continue;
+
+			// Le nom de la classe devient le nom de l'élément XML.
+			// C'est exactement ce que LoadFromFile() attend.
+			std::string type_name = ETypeName(*actor);
+
+			XMLElement* actor_element = doc.NewElement(type_name.c_str());
+
+			// Sauvegarde de toutes les propriétés.
+			const auto& properties = actor->GetProperties();
+
+			for (const auto& [name, prop] : properties)
+			{
+				// Convertit automatiquement int, float, bool, string,
+				// vec2, vec3, vec4 et transform en string.
+				std::string value = PropertyToString(prop);
+
+				actor_element->SetAttribute(
+						name.c_str(),
+						value.c_str()
+				);
+			}
+
+			root->InsertEndChild(actor_element);
+		}
 
 		// Les niveaux sont sauvegardés dans assets/
 		std::string output_path = "assets/" + std::string(_path);
