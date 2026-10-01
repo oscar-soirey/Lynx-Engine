@@ -2,6 +2,7 @@
 
 #include <hrl/hrl.h>
 #include <core/Filesystem.h>
+#include <core/RessourceManager.h>
 
 #include <functional>
 #include <vector>
@@ -24,12 +25,7 @@ namespace lynx
    anim_time(frame_time),
    loop_(loop)
    {
-    auto texture_data = fs::ReadBinary(texture);
-
-    hrl_texture_ = HRL_CreateTexture(
-      reinterpret_cast<const char*>(texture_data.data()),
-      texture_data.size()
-    );
+    hrl_texture_ = RessourceTex(texture);
 
     material_ = HRL_CreateMaterial(HRL_SPRITE_SHADER);
 

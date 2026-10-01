@@ -161,11 +161,19 @@ namespace lynx
 	void Engine::StartGame()
 	{
 		game_tick_enabled_ = true;
+		for (auto& a: current_level_->GetActors())
+		{
+			a->StartGame();
+		}
 	}
 
 	void Engine::EndGame()
 	{
 		game_tick_enabled_ = false;
+		for (auto& a: current_level_->GetActors())
+		{
+			a->EndGame();
+		}
 	}
 
 	void Engine::SetWindowHandle(LynxWindow *win)

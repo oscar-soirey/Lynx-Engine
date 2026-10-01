@@ -232,14 +232,8 @@ private:
         // Texture
         // ----------------------------------------------------
 
-        auto texture_data =
-            lynx::fs::ReadBinary("blood_particle_texture.png");
-
         HRL_id texture =
-            HRL_CreateTexture(
-                reinterpret_cast<const char*>(texture_data.data()),
-                texture_data.size()
-            );
+            lynx::RessourceTex("blood_particle_texture.png");
 
         HRL_SetVFXEmitterTexture(
             emitter_,

@@ -89,11 +89,6 @@ Sprite::~Sprite()
     HRL_DeleteMesh(sprite);
 }
 
-void Sprite::Init()
-{
-    HRL_SetMeshScale(sprite, transform.scale.x * relative_sprite_transform_.scale.x, transform.scale.y * relative_sprite_transform_.scale.y, 1.f);
-}
-
 void Sprite::Tick(double dt)
 {
     (void)dt;
@@ -109,6 +104,8 @@ void Sprite::OnTransformChanged()
         transform.location.y + relative_sprite_transform_.location.y,
         transform.location.z + relative_sprite_transform_.location.z
     );
+
+    HRL_SetMeshScale(sprite, transform.scale.x * relative_sprite_transform_.scale.x, transform.scale.y * relative_sprite_transform_.scale.y, 1.f);
 }
 
 // ============================================================
@@ -116,15 +113,22 @@ void Sprite::OnTransformChanged()
 // ============================================================
 StaticSprite::StaticSprite()
 {
-    HPROPERTY(texture_path, lynx::Exposed);
+    HPROPERTY(texture_path, lynx::Exposed, OnTextureChanged());
 }
 
 void StaticSprite::Init()
 {
     Sprite::Init();
+}
 
-    auto texture_data = lynx::fs::ReadBinary(texture_path);
-    HRL_id hrl_texture = HRL_CreateTexture(reinterpret_cast<const char*>(texture_data.data()), texture_data.size());
+void StaticSprite::OnTextureChanged()
+{
+    HRL_id hrl_texture = lynx::RessourceTex(texture_path.c_str());
+
+    // Unreadable path (empty, typo while typing in the editor...): keep the current material.
+    if (hrl_texture == HRL_INVALID_ID)
+        return;
+
     HRL_id material = HRL_CreateMaterial(HRL_SPRITE_SHADER);
     HRL_MaterialSetTexture(material, HRL_T_ALBEDO, hrl_texture);
     HRL_SetMeshMaterial(sprite, material);

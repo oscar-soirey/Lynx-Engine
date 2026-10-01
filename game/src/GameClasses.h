@@ -5,6 +5,42 @@
 #include "hrl/hrl.h"
 #include "AnimationSystem.h"
 #include "Particles/BlockParticles.h"
+#include <memory>
+
+// ============================================================
+// Sound source
+// ============================================================
+class AudioSource2D : public lynx::Actor {
+public:
+    bool loop=true;
+    std::string path;
+    AudioSource2D()
+    {
+        HPROPERTY(path, lynx::Exposed);
+        HPROPERTY(loop, lynx::Exposed);
+    }
+
+    void Init() override
+    {
+        audio2D_ = std::make_unique<lynx::Audio2D>(path.c_str());
+        audio2D_->looping = loop;
+    }
+
+    void StartGame() override
+    {
+        audio2D_->Play();
+    }
+
+    void EndGame() override
+    {
+        audio2D_->Stop();
+    }
+
+private:
+    std::unique_ptr<lynx::Audio2D> audio2D_;
+};
+
+
 
 // ============================================================
 // Sprite
@@ -14,7 +50,6 @@ class Sprite : public lynx::Actor {
 public:
     Sprite();
     virtual ~Sprite();
-    void Init() override;
     void Tick(double dt) override;
     void OnTransformChanged() override;
 
@@ -30,6 +65,7 @@ public:
     std::string texture_path;
     StaticSprite();
     void Init() override;
+    void OnTextureChanged();
 };
 
 

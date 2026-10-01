@@ -5,6 +5,8 @@
 #include "core/Common.h"
 #include "core/Filesystem.h"
 #include "core/Factory.h"
+#include "core/Localization.h"
+#include "core/RessourceManager.h"
 
 #include "core/data/DataEnum.h"
 #include "core/data/EventDispatcher.h"

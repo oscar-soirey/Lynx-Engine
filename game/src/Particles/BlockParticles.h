@@ -327,8 +327,7 @@ private:
             HRL_VFX_SIMULATION_WORLD
         );
 
-        auto texture_data = lynx::fs::ReadBinary("block_particle_texture.png");
-        HRL_id emitter_texture = HRL_CreateTexture(reinterpret_cast<const char*>(texture_data.data()), texture_data.size());
+        HRL_id emitter_texture = lynx::RessourceTex("block_particle_texture.png");
         HRL_SetVFXEmitterTexture(emitter, emitter_texture);
 
 

@@ -30,6 +30,7 @@ add_library(Lynx SHARED
 		src/core/Engine.cpp
 		src/core/Filesystem.cpp
 		src/core/Level.cpp
+		src/core/RessourceManager.cpp
 
 		src/core/data/IniParser.cpp
 		src/core/Private/SystemModule.cpp
