@@ -174,10 +174,16 @@ namespace lynx
 	}
 
 
-	void Engine::CreateLevel(const char *file_name)
+	Level* Engine::CreateLevel(const char *file_name)
 	{
 		current_level_ = new Level();
 		current_level_->LoadFromFile(file_name, this);
+		return current_level_;
+	}
+
+	void Engine::DestroyCurrentLevel()
+	{
+		delete current_level_;
 	}
 
 	Level *Engine::GetCurrentLevel() const

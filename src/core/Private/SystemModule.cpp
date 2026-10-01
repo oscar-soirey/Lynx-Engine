@@ -32,8 +32,6 @@ namespace lynx
 			std::cout << "UnregisterFactory function not found" << std::endl;
 			return;
 		}
-
-		printf("dll ok!\n");
 	}
 
 #elif defined (__linux__)

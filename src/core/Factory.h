@@ -77,6 +77,11 @@ namespace lynx
             }
         }
 
+        const Factory* GetInternalFactory() const
+        {
+            return &factory_;
+        }
+
     private:
         Factory factory_;
     };

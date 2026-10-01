@@ -6,6 +6,7 @@
 #include <glfw/glfw3.h>
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
+
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
@@ -13,6 +14,8 @@
 #include <random>
 #include <unordered_set>
 #include <vector>
+#include <cmath>
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -26,10 +29,15 @@
 float camX;
 float camY;
 float camZ = 200.f;
-bool dragging_object=false;
-bool isPlaying=false;
 
-static void ErrorCallback(HRL_EError code, HRL_ESeverity severity, const char* detail)
+bool dragging_object = false;
+bool isPlaying = false;
+
+
+static void ErrorCallback(
+    HRL_EError code,
+    HRL_ESeverity severity,
+    const char* detail)
 {
     printf(
         "Error of type : %s, Severity : %s, Details : %s\n",
@@ -48,9 +56,11 @@ static void ErrorCallback(HRL_EError code, HRL_ESeverity severity, const char* d
 void InitImGui(GLFWwindow* window)
 {
     IMGUI_CHECKVERSION();
+
     ImGui::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
+
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     io.Fonts->AddFontFromFileTTF(
@@ -60,8 +70,14 @@ void InitImGui(GLFWwindow* window)
 
     ImGui::StyleColorsDark();
 
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    ImGui_ImplGlfw_InitForOpenGL(
+        window,
+        true
+    );
+
+    ImGui_ImplOpenGL3_Init(
+        "#version 330"
+    );
 }
 
 
@@ -76,7 +92,10 @@ void BeginImGuiFrame()
 void EndImGuiFrame()
 {
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    ImGui_ImplOpenGL3_RenderDrawData(
+        ImGui::GetDrawData()
+    );
 }
 
 
@@ -88,16 +107,27 @@ void ShutdownImGui()
 }
 
 
-static void FramebufferSizeCallback(GLFWwindow*, int width, int height)
+static void FramebufferSizeCallback(
+    GLFWwindow*,
+    int width,
+    int height)
 {
-    HRL_WindowResizeCallback(width, height);
+    HRL_WindowResizeCallback(
+        width,
+        height
+    );
 }
+
 
 static double lastMouseX = 0.0;
 static double lastMouseY = 0.0;
 static bool haveLastMousePosition = false;
 
-static void MouseMove(GLFWwindow*, double x, double y)
+
+static void MouseMove(
+    GLFWwindow*,
+    double x,
+    double y)
 {
     HRL_MouseMovedCallback(
         static_cast<float>(x),
@@ -117,27 +147,79 @@ static void MouseMove(GLFWwindow*, double x, double y)
     haveLastMousePosition = true;
 }
 
+
 HRL_id scene;
 HRL_id editing_object;
 HRL_id gizmo;
-lynx::Actor* editing_actor=nullptr;
+
+lynx::Actor* editing_actor = nullptr;
 
 
 void SetObjectSelected(HRL_id object)
 {
     if (object == HRL_INVALID_ID)
     {
-        editing_actor=nullptr;
-        HRL_SetGizmoVisible(gizmo, HRL_FALSE);
+        editing_actor = nullptr;
+
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_FALSE
+        );
     }
     else
     {
-        editing_actor = (lynx::Actor*)HRL_GetMeshUserHandle(object);
-        if (!editing_actor) printf("nullptr");
-        HRL_SetGizmoPosition(gizmo, editing_actor->transform.location.x, editing_actor->transform.location.y, editing_actor->transform.location.z);
-        HRL_SetGizmoVisible(gizmo, HRL_TRUE);
+        editing_actor =
+            (lynx::Actor*)HRL_GetMeshUserHandle(object);
+
+        if (!editing_actor)
+        {
+            printf("nullptr\n");
+            return;
+        }
+
+        HRL_SetGizmoPosition(
+            gizmo,
+            editing_actor->transform.location.x,
+            editing_actor->transform.location.y,
+            editing_actor->transform.location.z
+        );
+
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_TRUE
+        );
     }
 }
+
+
+void SetActorSelected(lynx::Actor* actor)
+{
+    editing_actor = actor;
+    editing_object = HRL_INVALID_ID;
+
+    if (!editing_actor)
+    {
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_FALSE
+        );
+
+        return;
+    }
+
+    HRL_SetGizmoPosition(
+        gizmo,
+        editing_actor->transform.location.x,
+        editing_actor->transform.location.y,
+        editing_actor->transform.location.z
+    );
+
+    HRL_SetGizmoVisible(
+        gizmo,
+        HRL_TRUE
+    );
+}
+
 
 static void MouseButtonCallback(
     GLFWwindow* window,
@@ -145,13 +227,16 @@ static void MouseButtonCallback(
     int action,
     int mods)
 {
-
     auto io = ImGui::GetIO();
 
     if (action == GLFW_PRESS && !io.KeyShift)
+    {
         lynx::InjectMouseButtonDown(button);
+    }
     else if (action == GLFW_RELEASE && !io.KeyShift)
+    {
         lynx::InjectMouseButtonUp(button);
+    }
 
     if (button == GLFW_MOUSE_BUTTON_LEFT &&
         action == GLFW_PRESS)
@@ -168,9 +253,17 @@ static void MouseButtonCallback(
         if (!isPlaying)
         {
             auto io = ImGui::GetIO();
-            if (io.KeyCtrl)
+
+            if (io.KeyCtrl && !io.WantCaptureMouse)
             {
-                HRL_id object = HRL_GL_GetHoveredObject(scene, (int)mouseX, (int)mouseY, nullptr);
+                HRL_id object =
+                    HRL_GL_GetHoveredObject(
+                        scene,
+                        (int)mouseX,
+                        (int)mouseY,
+                        nullptr
+                    );
+
                 if (object != HRL_INVALID_ID)
                 {
                     editing_object = object;
@@ -185,7 +278,6 @@ static void MouseButtonCallback(
         }
     }
 
-    // Clic gauche = HRL / gizmo / UI
     if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
         HRL_MouseButtonCallback(
@@ -197,95 +289,171 @@ static void MouseButtonCallback(
     }
 }
 
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+
+void ScrollCallback(
+    GLFWwindow* window,
+    double xoffset,
+    double yoffset)
 {
     auto io = ImGui::GetIO();
 
-    if (!io.KeyShift)
-        lynx::InjectMouseWheel(static_cast<float>(yoffset));
+    if (!io.KeyShift && !io.WantCaptureMouse)
+    {
+        lynx::InjectMouseWheel(
+            static_cast<float>(yoffset)
+        );
+    }
 
-    camZ -= (float)yoffset*10;
+    if (!io.WantCaptureMouse)
+    {
+        camZ -=
+            static_cast<float>(yoffset) * 10.f;
+    }
 }
 
 
-void inject_keys_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+void inject_keys_callback(
+    GLFWwindow* window,
+    int key,
+    int scancode,
+    int action,
+    int mods)
 {
     auto io = ImGui::GetIO();
+
     if (action == GLFW_PRESS)
     {
         if (!io.KeyShift)
+        {
             lynx::InjectKeyDown(key);
+        }
     }
     else if (action == GLFW_RELEASE)
     {
         if (!io.KeyShift)
+        {
             lynx::InjectKeyUp(key);
+        }
     }
 }
+
 
 float gameplayCamX = 0.f;
 float gameplayCamY = 0.f;
 
 
-
 int main()
 {
-    lynx::Engine* engine = lynx::CreateEngine("", false);
+    lynx::Engine* engine =
+        lynx::CreateEngine("", false);
 
-    lynx::LoadConfigFile("input.json");
+    lynx::LoadConfigFile(
+        "input.json"
+    );
 
-    lynx::SysModule gameModule("libGameExample.dll");
+    lynx::SysModule gameModule(
+        "libGameExample.dll"
+    );
+
     gameModule.RegisterFactory();
 
 
     glfwInit();
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-    GLFWwindow* win = glfwCreateWindow(
-        1280,
-        720,
-        "Lynx ImGui Editor",
-        nullptr,
-        nullptr
+    glfwWindowHint(
+        GLFW_CONTEXT_VERSION_MAJOR,
+        3
     );
+
+    glfwWindowHint(
+        GLFW_CONTEXT_VERSION_MINOR,
+        3
+    );
+
+    glfwWindowHint(
+        GLFW_OPENGL_PROFILE,
+        GLFW_OPENGL_CORE_PROFILE
+    );
+
+
+    GLFWwindow* win =
+        glfwCreateWindow(
+            1280,
+            720,
+            "Lynx Engine",
+            nullptr,
+            nullptr
+        );
+
+    glfwMaximizeWindow(win);
 
     glfwMakeContextCurrent(win);
 
-    glfwSetFramebufferSizeCallback(win, FramebufferSizeCallback);
-    glfwSetMouseButtonCallback(win, MouseButtonCallback);
-    glfwSetCursorPosCallback(win, MouseMove);
-    glfwSetScrollCallback(win, ScrollCallback);
-    glfwSetKeyCallback(win, inject_keys_callback);
 
+    glfwSetFramebufferSizeCallback(
+        win,
+        FramebufferSizeCallback
+    );
 
-    // Désactiver la V-Sync
-    //glfwSwapInterval(0);
+    glfwSetMouseButtonCallback(
+        win,
+        MouseButtonCallback
+    );
+
+    glfwSetCursorPosCallback(
+        win,
+        MouseMove
+    );
+
+    glfwSetScrollCallback(
+        win,
+        ScrollCallback
+    );
+
+    glfwSetKeyCallback(
+        win,
+        inject_keys_callback
+    );
+
 
     HRL_Init(HRL_OPENGL_33);
+
+    int winX, winY;
+    glfwGetWindowSize(win, &winX, &winY);
+
     HRL_InitContext(
-        1280,
-        720,
+        winX,
+        winY,
         (void*)glfwGetProcAddress
     );
 
-    HRL_RegisterErrorCallback(ErrorCallback);
-    HRL_SetDebugLineThickness(3.f);
+    HRL_RegisterErrorCallback(
+        ErrorCallback
+    );
+
+    HRL_SetDebugLineThickness(
+        3.f
+    );
 
 
+    scene =
+        HRL_CreateScene(true);
 
-    scene = HRL_CreateScene(true);
     lynx::SetSceneID(scene);
 
 
-    lynx::CameraShake cameraShake;
-    lynx::SetCameraShake(cameraShake);
+    HRL_id gameplay_cam =
+        HRL_CreateCamera(
+            scene,
+            HRL_PERSPECTIVE
+        );
 
 
-    HRL_id gameplay_cam = HRL_CreateCamera(scene, HRL_PERSPECTIVE);
-    HRL_SetCameraPerspectiveFov(gameplay_cam, 20.f);
+    HRL_SetCameraPerspectiveFov(
+        gameplay_cam,
+        20.f
+    );
+
     HRL_SetCameraRotation(
         gameplay_cam,
         0.f,
@@ -294,74 +462,298 @@ int main()
     );
 
 
-    //load world
-    auto save_file = lynx::fs::ReadBinary("save_file.txt");
-    std::string save_path(
-        reinterpret_cast<const char*>(save_file.data()),
+    // ------------------------------------------------------------
+    // Load world
+    // ------------------------------------------------------------
+
+    auto save_file =
+        lynx::fs::ReadBinary(
+            "save_file.txt"
+        );
+
+    std::string save_data(
+        reinterpret_cast<const char*>(
+            save_file.data()
+        ),
         save_file.size()
     );
 
-    // Retirer le \n éventuel
-    while (!save_path.empty() &&
-           (save_path.back() == '\n' || save_path.back() == '\r'))
+
+    while (!save_data.empty() &&
+           (save_data.back() == '\n' ||
+            save_data.back() == '\r' ||
+            save_data.back() == ' ' ||
+            save_data.back() == '\t'))
     {
-        save_path.pop_back();
+        save_data.pop_back();
     }
 
-    if (lynx::fs::Exists(save_path))
-    {
-        auto world_file = lynx::fs::ReadBinary(save_path);
 
-        HRL_LoadVoxelWorldBuffer(
-            scene,
-            world_file.data(),
-            world_file.size()
-        );
+    std::filesystem::path world_path =
+        std::filesystem::path(save_data);
+
+
+    std::filesystem::path world_file_path =
+        std::filesystem::path("assets") /
+        world_path;
+
+
+    std::string world_path_string =
+        world_path.string();
+
+
+    std::string world_file_path_string =
+        world_file_path.string();
+
+
+    std::cout
+        << "[WORLD] Relative path : "
+        << world_path_string
+        << "\n";
+
+    std::cout
+        << "[WORLD] File path : "
+        << world_file_path_string
+        << "\n";
+
+
+    if (lynx::fs::Exists(world_path_string))
+    {
+        std::cout
+            << "[WORLD] Loading : "
+            << world_path_string
+            << "\n";
+
+
+        auto world_file =
+            lynx::fs::ReadBinary(
+                world_path_string
+            );
+
+
+        std::cout
+            << "[WORLD] Loaded "
+            << world_file.size()
+            << " bytes\n";
+
+
+        if (world_file.empty())
+        {
+            std::cerr
+                << "[WORLD] ERROR: world file is empty.\n";
+        }
+        else
+        {
+            HRL_LoadVoxelWorldBuffer(
+                scene,
+                world_file.data(),
+                world_file.size()
+            );
+        }
     }
     else
     {
-        HRL_SetVoxelSize(scene, 4096, 4096);
-        HRL_SetVoxelPhysicalSize(scene, 0.2f);
-        HRL_SetVoxelChunkSize(scene, 16);
+        std::cout
+            << "[WORLD] Creating new world : "
+            << world_file_path_string
+            << "\n";
+
+
+        HRL_SetVoxelSize(
+            scene,
+            131072,
+            131072
+        );
+
+        HRL_SetVoxelPhysicalSize(
+            scene,
+            0.15f
+        );
+
+        HRL_SetVoxelChunkSize(
+            scene,
+            16
+        );
+
 
         HRL_SaveVoxelWorldAllFile(
             scene,
-            save_path.c_str()
+            world_file_path_string.c_str()
         );
     }
 
-    engine->CreateLevel("world.xml");
 
-    auto font_data = lynx::fs::ReadBinary("Ubuntu-Regular.ttf");
-    HRL_id hrlfont = HRL_CreateFont(reinterpret_cast<const char*>(font_data.data()), font_data.size());
-    HRL_SetDebugMeshInfoTextSize(scene, 32.f);
-    HRL_SetDebugMeshInfoFont(scene, hrlfont);
-    HRL_SetDebugMeshInfoTextColor(scene, 1, 0.2, 0.2, 1.0);
-	//HRL_AddScreenMessage(scene, 5.f, "Level loaded succesfully");
-
-
-    //
-
-    HRL_id camera = HRL_CreateCamera(
-        scene,
-        HRL_PERSPECTIVE
+    auto* level = engine->CreateLevel(
+        "world.xml"
     );
+
+
+    auto font_data =
+        lynx::fs::ReadBinary(
+            "Ubuntu-Regular.ttf"
+        );
+
+
+    HRL_id hrlfont =
+        HRL_CreateFont(
+            reinterpret_cast<const char*>(
+                font_data.data()
+            ),
+            font_data.size()
+        );
+
+
+    HRL_SetDebugMeshInfoTextSize(
+        scene,
+        32.f
+    );
+
+    HRL_SetDebugMeshInfoFont(
+        scene,
+        hrlfont
+    );
+
+    HRL_SetDebugMeshInfoTextColor(
+        scene,
+        1,
+        0.2,
+        0.2,
+        1.0
+    );
+
+
+    // ------------------------------------------------------------
+    // Editor camera
+    // ------------------------------------------------------------
+
+    HRL_id camera =
+        HRL_CreateCamera(
+            scene,
+            HRL_PERSPECTIVE
+        );
+
 
     HRL_SetCameraPerspectiveFov(
         camera,
         20.f
     );
 
-    HRL_id viewport = HRL_CreateViewport(
-        scene,
-        camera,
-        0.f,
-        0.f,
-        1.f,
-        1.f
+
+    HRL_id viewport =
+        HRL_CreateViewport(
+            scene,
+            camera,
+            0.f,
+            0.f,
+            1.f,
+            1.f
+        );
+
+
+    // ------------------------------------------------------------
+    // Debug widgets
+    // ------------------------------------------------------------
+
+    HRL_id lynx_icon_w =
+        HRL_CreateWidget(
+            viewport,
+            HRL_WIDGET_IMAGE
+        );
+
+
+    auto lynx_icon_d =
+        lynx::fs::ReadBinary(
+            "splash/lynx-icon.png"
+        );
+
+
+    HRL_id lynx_icon_t =
+        HRL_CreateTexture(
+            reinterpret_cast<const char*>(
+                lynx_icon_d.data()
+            ),
+            lynx_icon_d.size()
+        );
+
+
+    HRL_SetImageTexture(
+        lynx_icon_w,
+        lynx_icon_t
     );
 
-    for (int i = 0; i < 4; ++i)
+
+    HRL_SetWidgetAnchor(
+        lynx_icon_w,
+        0.f,
+        0.f
+    );
+
+
+    HRL_SetWidgetPosition(
+        lynx_icon_w,
+        0.05f,
+        0.05f
+    );
+
+
+    HRL_SetWidgetSize(
+        lynx_icon_w,
+        0.14f,
+        0.2f
+    );
+
+
+    HRL_id hrl_icon_w =
+        HRL_CreateWidget(
+            viewport,
+            HRL_WIDGET_IMAGE
+        );
+
+
+    auto hrl_icon_d =
+        lynx::fs::ReadBinary(
+            "splash/hrl-icon.png"
+        );
+
+
+    HRL_id hrl_icon_t =
+        HRL_CreateTexture(
+            reinterpret_cast<const char*>(
+                hrl_icon_d.data()
+            ),
+            hrl_icon_d.size()
+        );
+
+
+    HRL_SetImageTexture(
+        hrl_icon_w,
+        hrl_icon_t
+    );
+
+
+    HRL_SetWidgetAnchor(
+        hrl_icon_w,
+        1.f,
+        0.f
+    );
+
+
+    HRL_SetWidgetPosition(
+        hrl_icon_w,
+        0.95f,
+        0.05f
+    );
+
+
+    HRL_SetWidgetSize(
+        hrl_icon_w,
+        0.14f,
+        0.2f
+    );
+
+
+    constexpr size_t voxelDataCount = sizeof(voxelData) / sizeof(voxelData[0]);
+    for (int i = 0; i < voxelDataCount; ++i)
     {
         int type = i + 1;
 
@@ -376,60 +768,125 @@ int main()
 
         HRL_SetVoxelTypeCollisionFlags(
             scene,
-                type,
-                voxelData[i].flags
+            type,
+            voxelData[i].flags
         );
+
+        if (voxelData[i].is_emissive)
+        {
+            HRL_SetVoxelTypeEmissiveColor(
+                scene,
+                type,
+                voxelData[i].emissive_color[0],
+                voxelData[i].emissive_color[1],
+                voxelData[i].emissive_color[2]
+            );
+        }
     }
 
-    HRL_SetVoxelTypeEmissiveColor(
-        scene,
-        4,
-        2.f,
-        2.f,
-        2.f
+
+    HRL_id post_mat =
+        HRL_CreateMaterial(
+            HRL_DEFAULT_POST_PROCESS_SHADER
+        );
+
+
+    HRL_id post =
+        HRL_CreatePostProcess(
+            viewport,
+            post_mat,
+            1
+        );
+
+
+    HRL_MaterialSetFloat(
+        post_mat,
+        "vignetteStrength",
+        0.4f
     );
-
-
-
-    HRL_id post_mat = HRL_CreateMaterial(HRL_DEFAULT_POST_PROCESS_SHADER);
-    HRL_id post = HRL_CreatePostProcess(viewport, post_mat, 1);
-    HRL_MaterialSetFloat(post_mat, "vignetteStrength", 0.4f);
 
 
     InitImGui(win);
 
-    lynx::SetMasterVolume(0.1f);
+    lynx::SetMasterVolume(
+        0.f
+    );
 
-    lynx::Audio2D ambient_cave("cave_ambience.mp3");
+
+    lynx::Audio2D ambient_cave(
+        "cave_ambience.mp3"
+    );
+
     ambient_cave.looping = true;
     ambient_cave.Play();
 
 
-
     // ------------------------------------------------------------
-    // Load ressources
+    // Brush preview
     // ------------------------------------------------------------
 
-    auto brush_preview_circle_data = lynx::fs::ReadBinary(
-        "brush_preview_circle.png"
+    auto brush_preview_circle_data =
+        lynx::fs::ReadBinary(
+            "brush_preview_circle.png"
+        );
+
+
+    HRL_id brush_preview_circle_texture =
+        HRL_CreateTexture(
+            reinterpret_cast<const char*>(
+                brush_preview_circle_data.data()
+            ),
+            brush_preview_circle_data.size()
+        );
+
+
+    HRL_id brush_preview_widget =
+        HRL_CreateWidget(
+            viewport,
+            HRL_WIDGET_IMAGE
+        );
+
+
+    HRL_SetWidgetVisible(
+        brush_preview_widget,
+        HRL_FALSE
     );
 
-    HRL_id brush_preview_circle_texture = HRL_CreateTexture(
-        reinterpret_cast<const char*>(brush_preview_circle_data.data()),
-        brush_preview_circle_data.size()
+
+    HRL_SetImageTexture(
+        brush_preview_widget,
+        brush_preview_circle_texture
     );
 
 
-    HRL_id brush_preview_widget = HRL_CreateWidget(viewport, HRL_WIDGET_IMAGE);
-    HRL_SetWidgetVisible(brush_preview_widget, HRL_FALSE);
-    HRL_SetImageTexture(brush_preview_widget, brush_preview_circle_texture);
-    HRL_SetWidgetSize(brush_preview_widget, 0.1, 0.1);
-    HRL_SetWidgetAnchor(brush_preview_widget, 0.5, 0.5);
+    HRL_SetWidgetSize(
+        brush_preview_widget,
+        0.1,
+        0.1
+    );
 
 
+    HRL_SetWidgetAnchor(
+        brush_preview_widget,
+        0.5,
+        0.5
+    );
 
-    gizmo = HRL_CreateGizmo(viewport);
-    HRL_SetGizmoVisible(gizmo, HRL_FALSE);
+
+    // ------------------------------------------------------------
+    // Gizmo
+    // ------------------------------------------------------------
+
+    gizmo =
+        HRL_CreateGizmo(
+            viewport
+        );
+
+
+    HRL_SetGizmoVisible(
+        gizmo,
+        HRL_FALSE
+    );
 
 
     HRL_SetGizmoMode(
@@ -437,26 +894,31 @@ int main()
         HRL_GIZMO_MODE_TRANSLATE
     );
 
+
     HRL_SetGizmoSpace(
         gizmo,
         HRL_GIZMO_SPACE_WORLD
     );
 
+
     HRL_SetGizmoTranslateAxes(
         gizmo,
-        HRL_GIZMO_AXIS_X | HRL_GIZMO_AXIS_Y | HRL_GIZMO_AXIS_Z
+        HRL_GIZMO_AXIS_X |
+        HRL_GIZMO_AXIS_Y |
+        HRL_GIZMO_AXIS_Z
     );
+
 
     HRL_SetGizmoScreenSize(
         gizmo,
         100.0f
     );
 
+
     HRL_SetGizmoUseScreenSize(
         gizmo,
         HRL_TRUE
     );
-
 
 
     // ------------------------------------------------------------
@@ -471,15 +933,18 @@ int main()
         &camY
     );
 
+
     HRL_SetCameraNearPlane(
         camera,
         0.1f
     );
 
+
     HRL_SetCameraFarPlane(
         camera,
         1000.f
     );
+
 
     HRL_SetCameraLocation(
         camera,
@@ -487,6 +952,7 @@ int main()
         camY,
         camZ
     );
+
 
     HRL_SetCameraRotation(
         camera,
@@ -500,10 +966,12 @@ int main()
     // Light
     // ------------------------------------------------------------
 
-    HRL_id sky = HRL_CreateLight(
-        scene,
-        HRL_SKY_LIGHT
-    );
+    HRL_id sky =
+        HRL_CreateLight(
+            scene,
+            HRL_SKY_LIGHT
+        );
+
 
     HRL_SetLightIntensity(
         sky,
@@ -515,33 +983,42 @@ int main()
     // FPS
     // ------------------------------------------------------------
 
-    double fpsTimer = glfwGetTime();
+    double fpsTimer =
+        glfwGetTime();
+
     int fpsFrames = 0;
 
-    // Vrai delta time entre deux frames
-    double lastFrameTime = glfwGetTime();
+    double lastFrameTime =
+        glfwGetTime();
 
 
     // ------------------------------------------------------------
     // Editor settings
     // ------------------------------------------------------------
+
     HRL_BeginVoxelEdit(scene);
+
 
     float cameraSpeed = 50.f;
 
     int brushRadius = 3;
+
     int brushVoxelType = 4;
+
     float brushDensity = 1.f;
+
     bool brushPaintEnabled = false;
+
     bool brushPaintEmptyVoxels = true;
 
-    // Each voxel is considered only once during a brush stroke.
-    // This prevents the random density test from being rerolled
-    // every frame when the mouse is held over the same voxel.
-    std::unordered_set<unsigned long long> brushPaintedVoxels;
+
+    std::unordered_set<unsigned long long>
+        brushPaintedVoxels;
+
+
     bool brushPainting = false;
 
-    // One entry per voxel changed by the current stroke.
+
     struct VoxelChange
     {
         int x;
@@ -550,50 +1027,82 @@ int main()
         int newType;
     };
 
-    // Each stroke is one undo step.
-    std::vector<std::vector<VoxelChange>> undoHistory;
-    std::vector<VoxelChange> currentStrokeChanges;
 
-    std::mt19937 brushRandomGenerator(std::random_device{}());
-    std::uniform_real_distribution<float> brushRandomDistribution(0.f, 1.f);
+    std::vector<
+        std::vector<VoxelChange>
+    > undoHistory;
 
-    auto brushVoxelKey = [](int x, int y) -> unsigned long long
+
+    std::vector<VoxelChange>
+        currentStrokeChanges;
+
+
+    std::mt19937 brushRandomGenerator(
+        std::random_device{}()
+    );
+
+
+    std::uniform_real_distribution<float>
+        brushRandomDistribution(
+            0.f,
+            1.f
+        );
+
+
+    auto brushVoxelKey =
+        [](int x, int y)
+        -> unsigned long long
     {
-        return (static_cast<unsigned long long>(
-                    static_cast<unsigned int>(x)
-                ) << 32) |
-               static_cast<unsigned int>(y);
+        return
+            (static_cast<unsigned long long>(
+                static_cast<unsigned int>(x)
+            ) << 32) |
+            static_cast<unsigned int>(y);
     };
 
-    auto tryPaintVoxel = [&](int x, int y)
-    {
-        const unsigned long long key = brushVoxelKey(x, y);
 
-        // Never reroll/repaint a voxel that was already considered
-        // during this continuous brush stroke.
+    auto tryPaintVoxel =
+        [&](int x, int y)
+    {
+        const unsigned long long key =
+            brushVoxelKey(x, y);
+
+
         if (!brushPaintedVoxels.insert(key).second)
             return;
 
-        // Density is a probability:
-        // 1.0 = every voxel, 0.5 = roughly half, 0.0 = none.
+
         if (brushDensity <= 0.f)
             return;
 
+
         if (brushDensity < 1.f &&
-            brushRandomDistribution(brushRandomGenerator) >= brushDensity)
+            brushRandomDistribution(
+                brushRandomGenerator
+            ) >= brushDensity)
         {
             return;
         }
 
-        const int previousType = HRL_GetVoxelType(scene, x, y);
 
-        // Do not paint empty voxels when disabled.
-        if (!brushPaintEmptyVoxels && previousType == 0)
+        const int previousType =
+            HRL_GetVoxelType(
+                scene,
+                x,
+                y
+            );
+
+
+        if (!brushPaintEmptyVoxels &&
+            previousType == 0)
+        {
             return;
+        }
 
-        // Avoid creating useless undo entries.
+
         if (previousType == brushVoxelType)
             return;
+
 
         currentStrokeChanges.push_back({
             x,
@@ -601,6 +1110,7 @@ int main()
             previousType,
             brushVoxelType
         });
+
 
         HRL_SetVoxelType(
             scene,
@@ -610,15 +1120,21 @@ int main()
         );
     };
 
-    auto undoLastStroke = [&]()
+
+    auto undoLastStroke =
+        [&]()
     {
         if (undoHistory.empty())
             return;
 
-        const auto& stroke = undoHistory.back();
 
-        // Restore in reverse order.
-        for (auto it = stroke.rbegin(); it != stroke.rend(); ++it)
+        const auto& stroke =
+            undoHistory.back();
+
+
+        for (auto it = stroke.rbegin();
+             it != stroke.rend();
+             ++it)
         {
             HRL_SetVoxelType(
                 scene,
@@ -628,16 +1144,27 @@ int main()
             );
         }
 
+
         undoHistory.pop_back();
     };
+
 
     HRL_EndVoxelEdit(scene);
 
 
-    auto* player = lynx::GetEngine()->GetCurrentLevel()->GetActorFromID("Pawn");
+    auto* player =
+        lynx::GetEngine()
+            ->GetCurrentLevel()
+            ->GetActorFromID("Pawn");
 
-    gameplayCamX = player->transform.location.x;
-    gameplayCamY = player->transform.location.y;
+
+    gameplayCamX =
+        player->transform.location.x;
+
+
+    gameplayCamY =
+        player->transform.location.y;
+
 
     HRL_SetCameraLocation(
         gameplay_cam,
@@ -653,48 +1180,99 @@ int main()
 
     bool f4_was_down = false;
 
+    bool f3_was_down = false;
+
+    bool ctrl_s_was_down = false;
+
+
     while (!glfwWindowShouldClose(win))
     {
         glfwPollEvents();
 
-        const bool f4_down = glfwGetKey(win, GLFW_KEY_F4) == GLFW_PRESS;
+
+        // --------------------------------------------------------
+        // F4 collision debug
+        // --------------------------------------------------------
+
+        const bool f4_down =
+            glfwGetKey(
+                win,
+                GLFW_KEY_F4
+            ) == GLFW_PRESS;
+
+
         if (f4_down && !f4_was_down)
         {
             static bool show_collision_debug = false;
-            show_collision_debug = !show_collision_debug;
+
+            show_collision_debug =
+                !show_collision_debug;
+
 
 #ifdef _WIN32
-            using SetCollisionDebugEnabledFn = void (*)(bool);
-            HMODULE game_dll = GetModuleHandleA("libGameExample.dll");
+
+            using SetCollisionDebugEnabledFn =
+                void (*)(bool);
+
+
+            HMODULE game_dll =
+                GetModuleHandleA(
+                    "libGameExample.dll"
+                );
+
+
             if (game_dll)
             {
                 auto set_collision_debug =
-                    reinterpret_cast<SetCollisionDebugEnabledFn>(
-                        GetProcAddress(game_dll, "Game_SetCollisionDebugEnabled")
+                    reinterpret_cast<
+                        SetCollisionDebugEnabledFn
+                    >(
+                        GetProcAddress(
+                            game_dll,
+                            "Game_SetCollisionDebugEnabled"
+                        )
                     );
 
+
                 if (set_collision_debug)
-                    set_collision_debug(show_collision_debug);
+                {
+                    set_collision_debug(
+                        show_collision_debug
+                    );
+                }
             }
+
 #endif
         }
+
+
         f4_was_down = f4_down;
+
 
         // --------------------------------------------------------
         // Delta time
         // --------------------------------------------------------
 
-        double currentFrameTime = glfwGetTime();
+        double currentFrameTime =
+            glfwGetTime();
 
-        float dt = static_cast<float>(
-            currentFrameTime - lastFrameTime
-        );
 
-        lastFrameTime = currentFrameTime;
+        float dt =
+            static_cast<float>(
+                currentFrameTime -
+                lastFrameTime
+            );
 
-        // Évite un déplacement énorme après un freeze,
-        // une minimisation de fenêtre, etc.
-        dt = std::min(dt, 0.1f);
+
+        lastFrameTime =
+            currentFrameTime;
+
+
+        dt =
+            std::min(
+                dt,
+                0.1f
+            );
 
 
         // --------------------------------------------------------
@@ -708,6 +1286,7 @@ int main()
             1.f
         );
 
+
         glClear(
             GL_COLOR_BUFFER_BIT |
             GL_DEPTH_BUFFER_BIT
@@ -720,7 +1299,10 @@ int main()
 
         fpsFrames++;
 
-        double now = glfwGetTime();
+
+        double now =
+            glfwGetTime();
+
 
         if (now - fpsTimer >= 0.25)
         {
@@ -728,29 +1310,29 @@ int main()
                 static_cast<double>(fpsFrames) /
                 (now - fpsTimer);
 
+
             char title[128];
+
 
             std::snprintf(
                 title,
                 sizeof(title),
-                "Lynx ImGui Editor - %.0f FPS",
+                "Lynx Engine - %.0f FPS",
                 fps
             );
+
 
             glfwSetWindowTitle(
                 win,
                 title
             );
 
+
             fpsFrames = 0;
+
             fpsTimer = now;
         }
 
-
-        // Le suivi et le shake de la caméra sont appliqués après
-        // ProgressOneFrame(), afin que les events d'animation
-        // (dont l'event de frame 4 de l'attaque) aient le temps
-        // d'appeler lynx::GetCameraShake().Trigger() avant lynx::GetCameraShake().Update().
 
         // --------------------------------------------------------
         // Mouse
@@ -759,75 +1341,185 @@ int main()
         double mouseX;
         double mouseY;
 
+
         glfwGetCursorPos(
             win,
             &mouseX,
             &mouseY
         );
 
-        auto io = ImGui::GetIO();
 
-        HRL_SetWidgetVisible(brush_preview_widget, HRL_FALSE);
+        ImGuiIO& io =
+            ImGui::GetIO();
+
+
+        // --------------------------------------------------------
+        // Ctrl + S
+        // --------------------------------------------------------
+
+        const bool ctrl_down =
+            glfwGetKey(
+                win,
+                GLFW_KEY_LEFT_CONTROL
+            ) == GLFW_PRESS ||
+            glfwGetKey(
+                win,
+                GLFW_KEY_RIGHT_CONTROL
+            ) == GLFW_PRESS;
+
+
+        const bool s_down =
+            glfwGetKey(
+                win,
+                GLFW_KEY_S
+            ) == GLFW_PRESS;
+
+
+        const bool ctrl_s =
+            ctrl_down &&
+            s_down;
+
+
+        if (ctrl_s && !ctrl_s_was_down)
+        {
+            std::cout
+                << "[CTRL+S] Saving world to: "
+                << world_file_path_string
+                << "\n";
+
+
+            HRL_SaveVoxelWorldAllFile(
+                scene,
+                world_file_path_string.c_str()
+            );
+
+            level->SaveToFile("world.xml");
+        }
+
+
+        ctrl_s_was_down =
+            ctrl_s;
+
+
+        HRL_SetWidgetVisible(
+            brush_preview_widget,
+            HRL_FALSE
+        );
+
+
         if (!isPlaying || io.KeyShift)
         {
-            HRL_SetWidgetVisible(brush_preview_widget, HRL_TRUE);
-
-            int winW, winH;
-            glfwGetWindowSize(win, &winW, &winH);
-            HRL_SetWidgetPosition(brush_preview_widget, mouseX/winW, mouseY/winH);
-
+            HRL_SetWidgetVisible(
+                brush_preview_widget,
+                HRL_TRUE
+            );
 
 
+            int winW;
+            int winH;
 
-            //Gizmo
-            if (editing_object != HRL_INVALID_ID && editing_actor)
+
+            glfwGetWindowSize(
+                win,
+                &winW,
+                &winH
+            );
+
+
+            HRL_SetWidgetPosition(
+                brush_preview_widget,
+                mouseX / winW,
+                mouseY / winH
+            );
+
+
+            // ----------------------------------------------------
+            // Gizmo
+            // ----------------------------------------------------
+
+            if (editing_actor &&
+                !io.WantCaptureMouse)
             {
-                dragging_object=true;
-                float gx, gy, gz;
-                HRL_GetGizmoPosition(gizmo, &gx, &gy, &gz);
-                editing_actor->transform.location = {gx, gy, gz};
+                dragging_object = true;
+
+
+                float gx;
+                float gy;
+                float gz;
+
+
+                HRL_GetGizmoPosition(
+                    gizmo,
+                    &gx,
+                    &gy,
+                    &gz
+                );
+
+
+                editing_actor->transform.location =
+                {
+                    gx,
+                    gy,
+                    gz
+                };
             }
 
 
+            // ----------------------------------------------------
+            // Editor mouse interaction
+            // ----------------------------------------------------
 
-            if (!io.KeyCtrl)
+            if (!io.KeyCtrl &&
+                !io.WantCaptureMouse)
             {
-                // --------------------------------------------------------
-                // Brush
-                // --------------------------------------------------------
-
                 const bool leftMousePressed =
                     glfwGetMouseButton(
                         win,
                         GLFW_MOUSE_BUTTON_LEFT
                     ) == GLFW_PRESS;
 
-                // Start a new brush stroke only when painting is enabled.
+
                 if (brushPaintEnabled &&
                     leftMousePressed &&
                     !brushPainting)
                 {
                     brushPainting = true;
+
                     brushPaintedVoxels.clear();
+
                     currentStrokeChanges.clear();
                 }
 
-                // End the current brush stroke.
-                if ((!leftMousePressed || !brushPaintEnabled) && brushPainting)
+
+                if ((!leftMousePressed ||
+                     !brushPaintEnabled) &&
+                    brushPainting)
                 {
                     brushPainting = false;
+
                     brushPaintedVoxels.clear();
 
+
                     if (!currentStrokeChanges.empty())
-                        undoHistory.push_back(std::move(currentStrokeChanges));
+                    {
+                        undoHistory.push_back(
+                            std::move(
+                                currentStrokeChanges
+                            )
+                        );
+                    }
+
 
                     currentStrokeChanges.clear();
                 }
 
-                if (brushPaintEnabled && leftMousePressed)
+
+                if (brushPaintEnabled &&
+                    leftMousePressed)
                 {
                     int centerX;
                     int centerY;
+
 
                     if (HRL_GetVoxelAtScreenPosition(
                             scene,
@@ -836,8 +1528,6 @@ int main()
                             &centerX,
                             &centerY))
                     {
-                        // Circular brush. Each voxel is passed through
-                        // tryPaintVoxel only once per continuous stroke.
                         for (int y = -brushRadius;
                              y <= brushRadius;
                              ++y)
@@ -860,41 +1550,50 @@ int main()
                 }
 
 
-                // --------------------------------------------------------
+                // ------------------------------------------------
                 // Camera movement
-                // --------------------------------------------------------
+                // ------------------------------------------------
 
                 if (glfwGetKey(
                         win,
                         GLFW_KEY_W
                     ) == GLFW_PRESS)
                 {
-                    camY += cameraSpeed * dt;
+                    camY +=
+                        cameraSpeed * dt;
                 }
 
-                if (glfwGetKey(
+
+                if (!ctrl_down &&
+                    glfwGetKey(
                         win,
                         GLFW_KEY_S
                     ) == GLFW_PRESS)
                 {
-                    camY -= cameraSpeed * dt;
+                    camY -=
+                        cameraSpeed * dt;
                 }
+
 
                 if (glfwGetKey(
                         win,
                         GLFW_KEY_D
                     ) == GLFW_PRESS)
                 {
-                    camX += cameraSpeed * dt;
+                    camX +=
+                        cameraSpeed * dt;
                 }
+
 
                 if (glfwGetKey(
                         win,
                         GLFW_KEY_A
                     ) == GLFW_PRESS)
                 {
-                    camX -= cameraSpeed * dt;
+                    camX -=
+                        cameraSpeed * dt;
                 }
+
 
                 HRL_SetCameraLocation(
                     camera,
@@ -904,22 +1603,33 @@ int main()
                 );
 
 
-                // --------------------------------------------------------
-                // Save / Load
-                // --------------------------------------------------------
+                // ------------------------------------------------
+                // F1 save
+                // ------------------------------------------------
 
                 if (glfwGetKey(
                         win,
                         GLFW_KEY_F1
                     ) == GLFW_PRESS)
                 {
-                    std::filesystem::path p = std::filesystem::path("assets/") / save_path;
-                    std::string str = p.string();
+                    std::cout
+                        << "[F1] Saving world to: "
+                        << world_file_path_string
+                        << "\n";
+
+
                     HRL_SaveVoxelWorldAllFile(
                         scene,
-                        str.c_str()
+                        world_file_path_string.c_str()
                     );
+
+                    level->SaveToFile("world.xml");
                 }
+
+
+                // ------------------------------------------------
+                // F2 load
+                // ------------------------------------------------
 
                 if (glfwGetKey(
                         win,
@@ -927,7 +1637,10 @@ int main()
                     ) == GLFW_PRESS)
                 {
                     auto world_save_data =
-                        lynx::fs::ReadBinary("save.hrlv");
+                        lynx::fs::ReadBinary(
+                            save_data
+                        );
+
 
                     HRL_LoadVoxelWorldBuffer(
                         scene,
@@ -936,44 +1649,150 @@ int main()
                     );
                 }
             }
+            else if (io.WantCaptureMouse)
+            {
+                if (brushPainting)
+                {
+                    brushPainting = false;
+
+                    brushPaintedVoxels.clear();
+
+
+                    if (!currentStrokeChanges.empty())
+                    {
+                        undoHistory.push_back(
+                            std::move(
+                                currentStrokeChanges
+                            )
+                        );
+                    }
+
+
+                    currentStrokeChanges.clear();
+                }
+            }
         }
 
-        if (glfwGetKey( win, GLFW_KEY_F3 ) == GLFW_PRESS)
+
+        // --------------------------------------------------------
+        // F3 : Toggle Editor / Game
+        // --------------------------------------------------------
+
+        const bool f3_down =
+            glfwGetKey(
+                win,
+                GLFW_KEY_F3
+            ) == GLFW_PRESS;
+
+
+        if (f3_down && !f3_was_down)
         {
-            HRL_SetViewportCamera(viewport, gameplay_cam);
-            isPlaying=true;
-            engine->StartGame();
+            if (!isPlaying)
+            {
+                // ------------------------------------------------
+                // EDITOR -> GAME
+                // ------------------------------------------------
+
+                HRL_SetViewportCamera(
+                    viewport,
+                    gameplay_cam
+                );
+
+                // Clear editor selection and hide the gizmo in game mode.
+                editing_object = HRL_INVALID_ID;
+                editing_actor = nullptr;
+
+                HRL_SetGizmoVisible(
+                    gizmo,
+                    HRL_FALSE
+                );
+
+                isPlaying = true;
+
+
+                engine->StartGame();
+
+
+                std::cout
+                    << "[F3] Switched to GAME mode\n";
+            }
+            else
+            {
+                // ------------------------------------------------
+                // GAME -> EDITOR
+                // ------------------------------------------------
+
+                HRL_SetViewportCamera(
+                    viewport,
+                    camera
+                );
+
+
+                isPlaying = false;
+
+				engine->EndGame();
+
+
+                std::cout
+                    << "[F3] Switched to EDITOR mode\n";
+            }
         }
 
 
+        f3_was_down =
+            f3_down;
 
 
         // --------------------------------------------------------
         // Engine / HRL
         // --------------------------------------------------------
 
-
         engine->ProgressOneFrame(dt);
+
 
         // --------------------------------------------------------
         // Gameplay camera
         // --------------------------------------------------------
 
-        float targetX = player->transform.location.x;
-        float targetY = player->transform.location.y;
+        float targetX =
+            player->transform.location.x;
 
-        // Vitesse de suivi de la caméra.
-        // Plus c'est petit, plus la caméra a du retard.
+
+        float targetY =
+            player->transform.location.y;
+
+
         float cameraFollowSpeed = 3.f;
 
-        float follow = 1.f - std::exp(-cameraFollowSpeed * dt);
 
-        gameplayCamX += (targetX - gameplayCamX) * follow;
-        gameplayCamY += (targetY - gameplayCamY) * follow;
+        float follow =
+            1.f -
+            std::exp(
+                -cameraFollowSpeed * dt
+            );
 
-        float shakenX = gameplayCamX;
-        float shakenY = gameplayCamY;
-        float shakenRotationZ = 0.f;
+
+        gameplayCamX +=
+            (targetX - gameplayCamX) *
+            follow;
+
+
+        gameplayCamY +=
+            (targetY - gameplayCamY) *
+            follow;
+
+
+        float shakenX =
+            gameplayCamX;
+
+
+        float shakenY =
+            gameplayCamY + 2.f;
+
+
+        float shakenRotationZ =
+            0.f;
+
 
         lynx::GetCameraShake().Update(
             dt,
@@ -982,12 +1801,14 @@ int main()
             shakenRotationZ
         );
 
+
         HRL_SetCameraLocation(
             gameplay_cam,
             shakenX,
             shakenY,
             100.f
         );
+
 
         HRL_SetCameraRotation(
             gameplay_cam,
@@ -996,7 +1817,9 @@ int main()
             shakenRotationZ
         );
 
+
         HRL_BeginFrame();
+
         HRL_EndFrame();
 
 
@@ -1012,41 +1835,748 @@ int main()
         // --------------------------------------------------------
 
         if (io.KeyCtrl &&
-            ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
+            ImGui::IsKeyPressed(
+                ImGuiKey_Z,
+                false
+            ) &&
             !brushPainting)
         {
             printf("undo\n");
+
             undoLastStroke();
         }
 
 
+        // --------------------------------------------------------
+        // Outliner
+        // --------------------------------------------------------
+
+        if (!isPlaying)
+        {
+            ImGui::Begin("Outliner");
+
+            const auto& actors = level->GetActors();
+
+            if (actors.empty())
+            {
+                ImGui::TextDisabled("No actors");
+            }
+            else
+            {
+                for (size_t i = 0; i < actors.size(); ++i)
+                {
+                    lynx::Actor* actor = actors[i];
+
+                    if (!actor)
+                        continue;
+
+                    std::string typeName =
+                        lynx::ETypeName(*actor);
+
+                    std::string label = typeName;
+
+                    if (!actor->object_id_.empty())
+                    {
+                        label += " [" + actor->object_id_ + "]";
+                    }
+
+                    label += "##OutlinerActor";
+                    label += std::to_string(i);
+
+                    const bool selected =
+                        editing_actor == actor;
+
+                    if (ImGui::Selectable(
+                            label.c_str(),
+                            selected
+                        ))
+                    {
+                        SetActorSelected(actor);
+                    }
+
+
+                    // Right-click context menu for this actor.
+                    if (ImGui::BeginPopupContextItem())
+                    {
+                        if (ImGui::MenuItem("Duplicate"))
+                        {
+                            lynx::Actor* duplicated_actor =
+                                level->SpawnActor(
+                                    typeName.c_str()
+                                );
+
+                            if (duplicated_actor)
+                            {
+                                // Copy the transform and every registered property
+                                // from the source actor to the new instance.
+                                duplicated_actor->transform =
+                                    actor->transform;
+
+                                const auto& source_properties =
+                                    actor->GetProperties();
+
+                                auto& destination_properties =
+                                    duplicated_actor->GetProperties();
+
+                                for (const auto& [name, source_property] :
+                                     source_properties)
+                                {
+                                    if (name == "object_id_")
+                                        continue;
+
+                                    auto destination_it =
+                                        destination_properties.find(name);
+
+                                    if (destination_it ==
+                                        destination_properties.end())
+                                    {
+                                        continue;
+                                    }
+
+                                    const auto& destination_property =
+                                        destination_it->second;
+
+                                    if (source_property.GetType() !=
+                                        destination_property.GetType())
+                                    {
+                                        continue;
+                                    }
+
+                                    switch (source_property.GetType())
+                                    {
+                                        case 0: // int
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<int*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<int*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 1: // float
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<float*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<float*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 2: // bool
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<bool*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<bool*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 3: // string
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<std::string*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<std::string*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 4: // vec2
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<lynx::vec2*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<lynx::vec2*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 5: // vec3
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<lynx::vec3*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<lynx::vec3*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 6: // vec4
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<lynx::vec4*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<lynx::vec4*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        case 7: // transform
+                                        {
+                                            auto source_ptr =
+                                                std::get_if<lynx::transform*>(
+                                                    &source_property.property_member
+                                                );
+
+                                            auto destination_ptr =
+                                                std::get_if<lynx::transform*>(
+                                                    &destination_property.property_member
+                                                );
+
+                                            if (source_ptr && destination_ptr &&
+                                                *source_ptr && *destination_ptr)
+                                            {
+                                                **destination_ptr = **source_ptr;
+                                            }
+                                            break;
+                                        }
+
+                                        default:
+                                            break;
+                                    }
+                                }
+
+                                // Generate a unique object ID for the copy.
+                                std::string base_id =
+                                    actor->object_id_.empty()
+                                        ? typeName
+                                        : actor->object_id_;
+
+                                std::string duplicated_id =
+                                    base_id + "_Copy";
+
+                                int copy_index = 2;
+
+                                while (level->GetActorFromID(
+                                           duplicated_id.c_str()
+                                       ))
+                                {
+                                    duplicated_id =
+                                        base_id +
+                                        "_Copy" +
+                                        std::to_string(copy_index++);
+                                }
+
+                                duplicated_actor->object_id_ =
+                                    duplicated_id;
+
+                                SetActorSelected(duplicated_actor);
+                            }
+
+                            ImGui::CloseCurrentPopup();
+                        }
+
+
+                        if (ImGui::MenuItem("Delete"))
+                        {
+                            if (editing_actor == actor)
+                            {
+                                editing_actor = nullptr;
+                                editing_object = HRL_INVALID_ID;
+
+                                HRL_SetGizmoVisible(
+                                    gizmo,
+                                    HRL_FALSE
+                                );
+                            }
+
+                            level->DestroyActor(actor);
+
+                            ImGui::CloseCurrentPopup();
+                        }
+
+                        ImGui::EndPopup();
+                    }
+                }
+            }
+
+            ImGui::End();
+
+
+            // --------------------------------------------------------
+            // Details
+            // --------------------------------------------------------
+
+            ImGui::Begin("Details");
+
+            if (!editing_actor)
+            {
+                ImGui::TextDisabled("No actor selected");
+            }
+            else
+            {
+                std::string typeName =
+                    lynx::ETypeName(*editing_actor);
+
+                ImGui::Text(
+                    "%s",
+                    typeName.c_str()
+                );
+
+                ImGui::Separator();
+
+
+                // ----------------------------------------------------
+                // Object ID
+                // ----------------------------------------------------
+
+                ImGui::Text("Object ID");
+
+                char objectIdBuffer[512];
+
+                std::snprintf(
+                    objectIdBuffer,
+                    sizeof(objectIdBuffer),
+                    "%s",
+                    editing_actor->object_id_.c_str()
+                );
+
+                if (ImGui::InputText(
+                        "##ObjectID",
+                        objectIdBuffer,
+                        sizeof(objectIdBuffer)
+                    ))
+                {
+                    editing_actor->object_id_ =
+                        objectIdBuffer;
+                }
+
+
+                ImGui::Separator();
+
+
+                // ----------------------------------------------------
+                // Properties
+                // ----------------------------------------------------
+
+                ImGui::Text("Properties");
+
+                const auto& properties =
+                    editing_actor->GetProperties();
+
+                if (properties.empty())
+                {
+                    ImGui::TextDisabled(
+                        "No properties"
+                    );
+                }
+                else
+                {
+                    for (const auto& [name, prop] : properties)
+                    {
+                        // object_id_ is edited separately above.
+                        if (name == "object_id_")
+                            continue;
+
+                        ImGui::PushID(name.c_str());
+
+                            ImGui::Text("%s", name.c_str());
+                            ImGui::SameLine();
+
+                            bool changed = false;
+
+                            switch (prop.GetType())
+                            {
+                                case 0: // int
+                                {
+                                    if (auto ptr =
+                                            std::get_if<int*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                            changed = ImGui::DragInt(
+                                                "##value",
+                                                *ptr,
+                                                1.0f
+                                            );
+                                    }
+                                    break;
+                                }
+
+                                case 1: // float
+                                {
+                                    if (auto ptr =
+                                            std::get_if<float*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                            changed = ImGui::DragFloat(
+                                                "##value",
+                                                *ptr,
+                                                0.05f
+                                            );
+                                    }
+                                    break;
+                                }
+
+                                case 2: // bool
+                                {
+                                    if (auto ptr =
+                                            std::get_if<bool*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                            changed = ImGui::Checkbox(
+                                                "##value",
+                                                *ptr
+                                            );
+                                    }
+                                    break;
+                                }
+
+                                case 3: // string
+                                {
+                                    if (auto ptr =
+                                            std::get_if<std::string*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                        {
+                                            char buffer[1024];
+
+                                            std::snprintf(
+                                                buffer,
+                                                sizeof(buffer),
+                                                "%s",
+                                                (*ptr)->c_str()
+                                            );
+
+                                            if (ImGui::InputText(
+                                                    "##value",
+                                                    buffer,
+                                                    sizeof(buffer)
+                                                ))
+                                            {
+                                                **ptr = buffer;
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                case 4: // vec2
+                                {
+                                    if (auto ptr =
+                                            std::get_if<lynx::vec2*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                        {
+                                            float values[2] =
+                                            {
+                                                (*ptr)->x,
+                                                (*ptr)->y
+                                            };
+
+                                            if (ImGui::DragFloat2(
+                                                    "##value",
+                                                    values,
+                                                    0.05f
+                                                ))
+                                            {
+                                                (*ptr)->x = values[0];
+                                                (*ptr)->y = values[1];
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                case 5: // vec3
+                                {
+                                    if (auto ptr =
+                                            std::get_if<lynx::vec3*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                        {
+                                            float values[3] =
+                                            {
+                                                (*ptr)->x,
+                                                (*ptr)->y,
+                                                (*ptr)->z
+                                            };
+
+                                            if (ImGui::DragFloat3(
+                                                    "##value",
+                                                    values,
+                                                    0.05f
+                                                ))
+                                            {
+                                                (*ptr)->x = values[0];
+                                                (*ptr)->y = values[1];
+                                                (*ptr)->z = values[2];
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                case 6: // vec4
+                                {
+                                    if (auto ptr =
+                                            std::get_if<lynx::vec4*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                        {
+                                            float values[4] =
+                                            {
+                                                (*ptr)->x,
+                                                (*ptr)->y,
+                                                (*ptr)->z,
+                                                (*ptr)->w
+                                            };
+
+                                            if (ImGui::DragFloat4(
+                                                    "##value",
+                                                    values,
+                                                    0.05f
+                                                ))
+                                            {
+                                                (*ptr)->x = values[0];
+                                                (*ptr)->y = values[1];
+                                                (*ptr)->z = values[2];
+                                                (*ptr)->w = values[3];
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                case 7: // transform
+                                {
+                                    if (auto ptr =
+                                            std::get_if<lynx::transform*>(&prop.property_member))
+                                    {
+                                        if (*ptr)
+                                        {
+                                            lynx::transform& value = **ptr;
+
+                                            float location[3] =
+                                            {
+                                                value.location.x,
+                                                value.location.y,
+                                                value.location.z
+                                            };
+
+                                            float rotation[3] =
+                                            {
+                                                value.rotation.x,
+                                                value.rotation.y,
+                                                value.rotation.z
+                                            };
+
+                                            float scale[3] =
+                                            {
+                                                value.scale.x,
+                                                value.scale.y,
+                                                value.scale.z
+                                            };
+
+                                            ImGui::Text("Location");
+                                            changed |= ImGui::DragFloat3(
+                                                "##location",
+                                                location,
+                                                0.05f
+                                            );
+
+                                            ImGui::Text("Rotation");
+                                            changed |= ImGui::DragFloat3(
+                                                "##rotation",
+                                                rotation,
+                                                0.5f
+                                            );
+
+                                            ImGui::Text("Scale");
+                                            changed |= ImGui::DragFloat3(
+                                                "##scale",
+                                                scale,
+                                                0.05f
+                                            );
+
+                                            value.location.x = location[0];
+                                            value.location.y = location[1];
+                                            value.location.z = location[2];
+
+                                            value.rotation.x = rotation[0];
+                                            value.rotation.y = rotation[1];
+                                            value.rotation.z = rotation[2];
+
+                                            value.scale.x = scale[0];
+                                            value.scale.y = scale[1];
+                                            value.scale.z = scale[2];
+
+                                            // Keep the editor gizmo synchronized with
+                                            // the transform edited from the Details panel.
+                                            if (changed && editing_actor)
+                                            {
+                                                HRL_SetGizmoPosition(
+                                                    gizmo,
+                                                    value.location.x,
+                                                    value.location.y,
+                                                    value.location.z
+                                                );
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                default:
+                                {
+                                    ImGui::TextDisabled(
+                                        "%s",
+                                        lynx::PropertyToString(prop).c_str()
+                                    );
+                                    break;
+                                }
+                            }
+
+                            (void)changed;
+
+                        ImGui::PopID();
+                    }
+                }
+            }
+
+
+            ImGui::End();
+        }
+
+
+        // --------------------------------------------------------
+        // Sound
+        // --------------------------------------------------------
+
         ImGui::Begin("Sound");
 
-        float master_volume = lynx::GetMasterVolume();
-        auto mv_changed = ImGui::SliderFloat("Master Volume", &master_volume, 0.f, 2.f);
+
+        float master_volume =
+            lynx::GetMasterVolume();
+
+
+        auto mv_changed =
+            ImGui::SliderFloat(
+                "Master Volume",
+                &master_volume,
+                0.f,
+                2.f
+            );
+
+
         if (mv_changed)
         {
-            lynx::SetMasterVolume(master_volume);
+            lynx::SetMasterVolume(
+                master_volume
+            );
         }
+
 
         ImGui::End();
 
 
         // --------------------------------------------------------
-        // Viewport
+        // Color Picking
         // --------------------------------------------------------
 
-        ImGui::Begin("Color Picking");
+        ImGui::Begin(
+            "Color Picking"
+        );
+
 
         ImVec2 viewportSize =
             ImGui::GetContentRegionAvail();
 
-        ImGui::Image(
-            HRL_GL_GetSceneColorPickingBufferGL_ID(scene),
-            viewportSize,
-            ImVec2(0, 1),
-            ImVec2(1, 0)
+
+        float col[4] =
+        {
+            1.f,
+            1.f,
+            1.f,
+            1.f
+        };
+
+
+        ImGui::ColorEdit4(
+            "Couleur",
+            col,
+            ImGuiColorEditFlags_Float
         );
+
+
+        ImGui::Text("");
+
 
         ImGui::End();
 
@@ -1057,6 +2587,7 @@ int main()
 
         ImGui::Begin("Config");
 
+
         ImGui::SliderFloat(
             "Camera Speed",
             &cameraSpeed,
@@ -1065,51 +2596,101 @@ int main()
         );
 
 
-
         // --------------------------------------------------------
         // Brush Mode
         // --------------------------------------------------------
 
-        ImGui::Text("Brush Mode");
+        ImGui::Text(
+            "Brush Mode"
+        );
+
 
         if (ImGui::Button("Paint"))
         {
             brushPaintEnabled = true;
-            HRL_SetWidgetVisible(brush_preview_widget, HRL_TRUE);
+
+
+            HRL_SetWidgetVisible(
+                brush_preview_widget,
+                HRL_TRUE
+            );
         }
+
 
         if (brushPaintEnabled)
         {
-            ImVec2 min = ImGui::GetItemRectMin();
-            ImVec2 max = ImGui::GetItemRectMax();
+            ImVec2 min =
+                ImGui::GetItemRectMin();
+
+
+            ImVec2 max =
+                ImGui::GetItemRectMax();
+
 
             ImGui::GetWindowDrawList()->AddRect(
-                ImVec2(min.x - 2.f, min.y - 2.f),
-                ImVec2(max.x + 2.f, max.y + 2.f),
-                IM_COL32(255, 255, 255, 255),
+                ImVec2(
+                    min.x - 2.f,
+                    min.y - 2.f
+                ),
+                ImVec2(
+                    max.x + 2.f,
+                    max.y + 2.f
+                ),
+                IM_COL32(
+                    255,
+                    255,
+                    255,
+                    255
+                ),
                 2.f,
                 0,
                 2.f
             );
         }
 
+
         ImGui::SameLine();
 
-        if (ImGui::Button("No Painting"))
+
+        if (ImGui::Button(
+                "No Painting"
+            ))
         {
             brushPaintEnabled = false;
-            HRL_SetWidgetVisible(brush_preview_widget, HRL_FALSE);
+
+
+            HRL_SetWidgetVisible(
+                brush_preview_widget,
+                HRL_FALSE
+            );
         }
+
 
         if (!brushPaintEnabled)
         {
-            ImVec2 min = ImGui::GetItemRectMin();
-            ImVec2 max = ImGui::GetItemRectMax();
+            ImVec2 min =
+                ImGui::GetItemRectMin();
+
+
+            ImVec2 max =
+                ImGui::GetItemRectMax();
+
 
             ImGui::GetWindowDrawList()->AddRect(
-                ImVec2(min.x - 2.f, min.y - 2.f),
-                ImVec2(max.x + 2.f, max.y + 2.f),
-                IM_COL32(255, 255, 255, 255),
+                ImVec2(
+                    min.x - 2.f,
+                    min.y - 2.f
+                ),
+                ImVec2(
+                    max.x + 2.f,
+                    max.y + 2.f
+                ),
+                IM_COL32(
+                    255,
+                    255,
+                    255,
+                    255
+                ),
                 2.f,
                 0,
                 2.f
@@ -1119,178 +2700,266 @@ int main()
 
         if (brushPaintEnabled)
         {
-            bool brush_radius_modified = ImGui::SliderInt(
-                "Brush Radius",
-                &brushRadius,
-                1,
-                20
-            );
+            bool brush_radius_modified =
+                ImGui::SliderInt(
+                    "Brush Radius",
+                    &brushRadius,
+                    1,
+                    20
+                );
+
 
             if (brush_radius_modified)
             {
-                //HRL_SetMeshScale(brush_preview_mesh, (float)brushRadius, (float)brushRadius, 1);
-                HRL_SetWidgetSize(brush_preview_widget, (float)brushRadius/100, (float)brushRadius/100);
+                HRL_SetWidgetSize(
+                    brush_preview_widget,
+                    static_cast<float>(brushRadius) / 100.f,
+                    static_cast<float>(brushRadius) / 100.f
+                );
             }
 
 
-
-        ImGui::Checkbox(
-            "Paint empty voxels",
-            &brushPaintEmptyVoxels
-        );
-
-        ImGui::SliderFloat(
-            "Brush Density",
-            &brushDensity,
-            0.f,
-            1.f,
-            "%.2f"
-        );
-
-
-        ImGui::Text("Voxel Type");
-
-        // Type 0 = empty / erase.
-        ImGui::PushID(0);
-        if (ImGui::ColorButton(
-                "##VoxelEmpty",
-                ImVec4(0.f, 0.f, 0.f, 1.f),
-                ImGuiColorEditFlags_NoTooltip,
-                ImVec2(40.f, 40.f)
-            ))
-        {
-            brushVoxelType = 0;
-        }
-
-        if (brushVoxelType == 0)
-        {
-            ImVec2 min = ImGui::GetItemRectMin();
-            ImVec2 max = ImGui::GetItemRectMax();
-
-            ImGui::GetWindowDrawList()->AddRect(
-                ImVec2(min.x - 2.f, min.y - 2.f),
-                ImVec2(max.x + 2.f, max.y + 2.f),
-                IM_COL32(255, 255, 255, 255),
-                2.f,
-                0,
-                2.f
-            );
-        }
-        ImGui::SameLine();
-        ImGui::PopID();
-
-        for (int i = 0; i < 4; ++i)
-        {
-            int type = i + 1;
-
-            ImVec4 color(
-                voxelData[i].color[0],
-                voxelData[i].color[1],
-                voxelData[i].color[2],
-                voxelData[i].color[3]
+            ImGui::Checkbox(
+                "Paint empty voxels",
+                &brushPaintEmptyVoxels
             );
 
-            ImGui::PushID(type);
+
+            ImGui::SliderFloat(
+                "Brush Density",
+                &brushDensity,
+                0.f,
+                1.f,
+                "%.2f"
+            );
+
+
+            ImGui::Text(
+                "Voxel Type"
+            );
+
+
+            // ----------------------------------------------------
+            // Empty voxel
+            // ----------------------------------------------------
+
+            ImGui::PushID(0);
+
 
             if (ImGui::ColorButton(
-                "##VoxelColor",
-                color,
-                ImGuiColorEditFlags_NoTooltip,
-                ImVec2(40.f, 40.f)
-            ))
+                    "##VoxelEmpty",
+                    ImVec4(
+                        0.f,
+                        0.f,
+                        0.f,
+                        1.f
+                    ),
+                    ImGuiColorEditFlags_NoTooltip,
+                    ImVec2(
+                        40.f,
+                        40.f
+                    )
+                ))
             {
-                brushVoxelType = type;
+                brushVoxelType = 0;
             }
 
-            if (brushVoxelType == type)
+
+            if (brushVoxelType == 0)
             {
-                ImVec2 min = ImGui::GetItemRectMin();
-                ImVec2 max = ImGui::GetItemRectMax();
+                ImVec2 min =
+                    ImGui::GetItemRectMin();
+
+
+                ImVec2 max =
+                    ImGui::GetItemRectMax();
+
 
                 ImGui::GetWindowDrawList()->AddRect(
-                    ImVec2(min.x - 2.f, min.y - 2.f),
-                    ImVec2(max.x + 2.f, max.y + 2.f),
-                    IM_COL32(255, 255, 255, 255),
+                    ImVec2(
+                        min.x - 2.f,
+                        min.y - 2.f
+                    ),
+                    ImVec2(
+                        max.x + 2.f,
+                        max.y + 2.f
+                    ),
+                    IM_COL32(
+                        255,
+                        255,
+                        255,
+                        255
+                    ),
                     2.f,
                     0,
                     2.f
                 );
             }
 
-            if (i < 3)
-                ImGui::SameLine();
+
+            ImGui::SameLine();
 
             ImGui::PopID();
-        }
+
+
+            // ----------------------------------------------------
+            // Voxel types
+            // ----------------------------------------------------
+
+            for (int i = 0; i < voxelDataCount; ++i)
+            {
+                int type = i + 1;
+
+
+                ImVec4 color(
+                    voxelData[i].color[0],
+                    voxelData[i].color[1],
+                    voxelData[i].color[2],
+                    voxelData[i].color[3]
+                );
+
+
+                ImGui::PushID(type);
+
+
+                if (ImGui::ColorButton(
+                        "##VoxelColor",
+                        color,
+                        ImGuiColorEditFlags_NoTooltip,
+                        ImVec2(
+                            40.f,
+                            40.f
+                        )
+                    ))
+                {
+                    brushVoxelType = type;
+                }
+
+
+                if (brushVoxelType == type)
+                {
+                    ImVec2 min =
+                        ImGui::GetItemRectMin();
+
+
+                    ImVec2 max =
+                        ImGui::GetItemRectMax();
+
+
+                    ImGui::GetWindowDrawList()->AddRect(
+                        ImVec2(
+                            min.x - 2.f,
+                            min.y - 2.f
+                        ),
+                        ImVec2(
+                            max.x + 2.f,
+                            max.y + 2.f
+                        ),
+                        IM_COL32(
+                            255,
+                            255,
+                            255,
+                            255
+                        ),
+                        2.f,
+                        0,
+                        2.f
+                    );
+                }
+
+
+                if (i < 3)
+                    ImGui::SameLine();
+
+
+                ImGui::PopID();
+            }
         }
 
 
         ImGui::End();
 
+
         // --------------------------------------------------------
         // Camera Shake
         // --------------------------------------------------------
 
-        ImGui::Begin("Camera Shake");
-
-    ImGui::Separator();
-    ImGui::Text("Camera Shake");
-
-    ImGui::Checkbox(
-        "Enable Camera Shake",
-        &lynx::GetCameraShake().enabled
-    );
-
-    if (lynx::GetCameraShake().enabled)
-    {
-        ImGui::SliderFloat(
-            "Shake Duration",
-            &lynx::GetCameraShake().duration,
-            0.01f,
-            2.0f,
-            "%.2f s"
+        ImGui::Begin(
+            "Camera Shake"
         );
 
-        ImGui::SliderFloat(
-            "Position Amplitude",
-            &lynx::GetCameraShake().positionAmplitude,
-            0.f,
-            20.f,
-            "%.2f"
+
+        ImGui::Separator();
+
+
+        ImGui::Text(
+            "Camera Shake"
         );
 
-        ImGui::SliderFloat(
-            "Rotation Amplitude",
-            &lynx::GetCameraShake().rotationAmplitude,
-            0.f,
-            20.f,
-            "%.2f deg"
+
+        ImGui::Checkbox(
+            "Enable Camera Shake",
+            &lynx::GetCameraShake().enabled
         );
 
-        ImGui::SliderFloat(
-            "Shake Frequency",
-            &lynx::GetCameraShake().frequency,
-            1.f,
-            60.f,
-            "%.1f Hz"
-        );
 
-        ImGui::SliderFloat(
-            "Shake Falloff",
-            &lynx::GetCameraShake().falloff,
-            0.1f,
-            4.0f,
-            "%.2f"
-        );
-
-        if (ImGui::Button("Test Camera Shake"))
+        if (lynx::GetCameraShake().enabled)
         {
-            lynx::GetCameraShake().Trigger();
+            ImGui::SliderFloat(
+                "Shake Duration",
+                &lynx::GetCameraShake().duration,
+                0.01f,
+                2.0f,
+                "%.2f s"
+            );
+
+
+            ImGui::SliderFloat(
+                "Position Amplitude",
+                &lynx::GetCameraShake().positionAmplitude,
+                0.f,
+                20.f,
+                "%.2f"
+            );
+
+
+            ImGui::SliderFloat(
+                "Rotation Amplitude",
+                &lynx::GetCameraShake().rotationAmplitude,
+                0.f,
+                20.f,
+                "%.2f deg"
+            );
+
+
+            ImGui::SliderFloat(
+                "Shake Frequency",
+                &lynx::GetCameraShake().frequency,
+                1.f,
+                60.f,
+                "%.1f Hz"
+            );
+
+
+            ImGui::SliderFloat(
+                "Shake Falloff",
+                &lynx::GetCameraShake().falloff,
+                0.1f,
+                4.0f,
+                "%.2f"
+            );
+
+
+            if (ImGui::Button(
+                    "Test Camera Shake"
+                ))
+            {
+                lynx::GetCameraShake().Trigger();
+            }
         }
-    }
 
-    ImGui::End();
 
+        ImGui::End();
 
 
         // --------------------------------------------------------
@@ -1299,6 +2968,7 @@ int main()
 
         EndImGuiFrame();
 
+
         glfwSwapBuffers(win);
     }
 
@@ -1306,8 +2976,11 @@ int main()
     // ------------------------------------------------------------
     // Shutdown
     // ------------------------------------------------------------
+
     delete lynx::GetEngine();
+
     ShutdownImGui();
+
 
     return 0;
 }

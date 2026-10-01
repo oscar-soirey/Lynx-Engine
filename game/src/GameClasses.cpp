@@ -84,6 +84,11 @@ Sprite::Sprite()
     HRL_SetMeshUserHandle(sprite, this);
 }
 
+Sprite::~Sprite()
+{
+    HRL_DeleteMesh(sprite);
+}
+
 void Sprite::Init()
 {
     HRL_SetMeshScale(sprite, transform.scale.x * relative_sprite_transform_.scale.x, transform.scale.y * relative_sprite_transform_.scale.y, 1.f);
@@ -104,6 +109,25 @@ void Sprite::OnTransformChanged()
         transform.location.y + relative_sprite_transform_.location.y,
         transform.location.z + relative_sprite_transform_.location.z
     );
+}
+
+// ============================================================
+// Static Sptite
+// ============================================================
+StaticSprite::StaticSprite()
+{
+    HPROPERTY(texture_path, lynx::Exposed);
+}
+
+void StaticSprite::Init()
+{
+    Sprite::Init();
+
+    auto texture_data = lynx::fs::ReadBinary(texture_path);
+    HRL_id hrl_texture = HRL_CreateTexture(reinterpret_cast<const char*>(texture_data.data()), texture_data.size());
+    HRL_id material = HRL_CreateMaterial(HRL_SPRITE_SHADER);
+    HRL_MaterialSetTexture(material, HRL_T_ALBEDO, hrl_texture);
+    HRL_SetMeshMaterial(sprite, material);
 }
 
 
@@ -151,6 +175,11 @@ void Pawn::Init()
     impact_src_.pitch_max = 1.2f;
     impact_src_.volume_min = 0.5f;
     impact_src_.volume_max = 0.8f;
+
+    body_hit_cs_.duration = 0.6f;
+    body_hit_cs_.positionAmplitude = 0.22f;
+    body_hit_cs_.rotationAmplitude = 0.f;
+    body_hit_cs_.falloff = 2.4f;
 }
 
 void Pawn::Tick(double dt)
@@ -334,6 +363,9 @@ void Pawn::Attack(float direction)
                     continue;
 
                 other->Hurt(this, hurt_amount_);
+
+                lynx::SetCameraShake(body_hit_cs_);
+                lynx::GetCameraShake().Trigger();
             }
         }
     }
@@ -399,12 +431,35 @@ void Pawn::Attack(float direction)
 
     if (destroyed_voxels > 0)
     {
+        lynx::SetCameraShake(destroy_voxels_cs_);
         lynx::GetCameraShake().Trigger();
 
         lynx::GetEngine()->SetGlobalTimeDilatation(
             0.1f,
             0.15f
         );
+    }
+}
+
+
+void Pawn::LaunchPawn(float launch_x, float launch_y, bool override_x, bool override_y)
+{
+    if (override_x)
+        velocity_x_ = launch_x;
+    else
+        velocity_x_ += launch_x;
+
+    if (override_y)
+        velocity_y_ = launch_y;
+    else
+        velocity_y_ += launch_y;
+}
+
+void Pawn::Hurt(Actor *instigator, float amount)
+{
+    if (hurt_source_reference_)
+    {
+        hurt_source_reference_->Play();
     }
 }
 

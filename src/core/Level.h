@@ -22,6 +22,8 @@ namespace lynx
 		const std::vector<Actor*>& GetActors() const;
 		int CountActorsOfClass(const char* _className) const;
 
+		void SaveToFile(const char* _path);
+
 	private:
 		std::vector<Actor*> actors_;
 

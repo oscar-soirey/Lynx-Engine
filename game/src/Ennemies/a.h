@@ -15,4 +15,6 @@ private:
 
 	lynx::blend_space bs_hurt{};
 	lynx::animation hurt_{sprite, "ennemy/Hurt.png", 4, false, 0.1f};
+
+	lynx::AudioSource hurt_src_{"sounds/hit/BodyHit.wav"};
 };

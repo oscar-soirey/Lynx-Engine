@@ -13,6 +13,7 @@
 class Sprite : public lynx::Actor {
 public:
     Sprite();
+    virtual ~Sprite();
     void Init() override;
     void Tick(double dt) override;
     void OnTransformChanged() override;
@@ -21,6 +22,14 @@ protected:
     HRL_id sprite = HRL_INVALID_ID;
 
     lynx::transform relative_sprite_transform_;
+};
+
+
+class StaticSprite : public Sprite {
+public:
+    std::string texture_path;
+    StaticSprite();
+    void Init() override;
 };
 
 
@@ -36,7 +45,11 @@ public:
     void Tick(double dt) override;
     void OnTransformChanged() override;
 
-    virtual void Hurt(lynx::Actor* instigator, float amount){}
+    virtual void Hurt(Actor* instigator, float amount);
+
+    // Launches the Pawn by applying an instantaneous velocity.
+    // Override flags replace the corresponding current velocity component.
+    void LaunchPawn(float launch_x, float launch_y, bool override_x = false, bool override_y = false);
 
     static void SetCollisionDebugEnabled(bool enabled);
 
@@ -46,7 +59,7 @@ protected:
     float attack_center_distance = 4.5f;
 
 
-    virtual void OnLanded(){};
+    virtual void OnLanded(){}
 
     // ========================================================
     // Combat
@@ -175,12 +188,17 @@ protected:
     BlockParticles block_particles;
     lynx::AudioSource impact_src_ = "sound.wav";
 
+    lynx::AudioSource* hurt_source_reference_=nullptr;
+
+
     static bool debug_collision_enabled_;
-
-
 
 
     lynx::blend_space* current_blendspace_ = nullptr;
 
     bool facing_right_ = true;
+
+
+    lynx::CameraShake destroy_voxels_cs_;
+	lynx::CameraShake body_hit_cs_;
 };

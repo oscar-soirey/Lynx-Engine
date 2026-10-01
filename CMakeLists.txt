@@ -87,7 +87,7 @@ file(GLOB ImGUI_SOURCE
 		"${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp"
 )
 
-add_executable(ImGuiEditor
+add_executable(ImGuiEditor src/icon.rc
 		${ImGUI_SOURCE}
 		third-party/glad/glad.c
 		game/main.cpp

@@ -46,7 +46,7 @@ namespace lynx
 		void StartGame();
 		void EndGame();
 
-		void CreateLevel(const char* file_name);
+		Level* CreateLevel(const char* file_name);
 		void DestroyCurrentLevel();
 		Level* GetCurrentLevel() const;
 

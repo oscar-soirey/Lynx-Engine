@@ -8,6 +8,7 @@
 #include <xml/tinyxml2.h>
 #include <thread>
 #include <algorithm>
+#include <filesystem>
 #include <iostream>
 
 #include "data/Typename.h"
@@ -157,8 +158,64 @@ namespace lynx
 			return std::strcmp(ETypeName(*a).c_str(), _className) == 0;
 		});
 	}
-}
 
-lynx::Level::Level()
-{
+
+
+
+	Level::Level()=default;
+
+
+	void Level::SaveToFile(const char* _path)
+	{
+		using namespace tinyxml2;
+
+		XMLDocument doc;
+
+		XMLElement* root = doc.NewElement("Level");
+		doc.InsertFirstChild(root);
+
+		for (Actor* actor : actors_)
+		{
+			if (!actor)
+				continue;
+
+			// Le nom de la classe devient le nom de l'élément XML.
+			// C'est exactement ce que LoadFromFile() attend.
+			std::string type_name = ETypeName(*actor);
+
+			XMLElement* actor_element = doc.NewElement(type_name.c_str());
+
+			// Sauvegarde de toutes les propriétés.
+			const auto& properties = actor->GetProperties();
+
+			for (const auto& [name, prop] : properties)
+			{
+				// Convertit automatiquement int, float, bool, string,
+				// vec2, vec3, vec4 et transform en string.
+				std::string value = PropertyToString(prop);
+
+				actor_element->SetAttribute(
+						name.c_str(),
+						value.c_str()
+				);
+			}
+
+			root->InsertEndChild(actor_element);
+		}
+
+		// Les niveaux sont sauvegardés dans assets/
+		std::string output_path = "assets/" + std::string(_path);
+
+		XMLError result = doc.SaveFile(output_path.c_str());
+
+		if (result != XML_SUCCESS)
+		{
+			std::cout << "error while saving level file: "
+								<< output_path << std::endl;
+			return;
+		}
+
+		std::cout << "level saved: "
+							<< output_path << std::endl;
+	}
 }
