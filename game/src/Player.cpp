@@ -5,6 +5,29 @@
 #include <Lynx.h>
 #include <hrl/hrl.h>
 
+#include "Projectile.h"
+
+
+Player::Player()
+{
+    // Offset du mesh NON miroite (joueur vers la droite). Le miroir est automatique.
+    // Corps du hero (sans l'epee) ~ 6 px a gauche du centre d'une frame de 42 px,
+    // soit 6/42 * 5 = ~0.7 unite monde : on decale le quad vers la droite.
+    relative_sprite_transform_.location.x = 0.7f;
+    relative_sprite_transform_.location.y = 0.85f;
+
+    //halo light autour du player
+    point_light_ = HRL_CreateLight(lynx::GetScene(), HRL_POINT_LIGHT);
+    HRL_SetLightIntensity(point_light_, 20.f);
+    HRL_SetLightColor(point_light_, 0.9f, 0.9f, 1.0f);
+}
+
+Player::~Player() 
+{
+	lynx::UnattachAudioListener();
+	HRL_DeleteLight(point_light_);
+}
+
 
 void Player::PlayFootstep()
 {
@@ -25,15 +48,18 @@ void Player::OnLanded()
 
 void Player::Init()
 {
-    relative_sprite_transform_.location.x = .5f;
-    relative_sprite_transform_.location.y = 1.f;
     relative_sprite_transform_.scale.x = 5.f;
     relative_sprite_transform_.scale.y = 5.f;
 
+    attack_radius = 13.5f;
+    attack_center_distance = 7.f;
+
     Pawn::Init();
+
 
     //Init
     lynx::AttachAudioListener(this);
+    lynx::SetUseDopplerEffect(false);
 
     rock_fs_src_.AttachToActor(this);
     rock_fs_src_.max_distance = 5.f;
@@ -55,75 +81,62 @@ void Player::Init()
     // Idle / Run
     // ====================================================
 
-    Run_.add_event(1, [this]()
+    _Run.add_event(1, [this]
     {
         PlayFootstep();
     });
-    Run_.add_event(4, [this]()
+    _Run.add_event(4, [this]
     {
         PlayFootstep();
     });
 
     bs_default.add(
         0.f,
-        Idle_
+        _Idle
     );
 
     bs_default.add(
         1.f,
-        Run_
+        _Run
     );
 
     bs_default.add(
         -1.f,
-        Run_
+        _Run
     );
 
 
     //Jump
-    bs_falling.add(0.f, Jump_);
-
-    bs_falling.on_finished([&] { current_blendspace_ = &bs_default; });
-
-
-    //Hurt
-    bs_hurt.add(0.f, Hurt_);
-    bs_hurt.on_finished([&] { current_blendspace_ = &bs_default; });
+    bs_falling.add(0.f, _Jump);
 
 
     // ====================================================
     // Attack 1
     // ====================================================
 
-    Attack1.add_event(4, [this]()
+    _Attack1.add_event(4, [this]()
     {
         Attack(facing_right_ ? 1.0f : -1.0f);
     });
 
-    WalkAttack1.add_event(4, [this]()
+    _WalkAttack1.add_event(4, [this]()
     {
         Attack(facing_right_ ? 1.0f : -1.0f);
-    });
-
-
-    bs_attacking1.on_finished([this]
-    {
-        AttackingFinished();
     });
 
     bs_attacking1.add(
         0.f,
-        Attack1
+        _Attack1
     );
 
     bs_attacking1.add(
         1.f,
-        WalkAttack1
+        _WalkAttack1
     );
 
     bs_attacking1.add(
         -1.f,
-        WalkAttack1
+        _WalkAttack1
     );
 
 
@@ -132,47 +145,78 @@ void Player::Init()
     // Attack 2
     // ====================================================
 
-    Attack2.add_event(4, [this]()
+    _Attack2.add_event(4, [this]()
     {
         Attack(facing_right_ ? 1.0f : -1.0f);
     });
 
-    WalkAttack2.add_event(4, [this]()
+    _WalkAttack2.add_event(4, [this]()
     {
         Attack(facing_right_ ? 1.0f : -1.0f);
     });
 
     bs_attacking2.add(
         0.f,
-        Attack2
+        _Attack2
     );
 
     bs_attacking2.add(
         1.f,
-        WalkAttack2
+        _WalkAttack2
     );
 
     bs_attacking2.add(
         -1.f,
-        WalkAttack2
+        _WalkAttack2
     );
 
-    bs_attacking2.on_finished([this]
-    {
-        AttackingFinished();
+
+    //Regles de transition
+    anim_manager_.add_state("loco", bs_default, { .variable = "speed" });
+    anim_manager_.add_state("attacking", bs_attacking2, {
+        .variable = "speed",
+        .on_exit    = [this]() { FinishAttack(); }
     });
-
-
-    current_blendspace_ = &bs_default;
-
-
-    point_light_ = HRL_CreateLight(lynx::GetScene(), HRL_POINT_LIGHT);
-    HRL_SetLightIntensity(point_light_, 20.f);
-    HRL_SetLightColor(point_light_, 0.9f, 0.9f, 1.0f);
+    anim_manager_.add_state("hurt", _Hurt);
+    anim_manager_.add_any_transition("attacking", anim_manager_.triggered("start-attack"), 0);
+    anim_manager_.add_any_transition("hurt", anim_manager_.triggered("hurt"), 0);
 }
 
 void Player::ProcessInput()
 {
+    // ----------------------------------------------------
+    // Select character
+    // ----------------------------------------------------
+    if (select_character_action_.IsPressed())
+    {
+        select_menu_open_ = true;
+        last_select_dir_  = 0;
+        selected_character_widget_ = current_player_form_ + 1;
+        lynx::GetEngine()->SetGlobalTimeDilatation(0.07f);
+        CreateSelectCharacterWidgets();
+        SetSelectedWidget(selected_character_widget_);
+    }
+    else if (select_character_action_.IsReleased())
+    {
+        select_menu_open_ = false;
+        current_player_form_ = selected_character_widget_ - 1;
+        lynx::GetEngine()->SetGlobalTimeDilatation(1.f);
+        RemoveSelectCharacterWidgets();
+    }
+
+    if (select_menu_open_)
+    {
+        const float axis = select_axis_.GetValue();
+        const int dir = (axis > 0.5f) - (axis < -0.5f);   // -1 / 0 / +1
+
+        if (dir != 0 && dir != last_select_dir_)           // seulement au moment où on pousse
+        {
+            selected_character_widget_ = std::clamp(selected_character_widget_ - dir, 2, 4);
+            SetSelectedWidget(selected_character_widget_);
+        }
+        last_select_dir_ = dir;
+    }
+
     // ----------------------------------------------------
     // Movement
     // ----------------------------------------------------
@@ -189,32 +233,114 @@ void Player::ProcessInput()
 
 
     // ----------------------------------------------------
-    // Animation blend
-    // ----------------------------------------------------
-
-    if (current_blendspace_)
-        current_blendspace_->set_value(move);
-
-
-    // ----------------------------------------------------
     // Attack
     // ----------------------------------------------------
 
     if (attack_action_.IsPressed() && BeginAttack())
     {
-        current_blendspace_ = &bs_attacking2;
-        bs_attacking2.restart();
+        anim_manager_.set_trigger("start-attack");
     }
+    if (cast_action_.IsPressed())
+    {
+        //anim_manager_.set_trigger("start-cast");
+        CastAttack();
+    }
+}
+
+void Player::CastAttack()
+{
+    float pvelocity = 40.f;
+    int direction_factor = 1;
+    if (!facing_right_) direction_factor = -1;
+
+    lynx::GetEngine()->GetCurrentLevel()
+    ->SpawnActorFromClass<Projectile>(
+    {transform.location,
+    {},
+    {3.f*direction_factor, 3.f, 1.f}
+    })
+    ->SetVelocity({pvelocity * direction_factor, 0.f});
 }
 
 void Player::OnTransformChanged()
 {
-        Pawn::OnTransformChanged();
-        HRL_SetLightLocation(point_light_, transform.location.x, transform.location.y, transform.location.z);
+    Pawn::OnTransformChanged();
+    HRL_SetLightLocation(point_light_, transform.location.x, transform.location.y, transform.location.z);
 }
 
-void Player::AttackingFinished()
+
+void Player::CreateSelectCharacterWidgets()
 {
-        current_blendspace_ = &bs_default;
-        FinishAttack();
+    HRL_id font = lynx::RessourceFont("widgets/normal-font.ttf");
+
+    {
+        //Fond noir blurry
+        HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_IMAGE);
+        HRL_SetWidgetAnchor(w, 0.f, 0.f);
+        HRL_SetWidgetPosition(w, 0.f, 0.f);
+        HRL_SetImageTexture(w, lynx::RessourceTex("widgets/black-background.png"));
+        HRL_SetWidgetZIndex(w, -100);
+        //toute la taille de l'ecran
+        HRL_SetWidgetSize(w, 1.f, 1.f);
+        HRL_SetWidgetAlpha(w, 0.7f);
+        select_character_scene_.Add(w);
+    }
+
+
+
+    {
+        //Select Character text
+        HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_LABEL);
+        HRL_SetWidgetAnchor(w, 1.f, 1.f);
+        HRL_SetWidgetPosition(w, 0.9f, 0.7f);
+        HRL_SetLabelFont(w, font);
+        HRL_SetLabelText(w, "Select Character");
+        HRL_SetLabelTextSize(w, 30.f);
+        select_character_scene_.Add(w);
+    }
+
+    {
+        //Forme normale
+        HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_LABEL);
+        HRL_SetWidgetAnchor(w, 1.f, 1.f);
+        HRL_SetWidgetPosition(w, 0.9f, 0.8f);
+        HRL_SetLabelFont(w, font);
+        HRL_SetLabelText(w, "Forme Normale");
+        HRL_SetLabelTextSize(w, 22.f);
+        select_character_scene_.Add(w);
+    }
+    {
+        //Forme lourde
+        HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_LABEL);
+        HRL_SetWidgetAnchor(w, 1.f, 1.f);
+        HRL_SetWidgetPosition(w, 0.9f, 0.85f);
+        HRL_SetLabelFont(w, font);
+        HRL_SetLabelText(w, "Forme Lourde");
+        HRL_SetLabelTextSize(w, 22.f);
+        select_character_scene_.Add(w);
+    }
+    {
+        //Forme projectile
+        HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_LABEL);
+        HRL_SetWidgetAnchor(w, 1.f, 1.f);
+        HRL_SetWidgetPosition(w, 0.9f, 0.9f);
+        HRL_SetLabelFont(w, font);
+        HRL_SetLabelText(w, "Forme Projectile");
+        HRL_SetLabelTextSize(w, 22.f);
+        select_character_scene_.Add(w);
+    }
+}
+
+void Player::SetSelectedWidget(int in)
+{
+    HRL_SetLabelTintColor(select_character_scene_.Get(2), 1.f, 1.f, 1.f, 1.f);
+    HRL_SetLabelTintColor(select_character_scene_.Get(3), 1.f, 1.f, 1.f, 1.f);
+    HRL_SetLabelTintColor(select_character_scene_.Get(4), 1.f, 1.f, 1.f, 1.f);
+    HRL_SetLabelTintColor(select_character_scene_.Get(in), 0.f, 1.f, 0.f, 1.f);
+}
+
+
+void Player::RemoveSelectCharacterWidgets()
+{
+    select_character_scene_.Delete();
 }

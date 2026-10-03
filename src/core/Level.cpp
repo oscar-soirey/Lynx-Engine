@@ -146,8 +146,7 @@ namespace lynx
 
 	void Level::DestroyActor(Actor *_act)
 	{
-		delete _act;
-		std::erase(actors_, _act);
+		destroy_queue_.push_back(_act);
 	}
 
 	int Level::CountActorsOfClass(const char* _className) const
@@ -217,5 +216,16 @@ namespace lynx
 
 		std::cout << "level saved: "
 							<< output_path << std::endl;
+	}
+
+
+	void Level::Update()
+	{
+		for (auto& a: destroy_queue_)
+		{
+			delete a;
+			std::erase(actors_, a);
+		}
+		destroy_queue_.clear();
 	}
 }

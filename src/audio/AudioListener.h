@@ -8,6 +8,7 @@ namespace lynx
 
 	LYNX_API void AttachAudioListener(Actor* target);
 	LYNX_API void UnattachAudioListener();
+	LYNX_API void SetUseDopplerEffect(bool use);
 
 	LYNX_API void SetListenerLocation(vec3 loc);
 	LYNX_API void SetListenerVelocity(vec3 velocity);

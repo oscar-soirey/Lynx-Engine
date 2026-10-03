@@ -3,6 +3,8 @@
 
 #include <openal/al.h>
 
+#include "../gameplay/Actor.h"
+
 namespace lynx
 {
 	namespace
@@ -12,16 +14,52 @@ namespace lynx
 		vec3 g_listener_velocity{};
 		vec3 g_listener_forward{0.0f, 0.0f, -1.0f};
 		vec3 g_listener_up{0.0f, 1.0f, 0.0f};
+
+		bool g_use_doppler = true;
+
+		void ApplyDoppler()
+		{
+			alDopplerFactor(g_use_doppler ? 1.0f : 0.0f);
+		}
+
+		void ApplyLocation()
+		{
+			alListener3f(
+				AL_POSITION,
+				g_listener_location.x,
+				g_listener_location.y,
+				audio_detail::Depth(g_listener_location.z)
+			);
+		}
 	}
 
 	void AttachAudioListener(Actor* target)
 	{
 		g_listener_actor = target;
+		alDopplerFactor(0);
 	}
 
 	void UnattachAudioListener()
 	{
 		g_listener_actor = nullptr;
+	}
+
+	void SetUseDopplerEffect(bool use)
+	{
+		g_use_doppler = use;
+
+		if (IsAudioInitialized())
+			ApplyDoppler();
+	}
+
+	void SetListenerVelocity(vec3 velocity)
+	{
+		g_listener_velocity = velocity;   // plus de early return
+
+		if (!IsAudioInitialized())
+			return;
+
+		alListener3f(AL_VELOCITY, velocity.x, velocity.y, velocity.z);
 	}
 
 	void SetListenerLocation(vec3 loc)
@@ -31,17 +69,7 @@ namespace lynx
 		if (!IsAudioInitialized())
 			return;
 
-		alListener3f(AL_POSITION, loc.x, loc.y, loc.z);
-	}
-
-	void SetListenerVelocity(vec3 velocity)
-	{
-		g_listener_velocity = velocity;
-
-		if (!IsAudioInitialized())
-			return;
-
-		alListener3f(AL_VELOCITY, velocity.x, velocity.y, velocity.z);
+		ApplyLocation();
 	}
 
 	void SetListenerOrientation(vec3 forward, vec3 up)
@@ -62,27 +90,24 @@ namespace lynx
 
 	void UpdateAudioListener()
 	{
-		// Actor access is intentionally not assumed here because the exact
-		// Lynx Actor transform API is engine-specific. When you have a transform
-		// getter, call SetListenerLocation(actor_position) from your game tick.
-		//
-		// This function still reapplies the last explicitly supplied state.
 		if (!IsAudioInitialized())
 			return;
 
-		alListener3f(
-			AL_POSITION,
-			g_listener_location.x,
-			g_listener_location.y,
-			g_listener_location.z
-		);
+		// Suit l'acteur attache (ex : le joueur).
+		if (g_listener_actor)
+			g_listener_location = g_listener_actor->transform.location;
 
-		alListener3f(
-			AL_VELOCITY,
-			g_listener_velocity.x,
-			g_listener_velocity.y,
-			g_listener_velocity.z
-		);
+		ApplyLocation();
+
+		if (g_use_doppler)
+		{
+			alListener3f(
+				AL_VELOCITY,
+				g_listener_velocity.x,
+				g_listener_velocity.y,
+				g_listener_velocity.z
+			);
+		}
 
 		const ALfloat orientation[6] = {
 			g_listener_forward.x, g_listener_forward.y, g_listener_forward.z,

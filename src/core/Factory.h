@@ -19,15 +19,23 @@
     )
 
 #define LYNX_LINK_MODULE(__module_content__) \
+    static void LynxFillFactory(lynx::Factory& __factory__) \
+    { \
+        __module_content__; \
+    } \
+    \
     extern "C" __declspec(dllexport) void FactoryRegisterClasses() \
     { \
-        lynx::Factory __factory__; \
-        __module_content__; \
-        lynx::GetEngine()->GetFactory().InsertFactory(__factory__); \
+        lynx::Factory f; \
+        LynxFillFactory(f); \
+        lynx::GetEngine()->GetFactory().InsertFactory(f); \
     } \
     \
     extern "C" __declspec(dllexport) void FactoryUnregisterClasses() \
     { \
+        lynx::Factory f; \
+        LynxFillFactory(f); \
+        lynx::GetEngine()->GetFactory().RemoveFactory(f); \
     }
 
 namespace lynx
@@ -74,6 +82,17 @@ namespace lynx
             for (const auto& [name, constructor] : factory)
             {
                 RegisterObject(name.c_str(), constructor);
+            }
+        }
+
+        // Retire de la factory toutes les classes listees dans `factory`.
+        // Appele au unload d'un module pour ne pas garder de constructeurs
+        // qui pointent dans une dll dechargee.
+        void RemoveFactory(const Factory& factory)
+        {
+            for (const auto& [name, constructor] : factory)
+            {
+                factory_.erase(name);
             }
         }
 

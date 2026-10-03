@@ -2,13 +2,10 @@
 #include "AudioCommon.h"
 
 #include <openal/al.h>
-#include <dr/dr_mp3.h>
-#include <dr/dr_wav.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <random>
-#include <string.h>
 #include <vector>
 
 #include "../core/Filesystem.h"
@@ -31,81 +28,6 @@ namespace lynx
 			std::uniform_real_distribution<float> dist(min_value, max_value);
 			return dist(AudioRandom());
 		}
-
-		bool LoadAudioFile(
-			const char* path,
-			const std::vector<uint8_t>& data,
-			std::vector<int16_t>& pcm,
-			ALenum& format,
-			ALsizei& sample_rate)
-		{
-			const char* extension = path;
-			for (const char* p = path; *p; ++p)
-				if (*p == '.')
-					extension = p + 1;
-
-			if (!_stricmp(extension, "wav"))
-			{
-				drwav wav;
-				if (!drwav_init_memory(&wav, data.data(), data.size(), nullptr))
-					return false;
-
-				const unsigned int channels = wav.channels;
-				sample_rate = static_cast<ALsizei>(wav.sampleRate);
-
-				if (channels == 1)
-					format = AL_FORMAT_MONO16;
-				else if (channels == 2)
-					format = AL_FORMAT_STEREO16;
-				else
-				{
-					drwav_uninit(&wav);
-					return false;
-				}
-
-				const drwav_uint64 frame_count = wav.totalPCMFrameCount;
-				pcm.resize(static_cast<size_t>(frame_count * channels));
-
-				const drwav_uint64 frames_read =
-					drwav_read_pcm_frames_s16(&wav, frame_count, pcm.data());
-
-				drwav_uninit(&wav);
-				return frames_read == frame_count;
-			}
-
-			if (!_stricmp(extension, "mp3"))
-			{
-				drmp3 mp3;
-				if (!drmp3_init_memory(&mp3, data.data(), data.size(), nullptr))
-					return false;
-
-				const unsigned int channels = mp3.channels;
-				sample_rate = static_cast<ALsizei>(mp3.sampleRate);
-
-				if (channels == 1)
-					format = AL_FORMAT_MONO16;
-				else if (channels == 2)
-					format = AL_FORMAT_STEREO16;
-				else
-				{
-					drmp3_uninit(&mp3);
-					return false;
-				}
-
-				const drmp3_uint64 frame_count =
-					drmp3_get_pcm_frame_count(&mp3);
-
-				pcm.resize(static_cast<size_t>(frame_count * channels));
-
-				const drmp3_uint64 frames_read =
-					drmp3_read_pcm_frames_s16(&mp3, frame_count, pcm.data());
-
-				drmp3_uninit(&mp3);
-				return frames_read == frame_count;
-			}
-
-			return false;
-		}
 	}
 
 	Audio2D::Audio2D(const char* sound_asset)
@@ -118,11 +40,14 @@ namespace lynx
 			return;
 
 		std::vector<int16_t> pcm;
-		ALenum format = 0;
-		ALsizei sample_rate = 0;
+		int channels = 0;
+		int sample_rate = 0;
 
-		if (!LoadAudioFile(sound_asset, sound_data, pcm, format, sample_rate))
+		// 2D : on garde le stereo tel quel (pas de downmix).
+		if (!audio_detail::LoadSoundFile(sound_asset, sound_data, false, pcm, channels, sample_rate))
 			return;
+
+		const ALenum format = channels == 1 ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
 
 		alGenBuffers(1, &buffer_);
 		alBufferData(
@@ -130,7 +55,7 @@ namespace lynx
 			format,
 			pcm.data(),
 			static_cast<ALsizei>(pcm.size() * sizeof(int16_t)),
-			sample_rate
+			static_cast<ALsizei>(sample_rate)
 		);
 
 		if (alGetError() != AL_NO_ERROR)

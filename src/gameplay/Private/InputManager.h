@@ -15,9 +15,10 @@ namespace lynx
     void LYNX_API InjectMouseMove(float dx, float dy);
     void LYNX_API InjectMouseWheel(float delta);
 
-    // Polls the first connected GLFW gamepad found across all joystick slots.
-    // Called by Engine before ProcessInput().
-    void PollInputDevices();
+    // Sets (does not accumulate) the current value of an analog input such as
+    // GAMEPAD_LEFT_X or GAMEPAD_RIGHT_TRIGGER. The host application (the exe,
+    // which owns GLFW) polls the gamepad and calls this every frame.
+    void LYNX_API InjectAnalog(int key, float value);
 
     // Internal frame management.
     void InputTick();

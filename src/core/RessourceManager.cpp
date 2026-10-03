@@ -29,4 +29,22 @@ namespace lynx
 		}
 		return it->second;
 	}
+
+	uint32_t RessourceFont(const char *path)
+	{
+		auto it = res_.find(path);
+		if (it == res_.end())
+		{
+			auto data = fs::ReadBinary(path);
+
+			// Missing / unreadable file: don't cache it, so it can load later.
+			if (data.empty())
+				return HRL_INVALID_ID;
+
+			HRL_id id = HRL_CreateFont(reinterpret_cast<const char*>(data.data()), data.size());
+			res_.emplace(path, id);
+			return id;
+		}
+		return it->second;
+	}
 }

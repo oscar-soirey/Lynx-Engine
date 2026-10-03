@@ -41,12 +41,17 @@ add_library(Lynx SHARED
 		#src/gameplay/PlayerController.cpp
 		src/gameplay/Private/InputManager.cpp
 		src/gameplay/CameraShake.cpp
+		src/gameplay/AnimationSystem.cpp
+		src/gameplay/AIBehavior.cpp
 
 		src/audio/AudioDecoder.cpp
 		src/audio/Audio2D.cpp
 		src/audio/AudioCommon.cpp
 		src/audio/AudioListener.cpp
 		src/audio/AudioSource.cpp
+
+		src/widgets/WidgetScene.cpp
+		src/widgets/WidgetContainers.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -74,6 +79,8 @@ add_library(GameExample SHARED
 		game/src/Player.cpp
 		game/src/Ennemies/Ennemy.cpp
 		game/src/Ennemies/a.cpp
+		game/src/Projectile.cpp
+		game/src/Collision.cpp
 )
 
 target_link_libraries(GameExample

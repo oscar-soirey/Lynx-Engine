@@ -12,28 +12,13 @@ namespace lynx
 {
 	class Level;
 
-	class LYNX_API LynxWindow {
-	public:
-		LynxWindow(const char* title);
-		~LynxWindow();
-
-		void InitHRL();
-
-		void PollEvents();
-		void SwapBuffers();
-		bool ShouldClose() const;
-
-		void* GetWindowHandle() const;
-
-		void SetIcon(const char* path){}
-		void SetTitle(const char* path){}
-
-	private:
-		void* win_=nullptr;
-	};
+	// The window (and GLFW) are owned by the host application (Main.cpp), never
+	// by lynx.dll. Kept as an opaque forward declaration for SetWindowHandle().
+	class LynxWindow;
 
 	class LYNX_API Engine {
 		friend Engine* CreateEngine(const char*, bool);
+		//friend void AsyncFunc(float time, std::function<void()> callback);
 	private:
 		Engine(const char* config_file, bool release);
 
@@ -47,7 +32,7 @@ namespace lynx
 		void EndGame();
 
 		Level* CreateLevel(const char* file_name);
-		void DestroyCurrentLevel();
+		void DeleteCurrentLevel();
 		Level* GetCurrentLevel() const;
 
 		void SetGlobalTimeDilatation(float td);
@@ -81,16 +66,26 @@ namespace lynx
 
 		//Can be nullptr if game is not rendered by LynxWindow
 		LynxWindow* win_=nullptr;
+
+
+		//async functions registered
+		//std::unordered_map<float, std::function<void>()> async_registered_;
 	};
 
 
-	//singleton
+	//singleton functions
 	LYNX_API Engine* CreateEngine(const char* config_file, bool release);
 	LYNX_API Engine* GetEngine();
 
 	LYNX_API void SetSceneID(uint32_t id);
 	LYNX_API uint32_t GetScene();
 
+	LYNX_API void SetViewportID(uint32_t id);
+	LYNX_API uint32_t GetViewport();
+
 	//Utility functions
 	LYNX_API std::string GetEngineVersion();
+
+	//apelle un callback apres un certain temps donné
+	LYNX_API void AsyncFunc(float time, std::function<void()> callback);
 }

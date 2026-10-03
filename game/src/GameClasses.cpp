@@ -11,52 +11,13 @@
 
 #include "hrl/hrl.h"
 
-#include "AnimationSystem.h"
-
 
 namespace
 {
+    // Sert uniquement a retrouver un Pawn dont reutiliser les particules / sons
+    // (voir DestroyVoxelsInRadius). Les collisions sont dans Collision.cpp.
     std::vector<Pawn*> g_pawns;
-
-    // Spatial index used for combat queries. Pawns are registered by the
-    // voxel cell containing their center, so attacks only inspect nearby
-    // cells instead of every Pawn in the game.
-    constexpr int kPawnQueryCellSize = 16;
-
-    struct PawnQueryCell
-    {
-        int x;
-        int y;
-
-        bool operator==(const PawnQueryCell& other) const
-        {
-            return x == other.x && y == other.y;
-        }
-    };
-
-    struct PawnQueryCellHash
-    {
-        std::size_t operator()(const PawnQueryCell& cell) const
-        {
-            const std::uint64_t x = static_cast<std::uint32_t>(cell.x);
-            const std::uint64_t y = static_cast<std::uint32_t>(cell.y);
-            return static_cast<std::size_t>((x << 32) ^ y);
-        }
-    };
-
-    std::unordered_map<PawnQueryCell, std::unordered_set<Pawn*>, PawnQueryCellHash>
-        g_pawn_query_cells;
-
-    PawnQueryCell GetPawnQueryCell(float voxel_x, float voxel_y)
-    {
-        return {
-            static_cast<int>(std::floor(voxel_x / static_cast<float>(kPawnQueryCellSize))),
-            static_cast<int>(std::floor(voxel_y / static_cast<float>(kPawnQueryCellSize)))
-        };
-    }
 }
-
-bool Pawn::debug_collision_enabled_ = false;
 
 namespace
 {
@@ -80,6 +41,8 @@ namespace
 
 Sprite::Sprite()
 {
+    HPROPERTY(relative_sprite_transform_, lynx::Exposed, OnTransformChanged());
+
     sprite = HRL_CreateMeshSprite(lynx::GetScene());
     HRL_SetMeshUserHandle(sprite, this);
 }
@@ -89,19 +52,48 @@ Sprite::~Sprite()
     HRL_DeleteMesh(sprite);
 }
 
-void Sprite::Tick(double dt)
+void Sprite::SetXOffset(float in)
 {
-    (void)dt;
+    if (x_offset_ == in)
+        return;
+
+    x_offset_ = in;
+    OnTransformChanged();
+}
+
+void Sprite::GetMeshWorldRect(float& center_x, float& center_y, float& width, float& height) const
+{
+    // Pawn::Move miroite le mesh en passant transform.scale.x en negatif.
+    // L'offset X du sprite est exprime pour le mesh NON miroite : on le miroite
+    // aussi, sinon le sprite saute de l'autre cote du collider quand on se retourne.
+    const float flip_x = transform.scale.x < 0.f ? -1.f : 1.f;
+
+    // L'offset est dans l'espace local de l'actor : il suit sa scale, comme le mesh.
+    const float scale_x = std::abs(transform.scale.x);
+    const float scale_y = std::abs(transform.scale.y);
+
+    center_x = transform.location.x
+             + relative_sprite_transform_.location.x * flip_x * scale_x
+             + x_offset_;
+
+    center_y = transform.location.y
+             + relative_sprite_transform_.location.y * scale_y;
+
+    width  = std::abs(transform.scale.x * relative_sprite_transform_.scale.x);
+    height = std::abs(transform.scale.y * relative_sprite_transform_.scale.y);
 }
 
 void Sprite::OnTransformChanged()
 {
     Actor::OnTransformChanged();
 
+    float center_x, center_y, width, height;
+    GetMeshWorldRect(center_x, center_y, width, height);
+
     HRL_SetMeshLocation(
         sprite,
-        transform.location.x + relative_sprite_transform_.location.x,
-        transform.location.y + relative_sprite_transform_.location.y,
+        center_x,
+        center_y,
         transform.location.z + relative_sprite_transform_.location.z
     );
 
@@ -139,28 +131,105 @@ void StaticSprite::OnTextureChanged()
 // Pawn
 // ============================================================
 
+Pawn::Pawn()
+{
+    HPROPERTY(collider_width_, lynx::Exposed);
+    HPROPERTY(collider_height_, lynx::Exposed);
+}
+
 Pawn::~Pawn()
 {
     auto it = std::find(g_pawns.begin(), g_pawns.end(), this);
     if (it != g_pawns.end())
         g_pawns.erase(it);
 
-    if (spatial_cell_valid_)
-    {
-        const PawnQueryCell spatial_cell{spatial_cell_x_, spatial_cell_y_};
-        auto cell_it = g_pawn_query_cells.find(spatial_cell);
-        if (cell_it != g_pawn_query_cells.end())
-        {
-            cell_it->second.erase(this);
-            if (cell_it->second.empty())
-                g_pawn_query_cells.erase(cell_it);
-        }
-    }
+    collision::RemovePawnBody(this);
 }
 
-void Pawn::SetCollisionDebugEnabled(bool enabled)
+int Pawn::DestroyVoxelsInRadius(
+    float center_x,
+    float center_y,
+    float radius,
+    float world_z)
 {
-    debug_collision_enabled_ = enabled;
+    // Les particules et le son ne dependent pas de la position du Pawn
+    // (Attack() les joue deja a des positions arbitraires) : on reutilise
+    // ceux d'un Pawn existant plutot que d'en creer par projectile.
+    Pawn* fx = g_pawns.empty() ? nullptr : g_pawns.front();
+
+    const int min_x = static_cast<int>(std::floor(center_x - radius - 1.f));
+    const int max_x = static_cast<int>(std::ceil(center_x + radius + 1.f));
+    const int min_y = static_cast<int>(std::floor(center_y - radius - 1.f));
+    const int max_y = static_cast<int>(std::ceil(center_y + radius + 1.f));
+
+    std::vector<VoxelEvent> voxel_events;
+
+    HRL_BeginVoxelEdit(lynx::GetScene());
+
+    int destroyed_voxels = 0;
+
+    for (int y = min_y; y <= max_y; ++y)
+    {
+        for (int x = min_x; x <= max_x; ++x)
+        {
+            const float dx = static_cast<float>(x) - center_x;
+            const float dy = static_cast<float>(y) - center_y;
+            const float dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq > radius * radius)
+                continue;
+
+            const uint8_t type = HRL_GetVoxelType(lynx::GetScene(), x, y);
+
+            if (type == 0 || IsVoxelIndestructible(type))
+                continue;
+
+            HRL_SetVoxelType(lynx::GetScene(), x, y, 0);
+
+            ++destroyed_voxels;
+
+            QueueVoxelEvent(voxel_events, type, x, y);
+
+            if (fx)
+            {
+                // Les debris partent du centre vers l'exterieur.
+                const float dist = std::sqrt(dist_sq);
+                const float nx = dist > 0.001f ? dx / dist : 0.f;
+                const float ny = dist > 0.001f ? dy / dist : 0.f;
+
+                fx->block_particles.PlayVoxel(
+                    static_cast<float>(x),
+                    static_cast<float>(y),
+                    world_z,
+                    type,
+                    nx * 1.5f,
+                    ny * 1.5f + 1.f
+                );
+            }
+        }
+    }
+
+    HRL_EndVoxelEdit(lynx::GetScene());
+
+    FireVoxelEvents(voxel_events);
+
+    if (destroyed_voxels > 0 && fx)
+    {
+        float world_x;
+        float world_y;
+
+        if (HRL_VoxelToWorldCoordinates(
+                lynx::GetScene(),
+                center_x,
+                center_y,
+                &world_x,
+                &world_y) == HRL_TRUE)
+        {
+            fx->impact_src_.PlayAtLocation({world_x, world_y, world_z});
+        }
+    }
+
+    return destroyed_voxels;
 }
 
 void Pawn::Init()
@@ -169,7 +238,11 @@ void Pawn::Init()
         g_pawns.push_back(this);
 
     Sprite::Init();
-    UpdatePawnSpatialCell();
+
+    // Les classes filles (Player::Init, A::Init...) modifient relative_sprite_transform_
+    // avant d'appeler Pawn::Init : sans ce refresh le mesh garde l'ancienne taille /
+    // position jusqu'au premier deplacement.
+    OnTransformChanged();
 
     block_particles.Initialize();
 
@@ -184,33 +257,38 @@ void Pawn::Init()
     body_hit_cs_.positionAmplitude = 0.22f;
     body_hit_cs_.rotationAmplitude = 0.f;
     body_hit_cs_.falloff = 2.4f;
+
+    anim_manager_.set_default_state("loco");
 }
 
 void Pawn::Tick(double dt)
 {
     Sprite::Tick(dt);
 
-    UpdateMovement(static_cast<float>(dt));
-    UpdatePawnSpatialCell();
+    if (movement_enabled_)
+    {
+        UpdateMovement(static_cast<float>(dt));
+    }
 
-    DrawCollisionDebug();
+    SyncCollider();
 
 
     // ----------------------------------------------------
     // Animation
     // ----------------------------------------------------
 
-    if (current_blendspace_)
-        current_blendspace_->update(dt);
+    anim_manager_.set_float("speed", target_velocity_x_);
+    anim_manager_.update(dt);
+
 }
 
 void Pawn::OnTransformChanged()
 {
     Sprite::OnTransformChanged();
-    UpdatePawnSpatialCell();
+    SyncCollider();
 }
 
-void Pawn::UpdatePawnSpatialCell()
+void Pawn::SyncCollider()
 {
     float voxel_x;
     float voxel_y;
@@ -225,31 +303,15 @@ void Pawn::UpdatePawnSpatialCell()
         return;
     }
 
-    const PawnQueryCell new_cell = GetPawnQueryCell(voxel_x, voxel_y);
-
-    if (spatial_cell_valid_ &&
-        spatial_cell_x_ == new_cell.x &&
-        spatial_cell_y_ == new_cell.y)
-    {
-        return;
-    }
-
-    if (spatial_cell_valid_)
-    {
-        const PawnQueryCell old_cell{spatial_cell_x_, spatial_cell_y_};
-        auto old_it = g_pawn_query_cells.find(old_cell);
-        if (old_it != g_pawn_query_cells.end())
-        {
-            old_it->second.erase(this);
-            if (old_it->second.empty())
-                g_pawn_query_cells.erase(old_it);
+    collision::SetPawnBody(
+        this,
+        collision::Box{
+            voxel_x,
+            voxel_y,
+            collider_width_ * 0.5f,
+            collider_height_ * 0.5f
         }
-    }
-
-    g_pawn_query_cells[new_cell].insert(this);
-    spatial_cell_x_ = new_cell.x;
-    spatial_cell_y_ = new_cell.y;
-    spatial_cell_valid_ = true;
+    );
 }
 
 bool Pawn::BeginAttack()
@@ -293,86 +355,25 @@ void Pawn::Attack(float direction)
     const int max_y = static_cast<int>(
         std::ceil(center_y + attack_radius + 1.f));
 
-    // Query only the spatial cells touched by the attack area. Pawn centers
-    // are indexed by cell, so this avoids scanning every Pawn in the game.
-    const float query_radius_x = attack_radius + collider_width_ * 0.5f;
-    const float query_radius_y = attack_radius + collider_height_ * 0.5f;
+    // Pawns touches par le disque d'attaque (grille spatiale du module collision).
+    std::vector<collision::PawnHit> hits;
+    collision::QueryPawnsInDisc(center_x, center_y, attack_radius, hits, this);
 
-    const int query_min_cell_x = static_cast<int>(
-        std::floor((center_x - query_radius_x) /
-                   static_cast<float>(kPawnQueryCellSize)));
-    const int query_max_cell_x = static_cast<int>(
-        std::floor((center_x + query_radius_x) /
-                   static_cast<float>(kPawnQueryCellSize)));
-    const int query_min_cell_y = static_cast<int>(
-        std::floor((center_y - query_radius_y) /
-                   static_cast<float>(kPawnQueryCellSize)));
-    const int query_max_cell_y = static_cast<int>(
-        std::floor((center_y + query_radius_y) /
-                   static_cast<float>(kPawnQueryCellSize)));
-
-    for (int cell_y = query_min_cell_y; cell_y <= query_max_cell_y; ++cell_y)
+    for (const collision::PawnHit& hit : hits)
     {
-        for (int cell_x = query_min_cell_x; cell_x <= query_max_cell_x; ++cell_x)
-        {
-            const PawnQueryCell cell{cell_x, cell_y};
-            const auto cell_it = g_pawn_query_cells.find(cell);
+        const float forward =
+            (hit.box.x - voxel_x) * direction;
 
-            if (cell_it == g_pawn_query_cells.end())
-                continue;
+        if (forward < -0.5f)
+            continue;
 
-            for (Pawn* other : cell_it->second)
-            {
-                if (other == this)
-                    continue;
+        hit.pawn->Hurt(this, hurt_amount_);
 
-                float other_x;
-                float other_y;
-
-                if (HRL_WorldToVoxelCoordinates(
-                        lynx::GetScene(),
-                        other->transform.location.x,
-                        other->transform.location.y,
-                        &other_x,
-                        &other_y) != HRL_TRUE)
-                {
-                    continue;
-                }
-
-                const float half_width = other->collider_width_ * 0.5f;
-                const float half_height = other->collider_height_ * 0.5f;
-
-                const float closest_x = std::clamp(
-                    other_x,
-                    center_x - half_width,
-                    center_x + half_width
-                );
-
-                const float closest_y = std::clamp(
-                    other_y,
-                    center_y - half_height,
-                    center_y + half_height
-                );
-
-                const float dx = closest_x - center_x;
-                const float dy = closest_y - center_y;
-
-                if ((dx * dx + dy * dy) > attack_radius * attack_radius)
-                    continue;
-
-                const float forward =
-                    (other_x - voxel_x) * direction;
-
-                if (forward < -0.5f)
-                    continue;
-
-                other->Hurt(this, hurt_amount_);
-
-                lynx::SetCameraShake(body_hit_cs_);
-                lynx::GetCameraShake().Trigger();
-            }
-        }
+        lynx::SetCameraShake(body_hit_cs_);
+        lynx::GetCameraShake().Trigger();
     }
+
+    std::vector<VoxelEvent> voxel_events;
 
     HRL_BeginVoxelEdit(lynx::GetScene());
 
@@ -406,7 +407,7 @@ void Pawn::Attack(float direction)
                 y
             );
 
-            if (type == 0)
+            if (type == 0 || IsVoxelIndestructible(type))
                 continue;
 
             HRL_SetVoxelType(
@@ -417,6 +418,8 @@ void Pawn::Attack(float direction)
             );
 
             ++destroyed_voxels;
+
+            QueueVoxelEvent(voxel_events, type, x, y);
 
             block_particles.PlayVoxel(
                 static_cast<float>(x),
@@ -432,6 +435,8 @@ void Pawn::Attack(float direction)
     }
 
     HRL_EndVoxelEdit(lynx::GetScene());
+
+    FireVoxelEvents(voxel_events);
 
     if (destroyed_voxels > 0)
     {
@@ -461,6 +466,7 @@ void Pawn::LaunchPawn(float launch_x, float launch_y, bool override_x, bool over
 
 void Pawn::Hurt(Actor *instigator, float amount)
 {
+    anim_manager_.set_trigger("hurt");
     if (hurt_source_reference_)
     {
         hurt_source_reference_->Play();
@@ -479,17 +485,19 @@ void Pawn::Move(float direction)
     target_velocity_x_ = direction * move_speed_;
 
     // Pawn owns its facing direction.
+    int invert_factor = 1;
+    if ( invert_right_left_ ) invert_factor = -1;
     if (direction < 0.f)
     {
         facing_right_ = false;
-
-        transform.scale.x = -std::abs(transform.scale.x);
+        transform.scale.x = -std::abs(transform.scale.x)*invert_factor;
+        SetXOffset(facing_left_relative_);
     }
     else if (direction > 0.f)
     {
         facing_right_ = true;
-
-        transform.scale.x = std::abs(transform.scale.x);
+        transform.scale.x = std::abs(transform.scale.x)*invert_factor;
+        SetXOffset(0.f);
     }
 }
 
@@ -512,125 +520,16 @@ void Pawn::StopJumping()
     jump_action_held_ = false;
 }
 
-bool Pawn::CheckCollision(
-    float x,
-    float y,
-    uint32_t blocking_flags,
-    HRL_VoxelCollision* out_collision
-) const
-{
-    HRL_VoxelCollision collision{};
-
-    const bool collided = HRL_VoxelCheckCollision(
-        lynx::GetScene(),
-        x,
-        y,
-        collider_width_,
-        collider_height_,
-        collision_mask_,
-        &collision
-    ) == HRL_TRUE;
-
-    if (out_collision)
-        *out_collision = collision;
-
-    if (!collided)
-        return false;
-
-    return (collision.flags & blocking_flags) != 0u;
-}
-
-bool Pawn::CheckPawnCollision(float x, float y) const
-{
-    const float half_width = collider_width_ * 0.5f;
-    const float half_height = collider_height_ * 0.5f;
-
-    for (const Pawn* other : g_pawns)
-    {
-        if (other == this)
-            continue;
-
-        float other_x;
-        float other_y;
-
-        if (HRL_WorldToVoxelCoordinates(
-                lynx::GetScene(),
-                other->transform.location.x,
-                other->transform.location.y,
-                &other_x,
-                &other_y) != HRL_TRUE)
-        {
-            continue;
-        }
-
-        const float other_half_width =
-            other->collider_width_ * 0.5f;
-
-        const float other_half_height =
-            other->collider_height_ * 0.5f;
-
-        if (std::abs(x - other_x) <
-                half_width + other_half_width &&
-            std::abs(y - other_y) <
-                half_height + other_half_height)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 bool Pawn::CanMoveX(float x, float y, float dx) const
 {
-    if (dx == 0.f)
-        return true;
-
-    if (CheckPawnCollision(x, y))
-        return false;
-
-    if (dx > 0.f)
-    {
-        return !CheckCollision(
-            x,
-            y,
-            HRL_VOXEL_COLLISION_RIGHT |
-            HRL_VOXEL_COLLISION_INSIDE
-        );
-    }
-
-    return !CheckCollision(
-        x,
-        y,
-        HRL_VOXEL_COLLISION_LEFT |
-        HRL_VOXEL_COLLISION_INSIDE
-    );
+    return collision::CanMoveX(
+        this, x, y, collider_width_, collider_height_, collision_mask_, dx);
 }
 
 bool Pawn::CanMoveY(float x, float y, float dy) const
 {
-    if (dy == 0.f)
-        return true;
-
-    if (CheckPawnCollision(x, y))
-        return false;
-
-    if (dy > 0.f)
-    {
-        return !CheckCollision(
-            x,
-            y,
-            HRL_VOXEL_COLLISION_TOP |
-            HRL_VOXEL_COLLISION_INSIDE
-        );
-    }
-
-    return !CheckCollision(
-        x,
-        y,
-        HRL_VOXEL_COLLISION_BOTTOM |
-        HRL_VOXEL_COLLISION_INSIDE
-    );
+    return collision::CanMoveY(
+        this, x, y, collider_width_, collider_height_, collision_mask_, dy);
 }
 
 uint32_t Pawn::GetGroundVoxelFlags() const
@@ -670,16 +569,7 @@ uint32_t Pawn::GetGroundVoxelFlags() const
     const int y =
         static_cast<int>(std::floor(feet_y - 0.001f)) - 1;
 
-    const uint8_t type = HRL_GetVoxelType(
-        lynx::GetScene(),
-        x,
-        y
-    );
-
-    if (type == 0)
-        return 0;
-
-    return voxelData[type - 1].flags;
+    return collision::GetVoxelFlags(x, y);
 }
 
 bool Pawn::IsGroundWithinDistance(float max_distance) const
@@ -1007,87 +897,36 @@ void Pawn::IntegrateMovement(float dt)
     }
 }
 
-void Pawn::DrawCollisionDebug() const
+void Pawn::Update(double dt)
 {
-    if (!debug_collision_enabled_)
-        return;
+    Sprite::Update(dt);
 
-    float half_width_world;
-    float half_height_world;
+    // Le collider peut avoir ete modifie depuis l'editeur (taille) : on resynchronise.
+    SyncCollider();
 
-    if (HRL_VoxelToWorldCoordinates(
-            lynx::GetScene(),
-            collider_width_ * 0.5f,
-            collider_height_ * 0.5f,
-            &half_width_world,
-            &half_height_world) != HRL_TRUE)
+    if (collision::IsDebugEnabled())
     {
-        return;
+        collision::DrawDebugCollider(
+            transform.location.x,
+            transform.location.y,
+            transform.location.z,
+            collider_width_,
+            collider_height_
+        );
+
+        // Bounds du quad du mesh (cyan) : doit entourer le personnage, centre sur son pivot.
+        float mesh_x, mesh_y, mesh_w, mesh_h;
+        GetMeshWorldRect(mesh_x, mesh_y, mesh_w, mesh_h);
+
+        collision::DrawDebugRectWorld(
+            mesh_x,
+            mesh_y,
+            transform.location.z,
+            mesh_w,
+            mesh_h,
+            0.1f,
+            0.9f,
+            1.f
+        );
     }
-
-    const float left =
-        transform.location.x -
-        half_width_world;
-
-    const float right =
-        transform.location.x +
-        half_width_world;
-
-    const float bottom =
-        transform.location.y -
-        half_height_world;
-
-    const float top =
-        transform.location.y +
-        half_height_world;
-
-    // The voxel world front face is at Z = 0 and the gameplay camera
-    // looks toward negative Z from positive Z. Keep the debug outline just
-    // in front of that face so it is not depth-occluded by the voxel world.
-    const float z =
-        transform.location.z - 0.1f;
-
-    const float xs[] = {
-        left,
-        right,
-        right,
-        left
-    };
-
-    const float ys[] = {
-        bottom,
-        bottom,
-        top,
-        top
-    };
-
-    const float zs[] = {
-        z,
-        z,
-        z,
-        z
-    };
-
-    HRL_DrawDebugPolygon(
-        lynx::GetScene(),
-        HRL_DEBUG_HOLLOW,
-        xs,
-        ys,
-        zs,
-        4,
-        1.f,
-        0.1f,
-        0.1f
-    );
-
-    HRL_DrawDebugPoint(
-        lynx::GetScene(),
-        transform.location.x,
-        transform.location.y,
-        z,
-        6.f,
-        1.f,
-        1.f,
-        0.f
-    );
 }

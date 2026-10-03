@@ -2,16 +2,14 @@
 #include "AudioCommon.h"
 
 #include <openal/al.h>
-#include <dr/dr_mp3.h>
-#include <dr/dr_wav.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <random>
-#include <string.h>
 #include <vector>
 
 #include "../core/Filesystem.h"
+#include "../gameplay/Actor.h"
 
 namespace lynx
 {
@@ -31,81 +29,6 @@ namespace lynx
 			std::uniform_real_distribution<float> dist(min_value, max_value);
 			return dist(AudioRandom());
 		}
-
-		bool LoadAudioFile(
-			const char* path,
-			const std::vector<uint8_t>& data,
-			std::vector<int16_t>& pcm,
-			ALenum& format,
-			ALsizei& sample_rate)
-		{
-			const char* extension = path;
-			for (const char* p = path; *p; ++p)
-				if (*p == '.')
-					extension = p + 1;
-
-			if (!_stricmp(extension, "wav"))
-			{
-				drwav wav;
-				if (!drwav_init_memory(&wav, data.data(), data.size(), nullptr))
-					return false;
-
-				const unsigned int channels = wav.channels;
-				sample_rate = static_cast<ALsizei>(wav.sampleRate);
-
-				if (channels == 1)
-					format = AL_FORMAT_MONO16;
-				else if (channels == 2)
-					format = AL_FORMAT_STEREO16;
-				else
-				{
-					drwav_uninit(&wav);
-					return false;
-				}
-
-				const drwav_uint64 frame_count = wav.totalPCMFrameCount;
-				pcm.resize(static_cast<size_t>(frame_count * channels));
-
-				const drwav_uint64 frames_read =
-					drwav_read_pcm_frames_s16(&wav, frame_count, pcm.data());
-
-				drwav_uninit(&wav);
-				return frames_read == frame_count;
-			}
-
-			if (!_stricmp(extension, "mp3"))
-			{
-				drmp3 mp3;
-				if (!drmp3_init_memory(&mp3, data.data(), data.size(), nullptr))
-					return false;
-
-				const unsigned int channels = mp3.channels;
-				sample_rate = static_cast<ALsizei>(mp3.sampleRate);
-
-				if (channels == 1)
-					format = AL_FORMAT_MONO16;
-				else if (channels == 2)
-					format = AL_FORMAT_STEREO16;
-				else
-				{
-					drmp3_uninit(&mp3);
-					return false;
-				}
-
-				const drmp3_uint64 frame_count =
-					drmp3_get_pcm_frame_count(&mp3);
-
-				pcm.resize(static_cast<size_t>(frame_count * channels));
-
-				const drmp3_uint64 frames_read =
-					drmp3_read_pcm_frames_s16(&mp3, frame_count, pcm.data());
-
-				drmp3_uninit(&mp3);
-				return frames_read == frame_count;
-			}
-
-			return false;
-		}
 	}
 
 	AudioSource::AudioSource(const char* sound_asset)
@@ -118,19 +41,21 @@ namespace lynx
 			return;
 
 		std::vector<int16_t> pcm;
-		ALenum format = 0;
-		ALsizei sample_rate = 0;
+		int channels = 0;
+		int sample_rate = 0;
 
-		if (!LoadAudioFile(sound_asset, sound_data, pcm, format, sample_rate))
+		// force_mono = true : OpenAL ne spatialise pas (ni attenuation, ni panning)
+		// les buffers stereo. Un son stereo est donc mixe en mono ici.
+		if (!audio_detail::LoadSoundFile(sound_asset, sound_data, true, pcm, channels, sample_rate))
 			return;
 
 		alGenBuffers(1, &buffer_);
 		alBufferData(
 			buffer_,
-			format,
+			AL_FORMAT_MONO16,
 			pcm.data(),
 			static_cast<ALsizei>(pcm.size() * sizeof(int16_t)),
-			sample_rate
+			static_cast<ALsizei>(sample_rate)
 		);
 
 		if (alGetError() != AL_NO_ERROR)
@@ -171,7 +96,13 @@ namespace lynx
 		location_ = loc;
 
 		if (source_)
-			alSource3f(source_, AL_POSITION, loc.x, loc.y, loc.z);
+			alSource3f(
+				source_,
+				AL_POSITION,
+				loc.x,
+				loc.y,
+				audio_detail::Depth(loc.z)
+			);
 	}
 
 	vec3 AudioSource::GetLocation() const
@@ -179,10 +110,18 @@ namespace lynx
 		return location_;
 	}
 
+	void AudioSource::SyncWithActor()
+	{
+		if (attached_actor_)
+			SetLocation(attached_actor_->transform.location);
+	}
+
 	void AudioSource::Play()
 	{
 		if (!source_)
 			return;
+
+		SyncWithActor();
 
 		alSourcef(source_, AL_GAIN, RandomRange(volume_min, volume_max));
 		alSourcef(source_, AL_PITCH, RandomRange(pitch_min, pitch_max));
@@ -219,9 +158,19 @@ namespace lynx
 		return state == AL_PLAYING;
 	}
 
+	// Position explicite (impacts, etc.) : prioritaire sur l'acteur attache.
 	void AudioSource::PlayAtLocation(vec3 loc)
 	{
+		if (!source_)
+			return;
+
+		// On joue sans resynchroniser sur l'acteur, sinon Play() ecraserait loc.
+		Actor* attached = attached_actor_;
+		attached_actor_ = nullptr;
+
 		SetLocation(loc);
 		Play();
+
+		attached_actor_ = attached;
 	}
 }

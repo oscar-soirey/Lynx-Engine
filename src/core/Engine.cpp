@@ -1,7 +1,5 @@
 #include "Engine.h"
-#include "Engine.h"
 
-#include <glfw/glfw3.h>
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
 
@@ -10,63 +8,12 @@
 #include "../gameplay/Actor.h"
 #include "../gameplay/Private/InputManager.h"
 #include "audio/AudioCommon.h"
+#include "audio/AudioListener.h"
 #include "Private/SystemModule.h"
 
 
 namespace lynx
 {
-	LynxWindow::LynxWindow(const char* title)
-	{
-		glfwInit();
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-		win_ = glfwCreateWindow(1280,720, title, nullptr, nullptr);
-
-		glfwMakeContextCurrent((GLFWwindow*)win_);
-
-		// désactiver la v-sync
-		glfwSwapInterval(0);
-
-		HRL_InitContext(1280, 720, (void*)glfwGetProcAddress);
-	}
-
-	LynxWindow::~LynxWindow()
-	{
-		glfwDestroyWindow((GLFWwindow*)win_);
-		glfwTerminate();
-	}
-
-	void LynxWindow::InitHRL()
-	{
-	}
-
-	bool LynxWindow::ShouldClose() const
-	{
-		return glfwWindowShouldClose((GLFWwindow*)win_);
-	}
-
-	void LynxWindow::PollEvents()
-	{
-		glfwPollEvents();
-	}
-
-	void LynxWindow::SwapBuffers()
-	{
-		glfwSwapBuffers((GLFWwindow*)win_);
-	}
-
-	void *LynxWindow::GetWindowHandle() const
-	{
-		return win_;
-	}
-
-
-
-
-
-
 	Engine::Engine(const char *config_file, bool release)
 	{
 		fs::AssetSource asset_src = fs::AssetSource::Directory;
@@ -121,8 +68,6 @@ namespace lynx
 
 		if (game_tick_enabled_)
 		{
-			PollInputDevices();
-
 			for (const auto& a : current_level_->GetActors())
 			{
 				a->ProcessInput();
@@ -131,6 +76,15 @@ namespace lynx
 
 			InputTick();
 		}
+
+		if (current_level_)
+		{
+			current_level_->Update();
+		}
+
+		// Le listener suit l'acteur attache (AttachAudioListener) : sans cet appel,
+		// il reste a (0,0,0) et il n'y a aucune attenuation.
+		UpdateAudioListener();
 
 		HRL_BeginFrame();
 		HRL_EndFrame();
@@ -189,9 +143,12 @@ namespace lynx
 		return current_level_;
 	}
 
-	void Engine::DestroyCurrentLevel()
+	void Engine::DeleteCurrentLevel()
 	{
+		// Le listener pointe sur un acteur du niveau : evite un pointeur pendant.
+		UnattachAudioListener();
 		delete current_level_;
+		current_level_ = nullptr;
 	}
 
 	Level *Engine::GetCurrentLevel() const
@@ -204,7 +161,6 @@ namespace lynx
 	{
 		return factory_;
 	}
-
 
 
 
@@ -228,5 +184,21 @@ namespace lynx
 	uint32_t GetScene()
 	{
 		return scene_id_;
+	}
+
+	static uint32_t viewport_id_;
+	void SetViewportID(uint32_t id)
+	{
+		viewport_id_ = id;
+	}
+	uint32_t GetViewport()
+	{
+		return viewport_id_;
+	}
+
+
+	void AsyncFunc(float time, const std::function<void()>& callback)
+	{
+		//engine_->async_registered_.emplace(time, callback);
 	}
 }

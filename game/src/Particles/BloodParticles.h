@@ -233,7 +233,7 @@ private:
         // ----------------------------------------------------
 
         HRL_id texture =
-            lynx::RessourceTex("blood_particle_texture.png");
+            lynx::RessourceTex("particle-texture.png");
 
         HRL_SetVFXEmitterTexture(
             emitter_,

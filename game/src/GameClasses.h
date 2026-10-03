@@ -3,9 +3,73 @@
 #include <Lynx.h>
 #include <cstdint>
 #include "hrl/hrl.h"
-#include "AnimationSystem.h"
 #include "Particles/BlockParticles.h"
+#include "Collision.h"
 #include <memory>
+#include <vector>
+
+
+
+// ============================================================
+// Debug collision shape
+// ============================================================
+class DebugCollisionShape : public lynx::Actor {
+public:
+
+	float collider_width_ = 5.8f;
+	float collider_height_ = 15.f;
+
+	DebugCollisionShape()
+	{
+		HPROPERTY(collider_width_, lynx::Exposed);
+		HPROPERTY(collider_height_, lynx::Exposed);
+	}
+
+	void Update(double _dt) override
+	{
+		collision::DrawDebugCollider(
+				transform.location.x,
+				transform.location.y,
+				transform.location.z,
+				collider_width_,
+				collider_height_
+		);
+	}
+};
+
+
+
+
+// ============================================================
+// Light
+// ============================================================
+class LightActor : public lynx::Actor {
+public:
+
+	std::string type="point";
+	
+	LightActor()
+	{
+		HPROPERTY(type, lynx::Exposed);
+	}
+	
+	void Init() override 
+	{
+		light_ = HRL_CreateLight(lynx::GetScene(), HRL_SKY_LIGHT);
+		HRL_SetLightIntensity(light_, 0.8f);
+	}
+	
+	~LightActor() override
+	{
+		HRL_DeleteLight(light_);
+	}
+	
+private:
+	HRL_id light_;
+};
+
+
+
 
 // ============================================================
 // Sound source
@@ -50,13 +114,23 @@ class Sprite : public lynx::Actor {
 public:
     Sprite();
     virtual ~Sprite();
-    void Tick(double dt) override;
-    void OnTransformChanged() override;
+
+		void SetXOffset(float in);
 
 protected:
     HRL_id sprite = HRL_INVALID_ID;
 
-    lynx::transform relative_sprite_transform_;
+    lynx::transform relative_sprite_transform_{};
+
+    void OnTransformChanged() override;
+
+    // Centre / taille (monde) du quad du mesh, tels que envoyes a HRL.
+    // Le quad est centre sur sa position : c'est aussi ce que dessine le debug.
+    void GetMeshWorldRect(float& center_x, float& center_y, float& width, float& height) const;
+
+private:
+	// Correction manuelle supplementaire (monde), appliquee telle quelle.
+	float x_offset_=0.f;
 };
 
 
@@ -75,24 +149,43 @@ public:
 
 class Pawn : public Sprite {
 public:
+		Pawn();
     ~Pawn();
 
     void Init() override;
     void Tick(double dt) override;
     void OnTransformChanged() override;
+		
+		void Update(double dt) override;
 
     virtual void Hurt(Actor* instigator, float amount);
+
+    // Masque de collision (voir collision::kTerrainMask / kPawnMask).
+    //   SetCollisionMask(collision::kTerrainMask) : collisionne avec le terrain
+    //   seulement, traverse tous les autres Pawns.
+    //   SetCollisionMask(collision::kDefaultMask) : comportement normal.
+    uint32_t GetCollisionMask() const { return collision_mask_; }
+    void SetCollisionMask(uint32_t mask) { collision_mask_ = mask; }
 
     // Launches the Pawn by applying an instantaneous velocity.
     // Override flags replace the corresponding current velocity component.
     void LaunchPawn(float launch_x, float launch_y, bool override_x = false, bool override_y = false);
 
-    static void SetCollisionDebugEnabled(bool enabled);
+    // Detruit tous les voxels du disque donne (coordonnees voxel) et joue les
+    // memes particules / son que Attack(). Retourne le nombre de voxels detruits.
+    static int DestroyVoxelsInRadius(
+        float center_x,
+        float center_y,
+        float radius,
+        float world_z
+    );
 
 protected:
 
     float attack_radius = 10.f;
     float attack_center_distance = 4.5f;
+
+	lynx::anim_manager anim_manager_;
 
 
     virtual void OnLanded(){}
@@ -110,17 +203,8 @@ protected:
     // Collision
     // ========================================================
 
-    bool CheckCollision(
-        float x,
-        float y,
-        uint32_t blocking_flags,
-        HRL_VoxelCollision* out_collision = nullptr
-    ) const;
-
     bool CanMoveX(float x, float y, float dx) const;
     bool CanMoveY(float x, float y, float dy) const;
-
-    bool CheckPawnCollision(float x, float y) const;
 
     // ========================================================
     // Ground detection
@@ -141,16 +225,12 @@ protected:
     bool IsFacingRight() const { return facing_right_; }
 
 protected:
-    void UpdatePawnSpatialCell();
+    // Publie la boite du Pawn au module collision (a appeler a chaque changement).
+    void SyncCollider();
 
     void UpdateMovement(float dt);
     void IntegrateMovement(float dt);
 
-    // ========================================================
-    // Debug collision
-    // ========================================================
-
-    void DrawCollisionDebug() const;
 
 
 protected:
@@ -165,6 +245,8 @@ protected:
     float target_velocity_x_ = 0.f;
 
     float move_speed_ = 10.f;
+
+	bool movement_enabled_=true;
 
     // Ground acceleration.
     float ground_acceleration_ = 170.f;
@@ -207,7 +289,7 @@ protected:
     float collider_width_ = 5.8f;
     float collider_height_ = 15.f;
 
-    uint32_t collision_mask_ = 1u;
+    uint32_t collision_mask_ = collision::kDefaultMask;
 
     bool grounded_ = false;
 
@@ -217,24 +299,18 @@ protected:
 
     float hurt_amount_ = 0.f;
 
-    int spatial_cell_x_ = 0;
-    int spatial_cell_y_ = 0;
-    bool spatial_cell_valid_ = false;
-
     BlockParticles block_particles;
     lynx::AudioSource impact_src_ = "sound.wav";
 
     lynx::AudioSource* hurt_source_reference_=nullptr;
 
 
-    static bool debug_collision_enabled_;
-
-
-    lynx::blend_space* current_blendspace_ = nullptr;
-
     bool facing_right_ = true;
+		//Correction manuelle (monde) de la position X du sprite quand le pawn regarde a gauche. Le miroir de l offset est deja automatique (Sprite::GetMeshWorldRect) : laisser a 0 sauf cas particulier.
+		float facing_left_relative_=0.f;
 
+	bool invert_right_left_=false;
 
     lynx::CameraShake destroy_voxels_cs_;
-	lynx::CameraShake body_hit_cs_;
+		lynx::CameraShake body_hit_cs_;
 };

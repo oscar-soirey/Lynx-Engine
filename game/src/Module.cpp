@@ -1,4 +1,5 @@
 #include "GameClasses.h"
+#include "Collision.h"
 #include "Player.h"
 #include "Ennemies/a.h"
 
@@ -10,7 +11,7 @@
 
 GAME_MODULE_EXPORT void Game_SetCollisionDebugEnabled(bool enabled)
 {
-    Pawn::SetCollisionDebugEnabled(enabled);
+  collision::SetDebugEnabled(enabled);
 }
 
 
@@ -19,6 +20,8 @@ GAME_MODULE_EXPORT void Game_SetCollisionDebugEnabled(bool enabled)
 // ============================================================
 
 LYNX_LINK_MODULE(
+		LYNX_MODULE_REGISTER(DebugCollisionShape);
+		LYNX_MODULE_REGISTER(LightActor);
 		LYNX_MODULE_REGISTER(AudioSource2D);
 		LYNX_MODULE_REGISTER(Sprite);
 		LYNX_MODULE_REGISTER(StaticSprite);

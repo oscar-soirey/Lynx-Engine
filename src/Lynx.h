@@ -19,7 +19,11 @@
 #include "gameplay/Actor.h"
 #include "gameplay/Input.h"
 #include "gameplay/CameraShake.h"
+#include "gameplay/AnimationSystem.h"
 
 #include "audio/AudioSource.h"
 #include "audio/AudioListener.h"
 #include "audio/Audio2D.h"
+
+#include "widgets/WidgetScene.h"
+#include "widgets/WidgetContainers.h"

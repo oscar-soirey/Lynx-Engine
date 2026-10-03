@@ -35,6 +35,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 #include <variant>
 #include <vector>
 #include <cmath>
@@ -46,6 +47,7 @@
 #endif
 
 #include "Common.h"
+#include "GamepadInput.h"
 #include "audio/AudioCommon.h"
 #include "core/Private/SystemModule.h"
 #include "gameplay/Private/InputManager.h"
@@ -54,8 +56,6 @@
 bool isPlaying = false;
 
 HRL_id scene;
-
-constexpr size_t voxelDataCount = sizeof(voxelData) / sizeof(voxelData[0]);
 
 
 static void ErrorCallback(
@@ -2013,6 +2013,38 @@ static void CycleGizmoMode()
 }
 
 
+// -----------------------------------------------------------------------------
+// Play snapshot : the state of the editor right before pressing Play (actors
+// + voxel world). When the game stops, main() restores it between two frames.
+// -----------------------------------------------------------------------------
+
+static const char* const kPlayBackupLevelFile = "play_backup.xml";   // working dir (same as world.xml)
+static const char* const kPlayBackupVoxelName = "play_backup.vox";   // relative to assets/
+
+static bool play_snapshot_valid = false;
+static bool restore_after_play_requested = false;
+
+
+static void SavePlaySnapshot()
+{
+    play_snapshot_valid = false;
+
+    if (!editor_level)
+        return;
+
+    const std::string voxel_path =
+        (std::filesystem::path("assets") / kPlayBackupVoxelName).string();
+
+    HRL_SaveVoxelWorldAllFile(scene, voxel_path.c_str());
+
+    editor_level->SaveToFile(kPlayBackupLevelFile);
+
+    play_snapshot_valid = true;
+
+    std::cout << "[PLAY] Snapshot saved\n";
+}
+
+
 // Editor <-> Game. Used by the F3 shortcut and by the toolbar Play/Stop button.
 static void TogglePlayMode()
 {
@@ -2022,6 +2054,9 @@ static void TogglePlayMode()
     if (!isPlaying)
     {
         // EDITOR -> GAME
+        // Remember the current state so Stop can put everything back.
+        SavePlaySnapshot();
+
         // Clear editor selection and hide the gizmo in game mode.
         editing_object = HRL_INVALID_ID;
         editing_actor = nullptr;
@@ -2040,9 +2075,19 @@ static void TogglePlayMode()
         // GAME -> EDITOR
         SetPlaying(editor_engine, editor_viewport, editor_camera, false);
 
+        // The level is rebuilt by main() between two frames (the panels still
+        // hold actor pointers during the current ImGui frame).
+        if (play_snapshot_valid)
+            restore_after_play_requested = true;
+
         std::cout << "[PLAY] Switched to EDITOR mode\n";
     }
 }
+
+
+// Raised by the toolbar "Reload Game" button, consumed by main() through
+// editor::ConsumeReloadRequest().
+static bool reload_game_requested = false;
 
 
 // Top bar. Every button has a keyboard shortcut that keeps working.
@@ -2130,6 +2175,20 @@ static void DrawToolbar()
 
         ImGui::PopStyleColor();
         tooltip("Toggle editor / game (F3)");
+
+        // Reload the game DLL. Only a REQUEST is raised here : the actual reload
+        // happens in main(), between two frames, never in the middle of the ImGui
+        // frame (the panels are still holding actor pointers at this point).
+        ImGui::SameLine();
+
+        if (ImGui::Button("Reload Game"))
+            reload_game_requested = true;
+
+        tooltip(
+            "Reload libGameExample.dll\n"
+            "Stops the game, saves pending level edits, destroys every actor,\n"
+            "unloads the DLL, loads it again and rebuilds the level."
+        );
 
         // Master volume stays available in both modes.
         ImGui::SameLine();
@@ -2219,6 +2278,51 @@ static void SaveEditorCamera()
 
     // 9 digits : enough to round-trip a float (world coordinates can be large).
     file << std::setprecision(9) << camX << " " << camY << " " << camZ << "\n";
+}
+
+
+// Collision debug overlay (F4). The flag lives inside the game DLL, so it has to
+// be pushed again every time the DLL is loaded (see editor::EndGameReload).
+static bool show_collision_debug = false;
+
+
+static void ApplyCollisionDebugToGame()
+{
+#ifdef _WIN32
+
+    using SetCollisionDebugEnabledFn =
+        void (*)(bool);
+
+
+    HMODULE game_dll =
+        GetModuleHandleA(
+            "libGameExample.dll"
+        );
+
+
+    if (!game_dll)
+        return;
+
+
+    auto set_collision_debug =
+        reinterpret_cast<
+            SetCollisionDebugEnabledFn
+        >(
+            GetProcAddress(
+                game_dll,
+                "Game_SetCollisionDebugEnabled"
+            )
+        );
+
+
+    if (set_collision_debug)
+    {
+        set_collision_debug(
+            show_collision_debug
+        );
+    }
+
+#endif
 }
 
 
@@ -2324,90 +2428,6 @@ namespace editor
         glfwSetDropCallback(
             win,
             DropCallback
-        );
-
-
-        // ------------------------------------------------------------
-        // Debug widgets
-        // ------------------------------------------------------------
-
-        HRL_id lynx_icon_w =
-            HRL_CreateWidget(
-                viewport,
-                HRL_WIDGET_IMAGE
-            );
-
-
-        HRL_id lynx_icon_t =
-            lynx::RessourceTex(
-                "splash/lynx-icon.png"
-            );
-
-
-        HRL_SetImageTexture(
-            lynx_icon_w,
-            lynx_icon_t
-        );
-
-
-        HRL_SetWidgetAnchor(
-            lynx_icon_w,
-            0.f,
-            0.f
-        );
-
-
-        HRL_SetWidgetPosition(
-            lynx_icon_w,
-            0.05f,
-            0.05f
-        );
-
-
-        HRL_SetWidgetSize(
-            lynx_icon_w,
-            0.14f,
-            0.2f
-        );
-
-
-        HRL_id hrl_icon_w =
-            HRL_CreateWidget(
-                viewport,
-                HRL_WIDGET_IMAGE
-            );
-
-
-        HRL_id hrl_icon_t =
-            lynx::RessourceTex(
-                "splash/hrl-icon.png"
-            );
-
-
-        HRL_SetImageTexture(
-            hrl_icon_w,
-            hrl_icon_t
-        );
-
-
-        HRL_SetWidgetAnchor(
-            hrl_icon_w,
-            1.f,
-            0.f
-        );
-
-
-        HRL_SetWidgetPosition(
-            hrl_icon_w,
-            0.95f,
-            0.05f
-        );
-
-
-        HRL_SetWidgetSize(
-            hrl_icon_w,
-            0.14f,
-            0.2f
         );
 
 
@@ -2521,6 +2541,143 @@ namespace editor
     }
 
 
+    // True once after the game was stopped and a Play snapshot exists.
+    bool ConsumeRestoreRequest()
+    {
+        const bool requested =
+            restore_after_play_requested;
+
+        restore_after_play_requested = false;
+
+        return requested;
+    }
+
+
+    // Called by main() right BEFORE the level is deleted and rebuilt from the
+    // Play snapshot. Drops every actor pointer held by the editor.
+    void BeginRestoreAfterPlay()
+    {
+        editing_actor = nullptr;
+        editing_object = HRL_INVALID_ID;
+        dragging_object = false;
+
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_FALSE
+        );
+
+        gizmoUndoActive = false;
+        gizmoUndoActorId.clear();
+
+        // Undo entries refer to actors by ID and the restored level has the same
+        // IDs, so the undo history is kept. editor_dirty is left untouched : the
+        // restored state IS the state the user had before pressing Play.
+        editor_level = nullptr;
+    }
+
+
+    // Called by main() AFTER the old level is deleted and BEFORE the new one is
+    // created. Same order as at startup (voxel world first, then the level) :
+    // reloading the voxel world while the actors' meshes already exist makes the
+    // actors point to meshes that are gone (properties change, nothing moves).
+    void RestoreVoxelsAfterPlay()
+    {
+        auto voxel_data =
+            lynx::fs::ReadBinary(
+                kPlayBackupVoxelName
+            );
+
+        if (!voxel_data.empty())
+        {
+            HRL_LoadVoxelWorldBuffer(
+                scene,
+                voxel_data.data(),
+                voxel_data.size()
+            );
+        }
+    }
+
+
+    // Called by main() once the level exists again.
+    void EndRestoreAfterPlay(lynx::Level* level)
+    {
+        editor_level = level;
+
+        play_snapshot_valid = false;
+
+        // The new actors start with the default collision debug value.
+        ApplyCollisionDebugToGame();
+
+        std::cout << "[PLAY] State restored\n";
+    }
+
+
+    // True once per click on the toolbar "Reload Game" button.
+    bool ConsumeReloadRequest()
+    {
+        const bool requested =
+            reload_game_requested;
+
+        reload_game_requested = false;
+
+        return requested;
+    }
+
+
+    // Called by main() right BEFORE the actors are destroyed and the game DLL is
+    // unloaded. After this call the editor holds no pointer to anything that
+    // lives in the DLL.
+    void BeginGameReload()
+    {
+        // 1. Leave play mode. EndGame() still runs while the DLL code is mapped.
+        if (isPlaying)
+        {
+            SetPlaying(
+                editor_engine,
+                editor_viewport,
+                editor_camera,
+                false
+            );
+        }
+
+        // 2. The level is about to be rebuilt from world.xml : write the pending
+        //    edits first (this needs the actors to still be alive).
+        if (editor_dirty)
+            SaveEditor();
+
+        // 3. Forget every actor pointer.
+        editing_actor = nullptr;
+        editing_object = HRL_INVALID_ID;
+        dragging_object = false;
+
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_FALSE
+        );
+
+        gizmoUndoActive = false;
+        gizmoUndoActorId.clear();
+
+        // 4. Undo entries refer to actors by ID : after the reload an ID could
+        //    point to a brand new actor, so the history is dropped.
+        editorUndoHistory.clear();
+
+        // 5. The old level is going away.
+        editor_level = nullptr;
+    }
+
+
+    // Called by main() once the DLL is loaded again and the new level exists.
+    void EndGameReload(lynx::Level* level)
+    {
+        editor_level = level;
+        editor_dirty = false;
+
+        // The freshly loaded DLL starts with its own default value.
+        ApplyCollisionDebugToGame();
+    }
+
+
     // Shift lets the user interact with the editor without feeding the game.
     bool BlockGameInput()
     {
@@ -2620,46 +2777,10 @@ namespace editor
 
         if (f4_down && !f4_was_down)
         {
-            static bool show_collision_debug = false;
-
             show_collision_debug =
                 !show_collision_debug;
 
-
-#ifdef _WIN32
-
-            using SetCollisionDebugEnabledFn =
-                void (*)(bool);
-
-
-            HMODULE game_dll =
-                GetModuleHandleA(
-                    "libGameExample.dll"
-                );
-
-
-            if (game_dll)
-            {
-                auto set_collision_debug =
-                    reinterpret_cast<
-                        SetCollisionDebugEnabledFn
-                    >(
-                        GetProcAddress(
-                            game_dll,
-                            "Game_SetCollisionDebugEnabled"
-                        )
-                    );
-
-
-                if (set_collision_debug)
-                {
-                    set_collision_debug(
-                        show_collision_debug
-                    );
-                }
-            }
-
-#endif
+            ApplyCollisionDebugToGame();
         }
 
 
@@ -4471,6 +4592,13 @@ namespace editor
     inline HRL_id CreateCamera(HRL_id, HRL_id fallback) { return fallback; }
     inline void Init(GLFWwindow*, lynx::Engine*, HRL_id, HRL_id, lynx::Level*, const std::string&) {}
     inline void Shutdown() {}
+    inline bool ConsumeReloadRequest() { return false; }
+    inline bool ConsumeRestoreRequest() { return false; }
+    inline void BeginRestoreAfterPlay() {}
+    inline void RestoreVoxelsAfterPlay() {}
+    inline void EndRestoreAfterPlay(lynx::Level*) {}
+    inline void BeginGameReload() {}
+    inline void EndGameReload(lynx::Level*) {}
     inline bool BlockGameInput() { return false; }
     inline bool WantsMouse() { return false; }
     inline void OnLeftMousePress(GLFWwindow*) {}
@@ -4609,11 +4737,22 @@ int main()
         "input.json"
     );
 
-    lynx::SysModule gameModule(
-        "libGameExample.dll"
-    );
+    // The game module is owned through a pointer so the editor can unload it and
+    // load it again (toolbar "Reload Game"). Destroying it (reset / destructor)
+    // invalidates everything that comes from the DLL : see SysModule::Unload().
+    std::unique_ptr<lynx::SysModule> gameModule;
 
-    gameModule.RegisterFactory();
+    auto load_game_module = [&]()
+    {
+        gameModule =
+            std::make_unique<lynx::SysModule>(
+                "libGameExample.dll"
+            );
+
+        gameModule->RegisterFactory();
+    };
+
+    load_game_module();
 
 
     glfwInit();
@@ -4902,6 +5041,7 @@ int main()
             1.f,
             1.f
         );
+    lynx::SetViewportID(viewport);
 
 
     editor::Init(
@@ -4979,23 +5119,6 @@ int main()
 
 
     // ------------------------------------------------------------
-    // Light
-    // ------------------------------------------------------------
-
-    HRL_id sky =
-        HRL_CreateLight(
-            scene,
-            HRL_SKY_LIGHT
-        );
-
-
-    HRL_SetLightIntensity(
-        sky,
-        0.9f
-    );
-
-
-    // ------------------------------------------------------------
     // FPS
     // ------------------------------------------------------------
 
@@ -5037,6 +5160,69 @@ int main()
 
 
     // ------------------------------------------------------------
+    // Game module reload (editor toolbar "Reload Game")
+    // ------------------------------------------------------------
+    // Returns false when the game cannot go on (the window is then closed).
+
+    auto reload_game_module = [&]() -> bool
+    {
+        std::cout << "[RELOAD] Reloading libGameExample.dll\n";
+
+        // 1. Editor side : stops the game, saves pending edits, drops every actor
+        //    pointer / selection / undo entry.
+        editor::BeginGameReload();
+
+        player = nullptr;
+
+        // 2. Unload the DLL. SysModule::Unload() first calls
+        //    engine->DeleteCurrentLevel() (every actor dies while their code is
+        //    still mapped), then unregisters the factory, then FreeLibrary.
+        //    `level` is dangling from here until CreateLevel() below.
+        gameModule.reset();
+
+        level = nullptr;
+
+        // 3. Load the DLL again and register its actor classes.
+        load_game_module();
+
+        // 4. Rebuild the level (world.xml was saved in step 1 if it was dirty).
+        level =
+            engine->CreateLevel(
+                "world.xml"
+            );
+
+        if (!level)
+        {
+            std::cerr << "[RELOAD] ERROR: could not recreate the level.\n";
+            return false;
+        }
+
+        player =
+            level->GetActorFromID(
+                "Pawn"
+            );
+
+        if (!player)
+        {
+            std::cerr << "[RELOAD] ERROR: no \"Pawn\" actor after reload.\n";
+            return false;
+        }
+
+        gameplayCamX =
+            player->transform.location.x;
+
+        gameplayCamY =
+            player->transform.location.y;
+
+        editor::EndGameReload(level);
+
+        std::cout << "[RELOAD] Done\n";
+
+        return true;
+    };
+
+
+    // ------------------------------------------------------------
     // Main loop
     // ------------------------------------------------------------
 
@@ -5050,6 +5236,91 @@ int main()
     while (!glfwWindowShouldClose(win))
     {
         glfwPollEvents();
+
+
+        // --------------------------------------------------------
+        // Game DLL reload : between two frames, no ImGui frame is open
+        // --------------------------------------------------------
+
+        if (editor::ConsumeReloadRequest())
+        {
+            if (!reload_game_module())
+            {
+                glfwSetWindowShouldClose(
+                    win,
+                    GLFW_TRUE
+                );
+
+                continue;
+            }
+
+            // Do not count the reload time as a frame.
+            lastFrameTime =
+                glfwGetTime();
+        }
+
+
+        // --------------------------------------------------------
+        // Restore the pre-Play state (after Stop) : same idea as the DLL
+        // reload, but the module stays loaded.
+        // --------------------------------------------------------
+
+        if (editor::ConsumeRestoreRequest())
+        {
+            editor::BeginRestoreAfterPlay();
+
+            player = nullptr;
+
+            engine->DeleteCurrentLevel();
+
+            // Voxel world first, level second (same order as the startup).
+            editor::RestoreVoxelsAfterPlay();
+
+            level =
+                engine->CreateLevel(
+                    "play_backup.xml"
+                );
+
+            if (!level)
+            {
+                std::cerr << "[PLAY] ERROR: could not restore the level.\n";
+
+                glfwSetWindowShouldClose(
+                    win,
+                    GLFW_TRUE
+                );
+
+                continue;
+            }
+
+            player =
+                level->GetActorFromID(
+                    "Pawn"
+                );
+
+            if (!player)
+            {
+                std::cerr << "[PLAY] ERROR: no \"Pawn\" actor after restore.\n";
+
+                glfwSetWindowShouldClose(
+                    win,
+                    GLFW_TRUE
+                );
+
+                continue;
+            }
+
+            gameplayCamX =
+                player->transform.location.x;
+
+            gameplayCamY =
+                player->transform.location.y;
+
+            editor::EndRestoreAfterPlay(level);
+
+            lastFrameTime =
+                glfwGetTime();
+        }
 
 
         // --------------------------------------------------------
@@ -5150,7 +5421,7 @@ int main()
         // --------------------------------------------------------
         // Engine / HRL
         // --------------------------------------------------------
-
+        lynx::gamepad::Poll(editor::BlockGameInput());
         engine->ProgressOneFrame(dt);
 
 
@@ -5222,11 +5493,6 @@ int main()
         );
 
 
-        HRL_BeginFrame();
-
-        HRL_EndFrame();
-
-
         // --------------------------------------------------------
         // Editor UI (ImGui)
         // --------------------------------------------------------
@@ -5241,6 +5507,9 @@ int main()
     // ------------------------------------------------------------
     // Shutdown
     // ------------------------------------------------------------
+
+    // The module needs a live engine to invalidate its actors / factory.
+    gameModule.reset();
 
     delete lynx::GetEngine();
 

@@ -50,7 +50,7 @@ public:
         // defined in Common.h.
         // ----------------------------------------------------
 
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < voxelDataCount; ++i)
         {
             const float* color = voxelData[i].color;
 
