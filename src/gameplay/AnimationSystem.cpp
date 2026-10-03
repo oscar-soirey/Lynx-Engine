@@ -52,6 +52,7 @@ namespace lynx
    current_frame_ = 0;
    anim_clock_ = 0.0;
    finished_ = false;
+   pending_start_events_ = true;
 
    HRL_SetSpriteRegion(
      sprite_,
@@ -110,6 +111,15 @@ namespace lynx
   {
    if (finished_)
     return;
+
+   // La frame 1 (index 0) est l'etat de depart : l'index 0 n'est jamais
+   // atteint par current_frame_++ (sauf au wrap d'une boucle), donc on
+   // declenche ses evenements au premier update apres un restart().
+   if (pending_start_events_)
+   {
+    pending_start_events_ = false;
+    trigger_events(0);
+   }
 
    anim_clock_ += dt;
 

@@ -22,6 +22,12 @@ namespace lynx
 			delete a;
 		}
 		actors_.clear();
+
+		for (const auto& a : spawn_queue_)
+		{
+			delete a;
+		}
+		spawn_queue_.clear();
 	}
 
 	void Level::LoadFromFile(const char *_path, Engine* engine)
@@ -122,24 +128,27 @@ namespace lynx
 
 	Actor* Level::SpawnActor(const char* _className)
 	{
-		ObjectConstructor constructor = lynx::GetEngine()->GetFactory().GetObjectConstr(_className).value();
-		if (!constructor)
+		// .value() sur un optional vide leve une exception : on teste d'abord.
+		auto constructor = lynx::GetEngine()->GetFactory().GetObjectConstr(_className);
+		if (!constructor.has_value() || !constructor.value())
 		{
 			printf("Class: %s not found\n", _className);
 			return nullptr;
 		}
-		Object* obj = constructor();
+		Object* obj = constructor.value()();
 		auto* act = dynamic_cast<Actor*>(obj);
 
 		if (!act)
 		{
 			//LOG_ERROR("Try to spawn actor but class is not derived of HGE_Actor");
+			delete obj;
 			return nullptr;
 		}
 
 		//act->backend_scene_id_ = GetEngineHRL_SceneID();
+		act->engine_internal_ = lynx::GetEngine();
 		act->Init();
-		actors_.push_back(act);
+		AddActor(act);
 
 		return act;
 	}
@@ -221,10 +230,18 @@ namespace lynx
 
 	void Level::Update()
 	{
+		// Les acteurs spawnes pendant la frame rejoignent la liste ici, hors de
+		// toute boucle sur actors_. Avant les destructions : un acteur spawne
+		// puis detruit dans la meme frame doit etre retrouve.
+		actors_.insert(actors_.end(), spawn_queue_.begin(), spawn_queue_.end());
+		spawn_queue_.clear();
+
 		for (auto& a: destroy_queue_)
 		{
-			delete a;
-			std::erase(actors_, a);
+			// std::erase retourne le nombre d'elements retires : 0 si l'acteur
+			// a deja ete detruit (DestroyActor appele deux fois) -> pas de double delete.
+			if (std::erase(actors_, a) > 0)
+				delete a;
 		}
 		destroy_queue_.clear();
 	}

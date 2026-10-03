@@ -278,6 +278,15 @@ void Pawn::Tick(double dt)
     // ----------------------------------------------------
 
     anim_manager_.set_float("speed", target_velocity_x_);
+
+    if (grounded_ || !movement_enabled_)
+        air_time_ = 0.f;
+    else
+        air_time_ += static_cast<float>(dt);
+
+    anim_manager_.set_bool("airborne", air_time_ >= air_anim_delay_);
+    anim_manager_.set_float("velocity_y", velocity_y_);
+
     anim_manager_.update(dt);
 
 }
@@ -503,16 +512,26 @@ void Pawn::Move(float direction)
 
 bool Pawn::Jump()
 {
-    if (!IsGroundWithinDistance(2.0f))
-        return false;
+    if (current_jump_count < max_jump_count)
+    {
+        if (current_jump_count > 0)
+        {
+            OnDoubleJump(current_jump_count);
+        }
+        current_jump_count++;
 
-    velocity_y_ = jump_speed_;
-    jump_hold_timer_ = jump_hold_time_;
-    grounded_ = false;
+        velocity_y_ = jump_speed_;
+        jump_hold_timer_ = jump_hold_time_;
+        grounded_ = false;
 
-    jump_action_held_ = true;
+        // Un vrai saut doit lancer l'anim tout de suite, sans attendre le delai.
+        air_time_ = air_anim_delay_;
 
-    return true;
+        jump_action_held_ = true;
+
+        return true;
+    }
+    return false;
 }
 
 void Pawn::StopJumping()
@@ -894,6 +913,7 @@ void Pawn::IntegrateMovement(float dt)
     if (!was_grounded && grounded_)
     {
         OnLanded();
+        current_jump_count = 0;
     }
 }
 

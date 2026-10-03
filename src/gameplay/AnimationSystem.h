@@ -103,6 +103,10 @@ namespace lynx
    bool loop_ = true;
    bool finished_ = false;
 
+   // Vrai tant que les evenements de la frame 1 n'ont pas ete declenches
+   // depuis le dernier restart() (l'index 0 n'est jamais atteint via ++).
+   bool pending_start_events_ = true;
+
    std::function<void()> finished_callback_;
 
    std::vector<frame_event> events_;

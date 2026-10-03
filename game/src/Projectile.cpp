@@ -22,16 +22,18 @@ void Projectile::Init()
 
 	projectile_particles_.Initialize();
 
-	transform.scale.x = -transform.scale.x;
-
-	HRL_id mat = HRL_CreateMaterial(HRL_SPRITE_SHADER);
-	HRL_MaterialSetTexture(mat, HRL_T_ALBEDO, lynx::RessourceTex("proj.png"));
-	HRL_SetMeshMaterial(sprite, mat);
+	// Le materiau (proj.png) est gere par anim_ : on ne le recree plus ici,
+	// sinon on ecraserait la spritesheet par la texture entiere.
+	anim_.restart();
+	anim_.play();
 }
 
 void Projectile::Tick(double _dt)
 {
 	Sprite::Tick(_dt);
+
+	// Avant le test consumed_ : l'anim continue jusqu'a la destruction du projectile.
+	anim_.update(_dt);
 
 	if (consumed_)
 		return;

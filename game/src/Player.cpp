@@ -48,8 +48,8 @@ void Player::OnLanded()
 
 void Player::Init()
 {
-    relative_sprite_transform_.scale.x = 5.f;
-    relative_sprite_transform_.scale.y = 5.f;
+    relative_sprite_transform_.scale.x = 10.f;
+    relative_sprite_transform_.scale.y = 10.f;
 
     attack_radius = 13.5f;
     attack_center_distance = 7.f;
@@ -75,6 +75,15 @@ void Player::Init()
     landed_src_.volume_min = 0.5f;
     landed_src_.volume_max = 0.8f;
 
+    whoosh_src_.AttachToActor(this);
+    whoosh_src_.pitch_min = 1.9f;
+    whoosh_src_.pitch_max = 2.2f;
+    whoosh_src_.volume_min = 0.6f;
+    whoosh_src_.volume_max = 0.8f;
+
+
+    max_jump_count=2;
+
 
 
     // ====================================================
@@ -85,7 +94,7 @@ void Player::Init()
     {
         PlayFootstep();
     });
-    _Run.add_event(4, [this]
+    _Run.add_event(6, [this]
     {
         PlayFootstep();
     });
@@ -106,80 +115,89 @@ void Player::Init()
     );
 
 
-    //Jump
-    bs_falling.add(0.f, _Jump);
+    // Jump / Falling : pas de blend_space, ce sont des etats a part entiere
+    // (voir les regles de transition plus bas).
+
 
 
     // ====================================================
-    // Attack 1
+    // Attack
     // ====================================================
 
-    _Attack1.add_event(4, [this]()
+    _Attack.add_event(1, [this]()
     {
         Attack(facing_right_ ? 1.0f : -1.0f);
+        whoosh_src_.Play();
     });
 
-    _WalkAttack1.add_event(4, [this]()
+    _WalkAttack.add_event(1, [this]()
     {
+        if (attack_event_done_) return;
+        attack_event_done_ = true;
         Attack(facing_right_ ? 1.0f : -1.0f);
+        whoosh_src_.Play();
     });
 
-    bs_attacking1.add(
+    bs_attacking.add(
         0.f,
-        _Attack1
+        _Attack
     );
 
-    bs_attacking1.add(
+    bs_attacking.add(
         1.f,
-        _WalkAttack1
+        _WalkAttack
     );
 
-    bs_attacking1.add(
+    bs_attacking.add(
         -1.f,
-        _WalkAttack1
-    );
-
-
-
-    // ====================================================
-    // Attack 2
-    // ====================================================
-
-    _Attack2.add_event(4, [this]()
-    {
-        Attack(facing_right_ ? 1.0f : -1.0f);
-    });
-
-    _WalkAttack2.add_event(4, [this]()
-    {
-        Attack(facing_right_ ? 1.0f : -1.0f);
-    });
-
-    bs_attacking2.add(
-        0.f,
-        _Attack2
-    );
-
-    bs_attacking2.add(
-        1.f,
-        _WalkAttack2
-    );
-
-    bs_attacking2.add(
-        -1.f,
-        _WalkAttack2
+        _WalkAttack
     );
 
 
     //Regles de transition
     anim_manager_.add_state("loco", bs_default, { .variable = "speed" });
-    anim_manager_.add_state("attacking", bs_attacking2, {
+
+    // Jump joue une fois, puis enchaine tout seul sur Falling (next_state).
+    anim_manager_.add_state("jump", _Jump, { .next_state = "falling" });
+    anim_manager_.add_state("double_jump", _Jump, { .next_state = "falling" });
+    anim_manager_.add_state("falling", _Falling);
+
+    anim_manager_.add_state("attacking", bs_attacking, {
         .variable = "speed",
         .on_exit    = [this]() { FinishAttack(); }
     });
     anim_manager_.add_state("hurt", _Hurt);
-    anim_manager_.add_any_transition("attacking", anim_manager_.triggered("start-attack"), 0);
-    anim_manager_.add_any_transition("hurt", anim_manager_.triggered("hurt"), 0);
+
+    // Sol -> air ("airborne" est calcule dans Pawn::Tick)
+    anim_manager_.add_transition("loco", "jump", anim_manager_.is_true("airborne"), 1);
+
+    // Air -> sol
+    anim_manager_.add_transition("jump", "loco", anim_manager_.is_false("airborne"), 1);
+    anim_manager_.add_transition("falling", "loco", anim_manager_.is_false("airborne"), 1);
+
+    // Fin d'une attaque / d'un hurt en l'air : retour direct sur la boucle de chute
+    // (sinon on passerait par loco, ce qui relancerait Jump).
+    anim_manager_.add_transition("attacking", "falling", anim_manager_.is_true("airborne"), 1, true);
+    anim_manager_.add_transition("hurt", "falling", anim_manager_.is_true("airborne"), 1, true);
+
+    // Deuxieme saut : depuis jump ou falling, on relance l'anim via double_jump.
+    // Priorite 2 pour passer avant les transitions d'air.
+    anim_manager_.add_transition("jump",    "double_jump", anim_manager_.triggered("double-jump"), 2);
+    anim_manager_.add_transition("falling", "double_jump", anim_manager_.triggered("double-jump"), 2);
+
+    // Retour au sol
+    anim_manager_.add_transition("double_jump", "loco", anim_manager_.is_false("airborne"), 1);
+
+    // Priorite 2 (> transitions d'air) : un trigger n'est valable qu'un seul update.
+    // S'il perdait contre loco->jump, is_attacking_ resterait a true (BeginAttack
+    // l'a deja mis) et on ne pourrait plus jamais attaquer.
+    anim_manager_.add_any_transition("attacking", anim_manager_.triggered("start-attack"), 2);
+    anim_manager_.add_any_transition("hurt", anim_manager_.triggered("hurt"), 2);
+}
+
+void Player::OnDoubleJump(int count)
+{
+    anim_manager_.set_trigger("double-jump");
 }
 
 void Player::ProcessInput()
@@ -238,12 +256,14 @@ void Player::ProcessInput()
 
     if (attack_action_.IsPressed() && BeginAttack())
     {
+        attack_event_done_ = false;
         anim_manager_.set_trigger("start-attack");
     }
     if (cast_action_.IsPressed())
     {
         //anim_manager_.set_trigger("start-cast");
         CastAttack();
+        //Hurt(this, 10);
     }
 }
 
@@ -339,8 +359,53 @@ void Player::SetSelectedWidget(int in)
     HRL_SetLabelTintColor(select_character_scene_.Get(in), 0.f, 1.f, 0.f, 1.f);
 }
 
-
 void Player::RemoveSelectCharacterWidgets()
 {
     select_character_scene_.Delete();
+}
+
+void Player::SetPlayerForm(int in)
+{
+
+}
+
+void Player::Death()
+{
+    movement_enabled_=false;
+    input_enabled_=false;
+}
+
+void Player::Hurt(Actor *instigator, float amount)
+{
+    life -= 1;
+    if (life <= 0)
+    {
+        Death();
+    }
+    RefreshLifeWidget();
+}
+
+void Player::RefreshLifeWidget()
+{
+    HRL_id w = life_widget_scene_.Get(0);
+    std::string life_str(std::to_string(life));
+    HRL_SetLabelText(w, life_str.c_str());
+}
+
+void Player::StartGame()
+{
+    Pawn::StartGame();
+    //Create life widget
+    HRL_id w = HRL_CreateWidget(lynx::GetViewport(), HRL_WIDGET_LABEL);
+    HRL_SetWidgetAnchor(w, 1.f, 0.f);
+    HRL_SetWidgetPosition(w, 0.9f, 0.1f);
+    HRL_SetLabelFont(w, lynx::RessourceFont("widgets/normal-font.ttf"));
+    HRL_SetLabelText(w, "3");
+    HRL_SetLabelTextSize(w, 42.f);
+    life_widget_scene_.Add(w);
+}
+
+void Player::EndGame()
+{
+    life_widget_scene_.Delete();
 }

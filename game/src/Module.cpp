@@ -2,6 +2,8 @@
 #include "Collision.h"
 #include "Player.h"
 #include "Ennemies/a.h"
+#include "Ennemies/Mushroom.h"
+#include "Objects/Bouncy.h"
 
 #ifdef _WIN32
 #define GAME_MODULE_EXPORT extern "C" __declspec(dllexport)
@@ -28,4 +30,6 @@ LYNX_LINK_MODULE(
 		LYNX_MODULE_REGISTER(Pawn);
 		LYNX_MODULE_REGISTER(Player);
 		LYNX_MODULE_REGISTER(A);
+		LYNX_MODULE_REGISTER(Mushroom);
+		LYNX_MODULE_REGISTER(Bouncy);
 )

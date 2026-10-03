@@ -154,7 +154,6 @@ public:
 
     void Init() override;
     void Tick(double dt) override;
-    void OnTransformChanged() override;
 		
 		void Update(double dt) override;
 
@@ -181,6 +180,7 @@ public:
     );
 
 protected:
+    void OnTransformChanged() override;
 
     float attack_radius = 10.f;
     float attack_center_distance = 4.5f;
@@ -222,6 +222,8 @@ protected:
     bool Jump();
     void StopJumping();
 
+	virtual void OnDoubleJump(int count) {}
+
     bool IsFacingRight() const { return facing_right_; }
 
 protected:
@@ -246,7 +248,7 @@ protected:
 
     float move_speed_ = 10.f;
 
-	bool movement_enabled_=true;
+		bool movement_enabled_=true;
 
     // Ground acceleration.
     float ground_acceleration_ = 170.f;
@@ -273,6 +275,9 @@ protected:
 
     float jump_hold_gravity_scale_ = 0.25f;
 
+		int max_jump_count=1;
+		int current_jump_count=0;
+
 
     // ========================================================
     // Step
@@ -293,6 +298,11 @@ protected:
 
     bool grounded_ = false;
 
+    // Temps passe sans toucher le sol. Sert a piloter le parametre d'animation
+    // "airborne" avec un petit delai (evite un flash de Jump sur une marche).
+    float air_time_ = 0.f;
+    float air_anim_delay_ = 0.05f;
+
     bool jump_action_held_ = false;
 
     bool is_attacking_ = false;
@@ -309,7 +319,7 @@ protected:
 		//Correction manuelle (monde) de la position X du sprite quand le pawn regarde a gauche. Le miroir de l offset est deja automatique (Sprite::GetMeshWorldRect) : laisser a 0 sauf cas particulier.
 		float facing_left_relative_=0.f;
 
-	bool invert_right_left_=false;
+		bool invert_right_left_=false;
 
     lynx::CameraShake destroy_voxels_cs_;
 		lynx::CameraShake body_hit_cs_;

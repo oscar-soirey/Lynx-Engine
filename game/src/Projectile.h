@@ -18,6 +18,14 @@ public:
 	float damage_ = 25.f;
 
 private:
+	// Animation du projectile : boucle pendant toute sa duree de vie.
+	// A ADAPTER a la spritesheet "proj.png" : nombre de frames (cote a cote,
+	// horizontalement) et duree d'une frame en secondes.
+	static constexpr int   kAnimFrameCount = 6;
+	static constexpr float kAnimFrameTime  = 0.08f;
+
+	lynx::animation anim_{ sprite, "proj.png", kAnimFrameCount, true, kAnimFrameTime };
+
 	// true si le projectile touche un voxel a cette position (coordonnees voxel).
 	bool IsInsideVoxel(float voxel_x, float voxel_y) const;
 

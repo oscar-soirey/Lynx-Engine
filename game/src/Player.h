@@ -14,36 +14,42 @@ public:
 	Player();
 	~Player() override;
 	void Init() override;
-	void ProcessInput() override;
-	void OnTransformChanged() override;
+
+	void Hurt(Actor *instigator, float amount) override;
+	void StartGame() override;
+	void EndGame() override;
 
 protected:
+	void OnTransformChanged() override;
 	void OnLanded() override;
+	void OnDoubleJump(int count) override;
 
 private:
 	void PlayFootstep();
 	void CastAttack();
 
+	void ProcessInput() override;
+
 	void CreateSelectCharacterWidgets();
 	void RemoveSelectCharacterWidgets();
 
 	lynx::blend_space bs_default{};
-	lynx::animation _Idle{ sprite, "hero/Idle.png", 4 };
-	lynx::animation _Run{sprite, "hero/Run.png", 6, true, 0.1f};
+	lynx::animation _Idle{ sprite, "hero/Idle.png", 10 };
+	lynx::animation _Run{sprite, "hero/Run.png", 10, true, 0.1f};
 
-	lynx::blend_space bs_falling{};
-	lynx::animation _Jump{sprite, "hero/Jump.png", 8, false, 0.1f};
-
-	lynx::blend_space bs_attacking1{};
-	lynx::animation _Attack1{sprite, "hero/Attack1.png", 6, false, 0.1f};
-	lynx::animation _WalkAttack1{sprite, "hero/RunAttack1.png", 6, false, 0.1f};
-
-	lynx::blend_space bs_attacking2{};
-	lynx::animation _Attack2{sprite, "hero/Attack2.png", 6, false, 0.1f};
-	lynx::animation _WalkAttack2{sprite, "hero/RunAttack2.png", 6, false, 0.1f};
+	// Air : _Jump = debut (une fois), puis _Falling = boucle tant qu'on est en l'air
+	lynx::animation _Falling{sprite, "hero/Falling.png", 3, true, 0.1f};
+	lynx::animation _Jump{sprite, "hero/Jump.png", 6, false, 0.1f};
 
 	lynx::animation _Hurt{sprite, "hero/Hurt.png", 4, false, 0.15f};
 
+	lynx::blend_space bs_attacking{};
+	lynx::animation _Attack{sprite, "hero/Attack.png", 3, false, 0.1f};
+	lynx::animation _WalkAttack{sprite, "hero/Attack.png", 3, false, 0.1f};
+
+	bool attack_event_done_=false;
+
+	int life=3;
 
 	//actions
 	lynx::InputAction jump_action_ = "jump";
@@ -58,6 +64,7 @@ private:
 	//audio sources
 	lynx::AudioSource rock_fs_src_ = "footstep1.wav";
 	lynx::AudioSource landed_src_ = "landed.wav";
+	lynx::AudioSource whoosh_src_ = "sounds/whoosh/whoosh.wav";
 
 	//game widgets
 	int selected_character_widget_=2;
@@ -70,4 +77,11 @@ private:
 
 	//Forme du personnage, 1=normale, 2=lourde, 3=projectile, 4=
 	int current_player_form_=1;
+
+	void SetPlayerForm(int in);
+
+	void Death();
+
+	void RefreshLifeWidget();
+	lynx::WidgetsScene life_widget_scene_;
 };

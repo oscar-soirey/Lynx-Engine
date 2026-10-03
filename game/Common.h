@@ -6,6 +6,16 @@
 #include <iterator>
 #include <vector>
 #include <cstdio>
+#include <random>
+
+
+inline float FRandomInRange(float min, float max)
+{
+	static std::random_device rd;
+	static std::mt19937 gen(rd());
+	std::uniform_real_distribution<float> dist(min, max);
+	return dist(gen);
+}
 
 
 #define GAME_DEBUG
@@ -66,7 +76,14 @@ struct VoxelData
 // ------------------------------------------------------------
 inline void OnExampleVoxelDestroyed(int voxel_x, int voxel_y)
 {
-	std::printf("[Voxel event] voxel detruit en (%d, %d)\n", voxel_x, voxel_y);
+	if (FRandomInRange(0.0f, 1.f) > 0.95f)
+	{
+		//printf("spawned");
+		//auto* act = lynx::GetEngine()->GetCurrentLevel()->SpawnActor("Bouncy");
+		//if (!act)
+		//	std::cout << "actor not found" << std::endl;
+		//act->transform = lynx::transform{{(float)voxel_x, (float)voxel_y, 0.f}, {}, {1.f, 1.f, 1.f}};
+	}
 }
 
 inline const VoxelData voxelData[] = {
@@ -129,7 +146,7 @@ inline const VoxelData voxelData[] = {
 		HRL_VOXEL_COLLISION_BOTTOM |
 		GAME_VOXEL_ROCK,
 		"ffd700",
-		false, "ffffff",
+		true, "ffffff",
 		&OnExampleVoxelDestroyed
 	},
 

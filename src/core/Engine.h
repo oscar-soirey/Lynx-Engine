@@ -49,12 +49,16 @@ namespace lynx
 	private:
 		//gameplay
 		bool game_tick_enabled_=false;
-		float global_time_dilatation_=1.f;
+		// Dilatation "de fond" (ex : menu de selection). Ne change que par
+		// SetGlobalTimeDilatation(float), jamais par un hit-stop.
+		float base_time_dilatation_ = 1.f;
 
-		float time_dilatation_end_time_ = 0.0f;
-		float previous_time_dilatation_ = 1.0f;
+		// Dilatation temporaire (ex : hit-stop), active tant que le timer > 0.
+		// Elle ne sauvegarde plus l'ancienne valeur : la dilatation effective
+		// est recalculee a chaque frame, donc rien ne peut rester bloque.
+		float temp_time_dilatation_ = 1.f;
 
-		// Temps restant avant restauration, en temps réel
+		// Temps restant du hit-stop, en temps réel
 		float time_dilatation_timer_ = 0.0f;
 
 		//game

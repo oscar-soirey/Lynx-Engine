@@ -1,5 +1,7 @@
 #include "Engine.h"
 
+#include <algorithm>
+
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
 
@@ -40,12 +42,7 @@ namespace lynx
 			time_dilatation_timer_ -= dt;
 
 			if (time_dilatation_timer_ <= 0.0f)
-			{
 				time_dilatation_timer_ = 0.0f;
-
-				global_time_dilatation_ =
-						previous_time_dilatation_;
-			}
 		}
 
 
@@ -53,7 +50,7 @@ namespace lynx
 		// Dilated delta time
 		// ========================================================
 
-		const float game_dt = dt * global_time_dilatation_;
+		const float game_dt = dt * GetGlobalTimeDilatation();
 
 
 		// ========================================================
@@ -70,7 +67,8 @@ namespace lynx
 		{
 			for (const auto& a : current_level_->GetActors())
 			{
-				a->ProcessInput();
+				if (a->input_enabled_)
+					a->ProcessInput();
 				a->Tick(game_dt);
 			}
 
@@ -92,24 +90,39 @@ namespace lynx
 
 	void Engine::SetGlobalTimeDilatation(float dilation)
 	{
-		global_time_dilatation_ = dilation;
-		time_dilatation_timer_ = 0.0f;
+		// Valeur de fond uniquement : un hit-stop en cours n'est pas annule
+		// (la dilatation effective prend le minimum des deux).
+		base_time_dilatation_ = dilation;
 	}
 
 	void Engine::SetGlobalTimeDilatation(
 			float dilation,
 			float duration)
 	{
-		previous_time_dilatation_ = global_time_dilatation_;
+		if (duration <= 0.0f)
+			return;
 
-		global_time_dilatation_ = dilation;
-
-		time_dilatation_timer_ = duration;
+		// Hit-stop deja en cours : on garde le plus fort et la duree la plus
+		// longue. Avant, on memorisait la valeur courante (deja dilatee) comme
+		// "valeur a restaurer", qui restait donc bloquee a 0.1 pour toujours.
+		if (time_dilatation_timer_ > 0.0f)
+		{
+			temp_time_dilatation_ = std::min(temp_time_dilatation_, dilation);
+			time_dilatation_timer_ = std::max(time_dilatation_timer_, duration);
+		}
+		else
+		{
+			temp_time_dilatation_ = dilation;
+			time_dilatation_timer_ = duration;
+		}
 	}
 
 	float Engine::GetGlobalTimeDilatation() const
 	{
-		return global_time_dilatation_;
+		if (time_dilatation_timer_ > 0.0f)
+			return std::min(base_time_dilatation_, temp_time_dilatation_);
+
+		return base_time_dilatation_;
 	}
 
 	void Engine::StartGame()

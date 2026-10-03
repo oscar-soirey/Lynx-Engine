@@ -31,6 +31,8 @@ namespace lynx
 	protected:
 		virtual void OnTransformChanged();
 
+		bool input_enabled_=true;
+
 	private:
 
 		virtual void ProcessInput(){}
