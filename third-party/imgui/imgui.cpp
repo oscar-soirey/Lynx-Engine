@@ -1509,6 +1509,25 @@ ImGuiStyle::ImGuiStyle()
     _MainScale                  = 1.0f;
     _NextFrameFontSizeBase      = 0.0f;
 
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Aseprite-like look. Purely visual: paddings/spacings are left untouched so layouts don't move.
+    // A rounding > 0 means "1 pixel notch on the corners" (see ImDrawList::AddRect/AddRectFilled), not an arc.
+    WindowRounding              = 0.0f;
+    ChildRounding               = 0.0f;
+    PopupRounding               = 1.0f;
+    FrameRounding               = 1.0f;
+    ScrollbarRounding           = 1.0f;
+    GrabRounding                = 1.0f;
+    TabRounding                 = 1.0f;
+    PopupBorderSize             = 1.0f;
+    FrameBorderSize             = 1.0f;             // Outlined buttons / fields / sliders
+    TabBorderSize               = 1.0f;
+    ImageBorderSize             = 0.0f;
+    AntiAliasedLines            = false;            // Crisp, aliased edges everywhere
+    AntiAliasedLinesUseTex      = false;
+    AntiAliasedFill             = false;
+#endif
+
     // Default theme
     ImGui::StyleColorsDark(this);
 }

@@ -10681,10 +10681,17 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
             ImU32 overline_col = GetColorU32(tab_bar_focused ? ImGuiCol_TabSelectedOverline : ImGuiCol_TabDimmedSelectedOverline);
             if (style.TabRounding > 0.0f)
             {
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+                // [PIXEL STYLE] Flat overline, inset by the same notch as the tab corners
+                const float ol_y = ImFloor(tl.y + 0.5f);
+                const float ol_t = ImMax(1.0f, ImFloor(style.TabBarOverlineSize + 0.5f));
+                display_draw_list->AddRectFilled(ImVec2(ImFloor(tl.x + 0.5f) + IMGUI_PIXEL_CORNER_SIZE, ol_y), ImVec2(ImFloor(tr.x + 0.5f) - IMGUI_PIXEL_CORNER_SIZE, ol_y + ol_t), overline_col);
+#else
                 float rounding = style.TabRounding;
                 display_draw_list->PathArcToFast(tl + ImVec2(+rounding, +rounding), rounding, 7, 9);
                 display_draw_list->PathArcToFast(tr + ImVec2(-rounding, +rounding), rounding, 9, 11);
                 display_draw_list->PathStroke(overline_col, 0, style.TabBarOverlineSize);
+#endif
             }
             else
             {
@@ -10791,6 +10798,24 @@ void ImGui::TabItemBackground(ImDrawList* draw_list, const ImRect& bb, ImGuiTabI
     const float rounding = ImMax(0.0f, ImMin((flags & ImGuiTabItemFlags_Button) ? g.Style.FrameRounding : g.Style.TabRounding, width * 0.5f - 1.0f));
     const float y1 = bb.Min.y + 1.0f;
     const float y2 = bb.Max.y - g.Style.TabBarBorderSize;
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Notched top corners + 1px outline on 3 sides (the bottom edge is left open so the tab merges with the tab bar)
+    {
+        const float x0 = ImFloor(bb.Min.x + 0.5f), x1 = ImFloor(bb.Max.x + 0.5f);
+        const float ya = ImFloor(y1 + 0.5f), yb = ImFloor(y2 + 0.5f);
+        draw_list->AddRectFilled(ImVec2(x0, ya), ImVec2(x1, yb), col, rounding, ImDrawFlags_RoundCornersTop);
+        if (g.Style.TabBorderSize > 0.0f)
+        {
+            const ImU32 border_col = GetColorU32(ImGuiCol_Border);
+            const float t = ImMax(1.0f, ImFloor(g.Style.TabBorderSize + 0.5f));
+            const float c = (rounding >= 0.5f) ? ImMax(IMGUI_PIXEL_CORNER_SIZE, t) : 0.0f;   // Corner notch (>= border thickness so edges never overlap)
+            const float side_y = ya + (c > 0.0f ? c : t);
+            draw_list->AddRectFilled(ImVec2(x0 + c, ya),   ImVec2(x1 - c, ya + t), border_col);   // Top
+            draw_list->AddRectFilled(ImVec2(x0,     side_y), ImVec2(x0 + t, yb),    border_col);   // Left
+            draw_list->AddRectFilled(ImVec2(x1 - t, side_y), ImVec2(x1,     yb),    border_col);   // Right
+        }
+    }
+#else
     draw_list->PathLineTo(ImVec2(bb.Min.x, y2));
     draw_list->PathArcToFast(ImVec2(bb.Min.x + rounding, y1 + rounding), rounding, 6, 9);
     draw_list->PathArcToFast(ImVec2(bb.Max.x - rounding, y1 + rounding), rounding, 9, 12);
@@ -10804,6 +10829,7 @@ void ImGui::TabItemBackground(ImDrawList* draw_list, const ImRect& bb, ImGuiTabI
         draw_list->PathLineTo(ImVec2(bb.Max.x - 0.5f, y2));
         draw_list->PathStroke(GetColorU32(ImGuiCol_Border), 0, g.Style.TabBorderSize);
     }
+#endif // IMGUI_DISABLE_PIXEL_STYLE
 }
 
 // Render text label (with custom clipping) + Unsaved Document marker + Close Button logic

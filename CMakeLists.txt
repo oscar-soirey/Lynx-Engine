@@ -78,7 +78,6 @@ add_library(GameExample SHARED
 		game/src/GameClasses.cpp
 		game/src/Player.cpp
 		game/src/Ennemies/Ennemy.cpp
-		game/src/Ennemies/a.cpp
 		game/src/Ennemies/Mushroom.cpp
 		game/src/Projectile.cpp
 		game/src/Collision.cpp

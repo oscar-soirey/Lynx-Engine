@@ -88,6 +88,30 @@ inline void OnExampleVoxelDestroyed(int voxel_x, int voxel_y)
 
 inline const VoxelData voxelData[] = {
 	{
+		//vert saturé
+		HRL_VOXEL_COLLISION_LEFT |
+		HRL_VOXEL_COLLISION_RIGHT |
+		HRL_VOXEL_COLLISION_TOP |
+		HRL_VOXEL_COLLISION_BOTTOM,
+		"75d420"
+	},
+		{
+		//vert foncé
+		HRL_VOXEL_COLLISION_LEFT |
+		HRL_VOXEL_COLLISION_RIGHT |
+		HRL_VOXEL_COLLISION_TOP |
+		HRL_VOXEL_COLLISION_BOTTOM,
+		"66b321"
+	},
+		{
+		//vert caqui
+		HRL_VOXEL_COLLISION_LEFT |
+		HRL_VOXEL_COLLISION_RIGHT |
+		HRL_VOXEL_COLLISION_TOP |
+		HRL_VOXEL_COLLISION_BOTTOM,
+		"9fb127"
+	},
+	{
 		//Viorose b21ab4 clair
 		HRL_VOXEL_COLLISION_LEFT |
 		HRL_VOXEL_COLLISION_RIGHT |
@@ -128,7 +152,7 @@ inline const VoxelData voxelData[] = {
 		true
 	},
 
-//Mossrite 51fa34
+//Mossrite vert 51fa34
 	{
 		HRL_VOXEL_COLLISION_LEFT |
 		HRL_VOXEL_COLLISION_RIGHT |

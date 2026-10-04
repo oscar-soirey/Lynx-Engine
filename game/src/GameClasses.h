@@ -195,7 +195,9 @@ protected:
     // ========================================================
 
     bool BeginAttack();
-    void Attack(float direction);
+    // direction : +1 droite / -1 gauche. direction_y : +1 haut / -1 bas / 0 = attaque horizontale.
+    // Si direction_y != 0, l'attaque est verticale (direction est ignore).
+    void Attack(float direction, float direction_y = 0.f);
     void FinishAttack();
     bool IsAttacking() const { return is_attacking_; }
 
@@ -307,7 +309,7 @@ protected:
 
     bool is_attacking_ = false;
 
-    float hurt_amount_ = 0.f;
+    float hurt_amount_ = 5.f;
 
     BlockParticles block_particles;
     lynx::AudioSource impact_src_ = "sound.wav";

@@ -186,6 +186,89 @@ void ImGui::StyleColorsDark(ImGuiStyle* dst)
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
     ImVec4* colors = style->Colors;
 
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Aseprite-like dark theme: flat greys, near-black 1px outlines, one warm accent color.
+    // Tweak the palette here. (Define IMGUI_DISABLE_PIXEL_STYLE to restore the stock Dear ImGui dark theme.)
+    #define PXC(r, g, b)        ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, 1.00f)
+    #define PXCA(r, g, b, a)    ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a) / 255.0f)
+    const ImVec4 c_outline      = PXC( 15,  15,  15);   // 1px outlines
+    const ImVec4 c_deep         = PXC( 30,  30,  30);   // Inset fields, scrollbar tracks, unfocused tabs
+    const ImVec4 c_panel        = PXC( 46,  46,  46);   // Window background
+    const ImVec4 c_panel_dark   = PXC( 37,  37,  37);   // Menus, title bars, popups
+    const ImVec4 c_face         = PXC( 61,  61,  61);   // Button face
+    const ImVec4 c_face_hot     = PXC( 80,  80,  80);   // Button hovered
+    const ImVec4 c_face_down    = PXC( 34,  34,  34);   // Button pressed
+    const ImVec4 c_text         = PXC(230, 230, 230);
+    const ImVec4 c_text_dim     = PXC(128, 128, 128);
+    const ImVec4 c_accent       = PXC(217, 154,  43);   // Selected / active
+    const ImVec4 c_accent_hot   = PXC(240, 185,  74);
+    const ImVec4 c_accent_dim   = PXC(120,  86,  26);
+
+    colors[ImGuiCol_Text]                   = c_text;
+    colors[ImGuiCol_TextDisabled]           = c_text_dim;
+    colors[ImGuiCol_WindowBg]               = c_panel;
+    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_PopupBg]                = c_panel_dark;
+    colors[ImGuiCol_Border]                 = c_outline;
+    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_FrameBg]                = c_deep;
+    colors[ImGuiCol_FrameBgHovered]         = PXC( 40,  40,  40);
+    colors[ImGuiCol_FrameBgActive]          = PXC( 52,  52,  52);
+    colors[ImGuiCol_TitleBg]                = c_deep;
+    colors[ImGuiCol_TitleBgActive]          = c_panel_dark;
+    colors[ImGuiCol_TitleBgCollapsed]       = c_deep;
+    colors[ImGuiCol_MenuBarBg]              = c_panel_dark;
+    colors[ImGuiCol_ScrollbarBg]            = c_deep;
+    colors[ImGuiCol_ScrollbarGrab]          = c_face;
+    colors[ImGuiCol_ScrollbarGrabHovered]   = c_face_hot;
+    colors[ImGuiCol_ScrollbarGrabActive]    = PXC(104, 104, 104);
+    colors[ImGuiCol_CheckMark]              = c_text;
+    colors[ImGuiCol_SliderGrab]             = c_accent;
+    colors[ImGuiCol_SliderGrabActive]       = c_accent_hot;
+    colors[ImGuiCol_Button]                 = c_face;
+    colors[ImGuiCol_ButtonHovered]          = c_face_hot;
+    colors[ImGuiCol_ButtonActive]           = c_face_down;
+    colors[ImGuiCol_Header]                 = PXC( 72,  72,  72);
+    colors[ImGuiCol_HeaderHovered]          = PXC( 88,  88,  88);
+    colors[ImGuiCol_HeaderActive]           = c_accent_dim;
+    colors[ImGuiCol_Separator]              = c_outline;
+    colors[ImGuiCol_SeparatorHovered]       = c_accent_dim;
+    colors[ImGuiCol_SeparatorActive]        = c_accent;
+    colors[ImGuiCol_ResizeGrip]             = c_face;
+    colors[ImGuiCol_ResizeGripHovered]      = PXC(104, 104, 104);
+    colors[ImGuiCol_ResizeGripActive]       = c_accent;
+    colors[ImGuiCol_InputTextCursor]        = c_text;
+    colors[ImGuiCol_TabHovered]             = c_face_hot;
+    colors[ImGuiCol_Tab]                    = c_deep;
+    colors[ImGuiCol_TabSelected]            = c_panel;
+    colors[ImGuiCol_TabSelectedOverline]    = c_accent;
+    colors[ImGuiCol_TabDimmed]              = PXC( 26,  26,  26);
+    colors[ImGuiCol_TabDimmedSelected]      = PXC( 40,  40,  40);
+    colors[ImGuiCol_TabDimmedSelectedOverline] = PXC( 90, 90, 90);
+    colors[ImGuiCol_DockingPreview]         = PXCA(217, 154, 43, 140);
+    colors[ImGuiCol_DockingEmptyBg]         = PXC( 24,  24,  24);
+    colors[ImGuiCol_PlotLines]              = PXC(170, 170, 170);
+    colors[ImGuiCol_PlotLinesHovered]       = c_accent_hot;
+    colors[ImGuiCol_PlotHistogram]          = c_accent;
+    colors[ImGuiCol_PlotHistogramHovered]   = c_accent_hot;
+    colors[ImGuiCol_TableHeaderBg]          = c_panel_dark;
+    colors[ImGuiCol_TableBorderStrong]      = c_outline;
+    colors[ImGuiCol_TableBorderLight]       = PXC( 36,  36,  36);
+    colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_TableRowBgAlt]          = ImVec4(1.00f, 1.00f, 1.00f, 0.04f);
+    colors[ImGuiCol_TextLink]               = c_accent_hot;
+    colors[ImGuiCol_TextSelectedBg]         = PXCA(217, 154, 43, 100);
+    colors[ImGuiCol_TreeLines]              = PXC( 70,  70,  70);
+    colors[ImGuiCol_DragDropTarget]         = c_accent_hot;
+    colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_UnsavedMarker]          = c_accent;
+    colors[ImGuiCol_NavCursor]              = c_accent_hot;
+    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.40f);
+    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
+    #undef PXC
+    #undef PXCA
+#else
     colors[ImGuiCol_Text]                   = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
     colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
     colors[ImGuiCol_WindowBg]               = ImVec4(0.06f, 0.06f, 0.06f, 0.94f);
@@ -248,6 +331,7 @@ void ImGui::StyleColorsDark(ImGuiStyle* dst)
     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
+#endif // IMGUI_DISABLE_PIXEL_STYLE
 }
 
 void ImGui::StyleColorsClassic(ImGuiStyle* dst)
@@ -1493,12 +1577,68 @@ void ImDrawList::AddLine(const ImVec2& p1, const ImVec2& p2, ImU32 col, float th
     PathStroke(col, 0, thickness);
 }
 
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+// [PIXEL STYLE] Pixel-art rectangles (Aseprite-like).
+// Any rounding > 0 is turned into a square "notch" of IMGUI_PIXEL_CORNER_SIZE pixels cut out of the corner
+// (a one step staircase instead of an arc). Everything is drawn with axis-aligned rectangles snapped to the
+// pixel grid, so edges stay perfectly crisp, with or without anti-aliasing.
+// Define IMGUI_DISABLE_PIXEL_STYLE (e.g. in imconfig.h) to get the stock Dear ImGui behavior back.
+#ifndef IMGUI_PIXEL_CORNER_SIZE
+#define IMGUI_PIXEL_CORNER_SIZE 1.0f
+#endif
+
+struct ImPixelRect
+{
+    float x0, y0, x1, y1;   // Pixel-snapped bounds (max is exclusive)
+    float n;                // Notch size in pixels
+    bool  tl, tr, br, bl;   // Which corners are notched
+};
+
+static bool ImPixelRectSetup(ImPixelRect* r, const ImVec2& p_min, const ImVec2& p_max, float rounding, ImDrawFlags flags)
+{
+    if (rounding < 0.5f || (flags & ImDrawFlags_RoundCornersMask_) == ImDrawFlags_RoundCornersNone)
+        return false;
+    flags = FixRectCornerFlags(flags);
+    r->x0 = ImFloor(p_min.x + 0.5f);
+    r->y0 = ImFloor(p_min.y + 0.5f);
+    r->x1 = ImFloor(p_max.x + 0.5f);
+    r->y1 = ImFloor(p_max.y + 0.5f);
+    r->tl = (flags & ImDrawFlags_RoundCornersTopLeft) != 0;
+    r->tr = (flags & ImDrawFlags_RoundCornersTopRight) != 0;
+    r->br = (flags & ImDrawFlags_RoundCornersBottomRight) != 0;
+    r->bl = (flags & ImDrawFlags_RoundCornersBottomLeft) != 0;
+    r->n = ImMin(IMGUI_PIXEL_CORNER_SIZE, ImFloor(ImMin(r->x1 - r->x0, r->y1 - r->y0) * 0.5f));
+    return r->n >= 1.0f;
+}
+#endif // IMGUI_DISABLE_PIXEL_STYLE
+
 // p_min = upper-left, p_max = lower-right
 // Note we don't render 1 pixels sized rectangles properly.
 void ImDrawList::AddRect(const ImVec2& p_min, const ImVec2& p_max, ImU32 col, float rounding, ImDrawFlags flags, float thickness)
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    ImPixelRect r;
+    if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
+    {
+        // Outline = 4 edges. Edges are shortened where a corner is notched, so that nothing overlaps (no double blending with alpha colors).
+        const float t = ImMax(1.0f, ImFloor(thickness + 0.5f));
+        const float c = ImMax(r.n, t);                                  // Notch is at least as big as the border thickness
+        if (c * 2.0f > ImMin(r.x1 - r.x0, r.y1 - r.y0))
+        {
+            AddRectFilled(p_min, p_max, col, rounding, flags);          // Too small to have a hollow center
+            return;
+        }
+        const float tl = r.tl ? c : 0.0f, tr = r.tr ? c : 0.0f, br = r.br ? c : 0.0f, bl = r.bl ? c : 0.0f;
+        PrimReserve(24, 16);
+        PrimRect(ImVec2(r.x0 + tl, r.y0),     ImVec2(r.x1 - tr, r.y0 + t), col);                                                    // Top
+        PrimRect(ImVec2(r.x0 + bl, r.y1 - t), ImVec2(r.x1 - br, r.y1),     col);                                                    // Bottom
+        PrimRect(ImVec2(r.x0,     r.y0 + (r.tl ? tl : t)), ImVec2(r.x0 + t, r.y1 - (r.bl ? bl : t)), col);                          // Left
+        PrimRect(ImVec2(r.x1 - t, r.y0 + (r.tr ? tr : t)), ImVec2(r.x1,     r.y1 - (r.br ? br : t)), col);                          // Right
+        return;
+    }
+#endif
     if (Flags & ImDrawListFlags_AntiAliasedLines)
         PathRect(p_min + ImVec2(0.50f, 0.50f), p_max - ImVec2(0.50f, 0.50f), rounding, flags);
     else
@@ -1510,6 +1650,19 @@ void ImDrawList::AddRectFilled(const ImVec2& p_min, const ImVec2& p_max, ImU32 c
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    ImPixelRect r;
+    if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
+    {
+        // Filled rect with notched corners = top band + middle band + bottom band (no overlap, no seams)
+        const float n = r.n;
+        PrimReserve(18, 12);
+        PrimRect(ImVec2(r.x0 + (r.tl ? n : 0.0f), r.y0),     ImVec2(r.x1 - (r.tr ? n : 0.0f), r.y0 + n), col);
+        PrimRect(ImVec2(r.x0,                     r.y0 + n), ImVec2(r.x1,                     r.y1 - n), col);
+        PrimRect(ImVec2(r.x0 + (r.bl ? n : 0.0f), r.y1 - n), ImVec2(r.x1 - (r.br ? n : 0.0f), r.y1),     col);
+        return;
+    }
+#endif
     if (rounding < 0.5f || (flags & ImDrawFlags_RoundCornersMask_) == ImDrawFlags_RoundCornersNone)
     {
         PrimReserve(6, 4);

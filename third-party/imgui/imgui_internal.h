@@ -54,6 +54,13 @@ Index of this file:
 #include "imgui.h"
 #endif
 
+// [PIXEL STYLE] Size (in pixels) of the notch cut out of rounded corners. Define IMGUI_DISABLE_PIXEL_STYLE to restore stock rendering.
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+#ifndef IMGUI_PIXEL_CORNER_SIZE
+#define IMGUI_PIXEL_CORNER_SIZE 1.0f
+#endif
+#endif
+
 #include <stdio.h>      // FILE*, sscanf
 #include <stdlib.h>     // NULL, malloc, free, qsort, atoi, atof
 #include <math.h>       // sqrtf, fabsf, fmodf, powf, floorf, ceilf, cosf, sinf

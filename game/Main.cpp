@@ -39,6 +39,7 @@
 #include <variant>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
 #include <cctype>
 #include <cctype>
 
@@ -52,10 +53,429 @@
 #include "core/Private/SystemModule.h"
 #include "gameplay/Private/InputManager.h"
 
-
 bool isPlaying = false;
 
 HRL_id scene;
+
+
+// =============================================================================
+// Custom mouse cursors (editor + game)
+// -----------------------------------------------------------------------------
+// Each image is read with lynx::fs::ReadBinary, loaded by HRL
+// (HRL_CreateTexture), then its pixels are read back from OpenGL
+// (HRL_GL_GetTextureGLID + glGetTexImage) to build a GLFW cursor.
+// Must be called AFTER HRL_Init / HRL_InitContext.
+//
+// Every image is optional : a missing file falls back to the standard system
+// cursor of the same kind (hand, text caret, resize). If NO image is found
+// at all, the system cursors are left untouched.
+// 32x32 is a good size (some systems refuse very large cursors).
+// =============================================================================
+
+enum CursorKind
+{
+    kCursorArrow = 0,
+    kCursorSelect,      // hand / "you can click or select this"
+    kCursorText,        // text selection (I-beam)
+    kCursorLoading,     // busy (long blocking operations)
+    kCursorResizeEW,    // resize left <-> right
+    kCursorResizeNS,    // resize up <-> down
+    kCursorResizeNWSE,  // resize diagonal, top-left <-> bottom-right
+    kCursorResizeNESW,  // resize diagonal, top-right <-> bottom-left
+    kCursorKindCount
+};
+
+#ifdef GLFW_RESIZE_NWSE_CURSOR
+constexpr int kShapeNWSE = GLFW_RESIZE_NWSE_CURSOR;
+constexpr int kShapeNESW = GLFW_RESIZE_NESW_CURSOR;
+#else
+constexpr int kShapeNWSE = 0;   // GLFW < 3.4 : no diagonal standard cursor
+constexpr int kShapeNESW = 0;
+#endif
+
+struct CursorDef
+{
+    const char* file;
+    int hotspotX;       // pixel that "clicks", -1 = center of the image
+    int hotspotY;
+    int fallbackShape;  // GLFW standard cursor used when the file is missing
+};
+
+// Tweak the hotspots here. (0,0) = top-left corner, like an arrow.
+static const CursorDef kCursorDefs[kCursorKindCount] =
+{
+    /* Arrow      */ { "cur/cursor.png",             0,  0, 0                    },
+    /* Select     */ { "cur/cursor_select.png",      0,  0, GLFW_HAND_CURSOR     },
+    /* Text       */ { "cur/cursor_text.png",       -1, -1, GLFW_IBEAM_CURSOR    },
+    /* Loading    */ { "cur/cursor_loading.png",    -1, -1, 0                    },
+    /* ResizeEW   */ { "cur/cursor_resize_h.png",   -1, -1, GLFW_HRESIZE_CURSOR  },
+    /* ResizeNS   */ { "cur/cursor_resize_v.png",   -1, -1, GLFW_VRESIZE_CURSOR  },
+    /* ResizeNWSE */ { "cur/cursor_resize_nwse.png",-1, -1, kShapeNWSE           },
+    /* ResizeNESW */ { "cur/cursor_resize_nesw.png",-1, -1, kShapeNESW           },
+};
+
+// Set to true if the cursors show up upside down.
+constexpr bool kCursorFlipY = true;
+
+// Size of the cursors : 1.0 = size of the png, 2.0 = twice bigger...
+// For the best quality, prefer a bigger png (48x48, 64x64) and keep 1.0.
+constexpr float kCursorScale = 1.3f;
+
+// true  : sharp pixels (pixel art)       false : smooth (bilinear)
+constexpr bool kCursorScaleNearest = true;
+
+// Some systems refuse or clip bigger cursors.
+constexpr int kCursorMaxSize = 128;
+
+static GLFWcursor* cursors[kCursorKindCount] = {};
+static GLFWwindow* cursorWindow = nullptr;
+static bool customCursorsEnabled = false;
+static int currentCursorKind = -1;
+static int busyCursorDepth = 0;
+
+static void SetCursorKind(int kind)
+{
+    if (!customCursorsEnabled || !cursorWindow)
+        return;
+
+    if (kind == currentCursorKind)
+        return;
+
+    currentCursorKind = kind;
+
+    GLFWcursor* cursor =
+        cursors[kind] ? cursors[kind] : cursors[kCursorArrow];
+
+    glfwSetCursor(cursorWindow, cursor);
+}
+
+// Shows the "loading" cursor during a long blocking operation (save, play /
+// stop, game reload...). The cursor is changed immediately, because the
+// main loop does not run while the operation is in progress.
+struct BusyCursorScope
+{
+    int previous;
+
+    BusyCursorScope()
+        : previous(currentCursorKind)
+    {
+        ++busyCursorDepth;
+        SetCursorKind(kCursorLoading);
+    }
+
+    ~BusyCursorScope()
+    {
+        --busyCursorDepth;
+
+        if (previous >= 0)
+            SetCursorKind(previous);
+    }
+};
+
+static std::vector<unsigned char> ScaleCursorPixels(
+    const std::vector<unsigned char>& src,
+    int w,
+    int h,
+    int new_w,
+    int new_h)
+{
+    std::vector<unsigned char> dst(static_cast<size_t>(new_w) * new_h * 4);
+
+    auto pixel = [&](int x, int y) -> const unsigned char*
+    {
+        x = std::clamp(x, 0, w - 1);
+        y = std::clamp(y, 0, h - 1);
+        return &src[(static_cast<size_t>(y) * w + x) * 4];
+    };
+
+    for (int y = 0; y < new_h; ++y)
+    {
+        for (int x = 0; x < new_w; ++x)
+        {
+            unsigned char* out =
+                &dst[(static_cast<size_t>(y) * new_w + x) * 4];
+
+            const float fx = (x + 0.5f) * w / new_w - 0.5f;
+            const float fy = (y + 0.5f) * h / new_h - 0.5f;
+
+            if (kCursorScaleNearest)
+            {
+                const unsigned char* p =
+                    pixel(static_cast<int>(std::floor(fx + 0.5f)),
+                          static_cast<int>(std::floor(fy + 0.5f)));
+
+                std::copy(p, p + 4, out);
+                continue;
+            }
+
+            // Bilinear, weighted by alpha so transparent pixels do not
+            // darken the edges of the cursor.
+            const int x0 = static_cast<int>(std::floor(fx));
+            const int y0 = static_cast<int>(std::floor(fy));
+            const float tx = fx - x0;
+            const float ty = fy - y0;
+
+            float r = 0.f, g = 0.f, b = 0.f, a = 0.f;
+
+            for (int j = 0; j < 2; ++j)
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    const float weight =
+                        (i ? tx : 1.f - tx) * (j ? ty : 1.f - ty);
+
+                    const unsigned char* p = pixel(x0 + i, y0 + j);
+                    const float wa = weight * p[3];
+
+                    r += wa * p[0];
+                    g += wa * p[1];
+                    b += wa * p[2];
+                    a += wa;
+                }
+            }
+
+            if (a > 0.f)
+            {
+                out[0] = static_cast<unsigned char>(r / a + 0.5f);
+                out[1] = static_cast<unsigned char>(g / a + 0.5f);
+                out[2] = static_cast<unsigned char>(b / a + 0.5f);
+            }
+            else
+            {
+                out[0] = out[1] = out[2] = 0;
+            }
+
+            out[3] = static_cast<unsigned char>(std::min(a, 255.f) + 0.5f);
+        }
+    }
+
+    return dst;
+}
+
+static GLFWcursor* CreateCursorFromImageFile(const CursorDef& def)
+{
+    const auto file =
+        lynx::fs::ReadBinary(
+            def.file
+        );
+
+    if (file.empty())
+        return nullptr;
+
+    // NOTE : HRL_CreateTexture takes the encoded image (png...) in memory.
+    const HRL_id texture =
+        HRL_CreateTexture(
+            reinterpret_cast<const char*>(file.data()),
+            file.size()
+        );
+
+    if (texture == HRL_INVALID_ID)
+    {
+        std::cerr << "[CURSOR] HRL_CreateTexture failed for "
+                  << def.file << "\n";
+        return nullptr;
+    }
+
+    const GLuint gl_id =
+        static_cast<GLuint>(HRL_GL_GetTextureGL_ID(texture));
+
+    if (gl_id == 0)
+    {
+        std::cerr << "[CURSOR] No OpenGL id for " << def.file << "\n";
+        return nullptr;
+    }
+
+    // Read the pixels back, keeping HRL's GL state untouched.
+    GLint previous_binding = 0;
+    GLint previous_pack_alignment = 4;
+
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_binding);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &previous_pack_alignment);
+
+    GLint w = 0;
+    GLint h = 0;
+
+    glBindTexture(GL_TEXTURE_2D, gl_id);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+
+    std::vector<unsigned char> pixels;
+
+    if (w > 0 && h > 0)
+    {
+        pixels.resize(static_cast<size_t>(w) * h * 4);
+
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glGetTexImage(
+            GL_TEXTURE_2D,
+            0,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            pixels.data()
+        );
+    }
+
+    glPixelStorei(GL_PACK_ALIGNMENT, previous_pack_alignment);
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_binding));
+
+    if (pixels.empty())
+    {
+        std::cerr << "[CURSOR] " << def.file << " is empty\n";
+        return nullptr;
+    }
+
+    if (kCursorFlipY)
+    {
+        const size_t row = static_cast<size_t>(w) * 4;
+
+        for (int y = 0; y < h / 2; ++y)
+        {
+            std::swap_ranges(
+                pixels.begin() + y * row,
+                pixels.begin() + (y + 1) * row,
+                pixels.begin() + (h - 1 - y) * row
+            );
+        }
+    }
+
+    // Enlarge the cursor (the OS shows a cursor at its pixel size).
+    float applied_scale = 1.f;
+
+    if (kCursorScale != 1.f)
+    {
+        applied_scale = kCursorScale;
+
+        const float biggest = static_cast<float>(std::max(w, h));
+
+        if (biggest * applied_scale > kCursorMaxSize)
+            applied_scale = kCursorMaxSize / biggest;
+
+        const int new_w =
+            std::max(1, static_cast<int>(std::lround(w * applied_scale)));
+        const int new_h =
+            std::max(1, static_cast<int>(std::lround(h * applied_scale)));
+
+        pixels = ScaleCursorPixels(pixels, w, h, new_w, new_h);
+
+        w = new_w;
+        h = new_h;
+    }
+
+    GLFWimage image;
+    image.width = w;
+    image.height = h;
+    image.pixels = pixels.data();
+
+    const int hotX =
+        (def.hotspotX < 0)
+            ? w / 2
+            : static_cast<int>(std::lround(def.hotspotX * applied_scale));
+
+    const int hotY =
+        (def.hotspotY < 0)
+            ? h / 2
+            : static_cast<int>(std::lround(def.hotspotY * applied_scale));
+
+    GLFWcursor* cursor =
+        glfwCreateCursor(&image, hotX, hotY);
+
+    if (!cursor)
+        std::cerr << "[CURSOR] glfwCreateCursor failed for " << def.file << "\n";
+
+    return cursor;
+}
+
+static void LoadCustomCursor(GLFWwindow* win)
+{
+    cursorWindow = win;
+
+    GLFWcursor* loaded[kCursorKindCount] = {};
+    bool any_loaded = false;
+
+    for (int i = 0; i < kCursorKindCount; ++i)
+    {
+        loaded[i] = CreateCursorFromImageFile(kCursorDefs[i]);
+
+        if (loaded[i])
+            any_loaded = true;
+        else
+            std::cerr << "[CURSOR] " << kCursorDefs[i].file
+                      << " not found, default cursor used\n";
+    }
+
+    // Nothing found : keep the system cursors (and let ImGui manage them).
+    if (!any_loaded)
+        return;
+
+    for (int i = 0; i < kCursorKindCount; ++i)
+    {
+        if (loaded[i])
+            cursors[i] = loaded[i];
+        else if (kCursorDefs[i].fallbackShape != 0)
+            cursors[i] = glfwCreateStandardCursor(kCursorDefs[i].fallbackShape);
+    }
+
+    customCursorsEnabled = true;
+
+    SetCursorKind(kCursorArrow);
+}
+
+
+// =============================================================================
+// Scene viewport window (editor)
+// -----------------------------------------------------------------------------
+// The "Viewport" ImGui window shows the scene texture. While it is visible,
+// the scene is no longer under the whole window, so:
+//   - the mouse is "for the scene" only when the Viewport window is hovered,
+//   - mouse positions must be converted from window pixels to scene pixels.
+// When the Viewport window is closed / hidden, everything behaves as before.
+// =============================================================================
+
+struct SceneViewportState
+{
+    bool visible = false;   // the Viewport window shows the scene this frame
+    bool hovered = false;   // the mouse is over the image (or dragging from it)
+    float x = 0.f;          // image position, window pixels
+    float y = 0.f;
+    float w = 0.f;          // image size, window pixels
+    float h = 0.f;
+};
+
+static SceneViewportState sceneViewport;
+
+// Replaces "!ImGui::GetIO().WantCaptureMouse" for every scene interaction.
+static bool SceneAcceptsMouse(bool imgui_wants_mouse)
+{
+    if (sceneViewport.visible)
+        return sceneViewport.hovered;
+
+    return !imgui_wants_mouse;
+}
+
+// Window pixels -> scene pixels (what HRL picking / gizmo functions expect).
+static void MouseToScene(
+    double window_x,
+    double window_y,
+    double& scene_x,
+    double& scene_y)
+{
+    if (!sceneViewport.visible ||
+        sceneViewport.w <= 0.f ||
+        sceneViewport.h <= 0.f)
+    {
+        scene_x = window_x;
+        scene_y = window_y;
+        return;
+    }
+
+    int win_w = 0;
+    int win_h = 0;
+
+    glfwGetWindowSize(glfwGetCurrentContext(), &win_w, &win_h);
+
+    scene_x = (window_x - sceneViewport.x) * win_w / sceneViewport.w;
+    scene_y = (window_y - sceneViewport.y) * win_h / sceneViewport.h;
+}
 
 
 static void ErrorCallback(
@@ -121,9 +541,14 @@ void InitImGui(GLFWwindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+    // ImGui's GLFW backend calls glfwSetCursor(arrow) every frame, which would
+    // erase our image. We pick the cursor ourselves (UpdateEditorMouseCursor).
+    if (customCursorsEnabled)
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
     io.Fonts->AddFontFromFileTTF(
-        "Ubuntu-Regular.ttf",
-        32.0f
+        "normal-font.ttf",
+        24.0f
     );
 
     ImGui::StyleColorsDark();
@@ -310,10 +735,16 @@ static void PushEditorUndo(std::function<void()> undo)
 }
 
 
+// Defined next to the brush code : puts the previewed voxels back.
+static void ClearBrushPreview();
+
+
 static void UndoLastEditorAction()
 {
     if (editorUndoHistory.empty())
         return;
+
+    ClearBrushPreview();
 
     std::function<void()> undo =
         std::move(editorUndoHistory.back());
@@ -906,6 +1337,10 @@ static void SaveEditor()
     if (!editor_level)
         return;
 
+    BusyCursorScope busy_cursor;
+
+    ClearBrushPreview();
+
     std::cout
         << "[SAVE] Saving voxel world to: "
         << world_file_path_string
@@ -1077,6 +1512,8 @@ static void CreateActorFromAsset(
         &mouse_y
     );
 
+    MouseToScene(mouse_x, mouse_y, mouse_x, mouse_y);
+
     int voxel_x;
     int voxel_y;
 
@@ -1145,7 +1582,7 @@ static void DrawContentBrowser(lynx::Level* level)
         return;
 
     ImGui::Begin("Content Browser");
-    ImGui::SetWindowFontScale(0.82f);
+    ImGui::SetWindowFontScale(0.62f);
 
     const ImVec2 window_pos =
         ImGui::GetWindowPos();
@@ -1512,7 +1949,7 @@ static void DrawContentBrowser(lynx::Level* level)
     if (entries.empty())
         ImGui::TextDisabled("Empty folder");
 
-    ImGui::SetWindowFontScale(1.0f);
+    ImGui::SetWindowFontScale(0.8f);
     ImGui::End();
 }
 
@@ -1526,7 +1963,7 @@ static void HandleLevelAssetDrop(lynx::Level* level)
 
     // The HRL level is rendered outside ImGui. When no ImGui window is
     // capturing the mouse, a Content Browser payload can be dropped here.
-    if (io.WantCaptureMouse ||
+    if (!SceneAcceptsMouse(io.WantCaptureMouse) ||
         !ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     {
         return;
@@ -1862,7 +2299,6 @@ static void WindowCloseCallback(GLFWwindow* window)
 
 static HRL_id editor_camera = HRL_INVALID_ID;
 static HRL_id editor_viewport = HRL_INVALID_ID;
-static HRL_id brush_preview_widget = HRL_INVALID_ID;
 static std::string editor_save_data;
 
 static float cameraSpeed = 50.f;
@@ -1885,6 +2321,10 @@ static float GetCameraSpeedForHeight()
 }
 static int brushRadius = 3;
 static int brushVoxelType = 4;
+
+// Type actually used by the brush this frame : brushVoxelType, or 0 (empty)
+// while Shift is held in the editor. Refreshed every frame in Tick().
+static int brushActiveType = 4;
 static float brushDensity = 1.f;
 static bool brushPaintEnabled = false;
 static bool brushPaintEmptyVoxels = true;
@@ -1954,24 +2394,161 @@ static void tryPaintVoxel(int x, int y)
         return;
     }
 
-    if (previousType == brushVoxelType)
+    if (previousType == brushActiveType)
         return;
 
     currentStrokeChanges.push_back({
         x,
         y,
         previousType,
-        brushVoxelType
+        brushActiveType
     });
 
     HRL_SetVoxelType(
         scene,
         x,
         y,
-        brushVoxelType
+        brushActiveType
     );
 
     MarkEditorDirty();
+}
+
+
+// ---------------------------------------------------------------------------
+// Brush preview (paints the voxels for real, then restores them)
+// ---------------------------------------------------------------------------
+
+struct BrushPreviewVoxel
+{
+    int x;
+    int y;
+    int previousType;
+};
+
+static std::vector<BrushPreviewVoxel> brushPreviewVoxels;
+
+// Puts every previewed voxel back to its real type.
+// Does NOT mark the editor dirty (a preview is not a modification).
+static void ClearBrushPreview()
+{
+    for (auto it = brushPreviewVoxels.rbegin();
+         it != brushPreviewVoxels.rend();
+         ++it)
+    {
+        HRL_SetVoxelType(
+            scene,
+            it->x,
+            it->y,
+            it->previousType
+        );
+    }
+
+    brushPreviewVoxels.clear();
+}
+
+// Shows what a click would paint at (centerX, centerY).
+// Density is ignored on purpose (it is random, it would flicker).
+static void ApplyBrushPreview(int centerX, int centerY)
+{
+    ClearBrushPreview();
+
+    for (int y = -brushRadius; y <= brushRadius; ++y)
+    {
+        for (int x = -brushRadius; x <= brushRadius; ++x)
+        {
+            if (x * x + y * y > brushRadius * brushRadius)
+                continue;
+
+            const int vx = centerX + x;
+            const int vy = centerY + y;
+
+            const int previousType =
+                HRL_GetVoxelType(scene, vx, vy);
+
+            if (!brushPaintEmptyVoxels && previousType == 0)
+                continue;
+
+            if (previousType == brushActiveType)
+                continue;
+
+            brushPreviewVoxels.push_back({ vx, vy, previousType });
+
+            HRL_SetVoxelType(scene, vx, vy, brushActiveType);
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Stroke interpolation : when the mouse moves faster than one brush radius
+// per frame, the brush is stamped on every voxel of the line between the
+// previous and the current position, so the stroke has no gaps.
+// ---------------------------------------------------------------------------
+
+static bool brushHasLastCenter = false;
+static int brushLastCenterX = 0;
+static int brushLastCenterY = 0;
+
+static void stampBrush(int centerX, int centerY)
+{
+    for (int y = -brushRadius; y <= brushRadius; ++y)
+    {
+        for (int x = -brushRadius; x <= brushRadius; ++x)
+        {
+            if (x * x + y * y <= brushRadius * brushRadius)
+                tryPaintVoxel(centerX + x, centerY + y);
+        }
+    }
+}
+
+// Bresenham line from the last stamped center to (cx, cy), both included.
+// tryPaintVoxel already ignores voxels visited during the current stroke,
+// so overlapping stamps only cost a hash lookup.
+static void paintBrushStroke(int cx, int cy)
+{
+    if (!brushHasLastCenter)
+    {
+        stampBrush(cx, cy);
+    }
+    else
+    {
+        int x = brushLastCenterX;
+        int y = brushLastCenterY;
+
+        const int dx = std::abs(cx - x);
+        const int dy = -std::abs(cy - y);
+        const int sx = (x < cx) ? 1 : -1;
+        const int sy = (y < cy) ? 1 : -1;
+
+        int err = dx + dy;
+
+        while (true)
+        {
+            stampBrush(x, y);
+
+            if (x == cx && y == cy)
+                break;
+
+            const int e2 = 2 * err;
+
+            if (e2 >= dy)
+            {
+                err += dy;
+                x += sx;
+            }
+
+            if (e2 <= dx)
+            {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    brushHasLastCenter = true;
+    brushLastCenterX = cx;
+    brushLastCenterY = cy;
 }
 
 
@@ -2029,6 +2606,8 @@ static void SavePlaySnapshot()
 {
     play_snapshot_valid = false;
 
+    ClearBrushPreview();
+
     if (!editor_level)
         return;
 
@@ -2050,6 +2629,8 @@ static void TogglePlayMode()
 {
     if (!editor_engine)
         return;
+
+    BusyCursorScope busy_cursor;
 
     if (!isPlaying)
     {
@@ -2440,49 +3021,6 @@ namespace editor
 
 
         // ------------------------------------------------------------
-        // Brush preview
-        // ------------------------------------------------------------
-
-        HRL_id brush_preview_circle_texture =
-            lynx::RessourceTex(
-                "brush_preview_circle.png"
-            );
-
-
-        brush_preview_widget =
-            HRL_CreateWidget(
-                viewport,
-                HRL_WIDGET_IMAGE
-            );
-
-
-        HRL_SetWidgetVisible(
-            brush_preview_widget,
-            HRL_FALSE
-        );
-
-
-        HRL_SetImageTexture(
-            brush_preview_widget,
-            brush_preview_circle_texture
-        );
-
-
-        HRL_SetWidgetSize(
-            brush_preview_widget,
-            0.1,
-            0.1
-        );
-
-
-        HRL_SetWidgetAnchor(
-            brush_preview_widget,
-            0.5,
-            0.5
-        );
-
-
-        // ------------------------------------------------------------
         // Gizmo
         // ------------------------------------------------------------
 
@@ -2687,7 +3225,7 @@ namespace editor
 
     bool WantsMouse()
     {
-        return ImGui::GetIO().WantCaptureMouse;
+        return !SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse);
     }
 
 
@@ -2705,9 +3243,11 @@ namespace editor
             &mouseY
         );
 
+        MouseToScene(mouseX, mouseY, mouseX, mouseY);
+
         const ImGuiIO& io = ImGui::GetIO();
 
-        if (io.KeyCtrl && !io.WantCaptureMouse)
+        if (io.KeyCtrl && SceneAcceptsMouse(io.WantCaptureMouse))
         {
             HRL_id object =
                 HRL_GL_GetHoveredObject(
@@ -2733,7 +3273,7 @@ namespace editor
 
     void OnScroll(double yoffset)
     {
-        if (!ImGui::GetIO().WantCaptureMouse)
+        if (SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse))
         {
             camZ =
                 ClampCameraZ(
@@ -2741,6 +3281,62 @@ namespace editor
                     static_cast<float>(yoffset) * 10.f
                 );
         }
+    }
+
+
+    // Picks the cursor image for this frame. ImGui tells which kind of cursor
+    // it wants (arrow, text caret, resize...) ; we show our image for it.
+    static void UpdateEditorMouseCursor(GLFWwindow* win)
+    {
+        static bool cursor_hidden = false;
+
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
+
+        const bool want_hidden =
+            (imgui_cursor == ImGuiMouseCursor_None);
+
+        if (want_hidden != cursor_hidden)
+        {
+            cursor_hidden = want_hidden;
+
+            glfwSetInputMode(
+                win,
+                GLFW_CURSOR,
+                cursor_hidden ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_NORMAL
+            );
+        }
+
+        if (cursor_hidden)
+            return;
+
+        int kind = kCursorArrow;
+
+        switch (imgui_cursor)
+        {
+        case ImGuiMouseCursor_TextInput: kind = kCursorText;       break;
+        case ImGuiMouseCursor_ResizeEW:  kind = kCursorResizeEW;   break;
+        case ImGuiMouseCursor_ResizeNS:  kind = kCursorResizeNS;   break;
+        case ImGuiMouseCursor_ResizeNWSE:kind = kCursorResizeNWSE; break;
+        case ImGuiMouseCursor_ResizeNESW:kind = kCursorResizeNESW; break;
+        case ImGuiMouseCursor_Hand:      kind = kCursorSelect;     break;
+        default:                         break;
+        }
+
+        if (busyCursorDepth > 0)
+        {
+            kind = kCursorLoading;
+        }
+        else if (kind == kCursorArrow &&
+                 !isPlaying &&
+                 io.KeyCtrl &&
+                 SceneAcceptsMouse(io.WantCaptureMouse))
+        {
+            // Ctrl + click selects an object in the viewport.
+            kind = kCursorSelect;
+        }
+
+        SetCursorKind(kind);
     }
 
 
@@ -2762,6 +3358,27 @@ namespace editor
             &mouseX,
             &mouseY
         );
+
+        // Window pixels -> scene pixels (brush, picking...).
+        MouseToScene(mouseX, mouseY, mouseX, mouseY);
+
+
+        // The brush preview is redrawn every frame at the end of the
+        // brush block. Everything else in this frame sees the real voxels.
+        ClearBrushPreview();
+
+
+        // Shift = temporary eraser (voxel 0) while editing.
+        // In play mode Shift only hands the mouse to the editor, so the
+        // selected type is kept.
+        brushActiveType =
+            (io.KeyShift && !isPlaying)
+                ? 0
+                : brushVoxelType;
+
+
+        if (customCursorsEnabled)
+            UpdateEditorMouseCursor(win);
 
 
         // --------------------------------------------------------
@@ -2832,12 +3449,6 @@ namespace editor
             ctrl_s;
 
 
-        HRL_SetWidgetVisible(
-            brush_preview_widget,
-            HRL_FALSE
-        );
-
-
         // --------------------------------------------------------
         // Camera movement
         // --------------------------------------------------------
@@ -2880,7 +3491,7 @@ namespace editor
 
         if (!isPlaying &&
             editing_actor &&
-            !io.WantCaptureMouse)
+            SceneAcceptsMouse(io.WantCaptureMouse))
         {
             float pos[3];
             float rot[3];
@@ -2970,36 +3581,12 @@ namespace editor
         if (brushPaintEnabled &&
             (!isPlaying || io.KeyShift))
         {
-            HRL_SetWidgetVisible(
-                brush_preview_widget,
-                HRL_TRUE
-            );
-
-
-            int winW;
-            int winH;
-
-
-            glfwGetWindowSize(
-                win,
-                &winW,
-                &winH
-            );
-
-
-            HRL_SetWidgetPosition(
-                brush_preview_widget,
-                mouseX / winW,
-                mouseY / winH
-            );
-
-
             // ----------------------------------------------------
             // Editor mouse interaction
             // ----------------------------------------------------
 
             if (!io.KeyCtrl &&
-                !io.WantCaptureMouse)
+                SceneAcceptsMouse(io.WantCaptureMouse))
             {
                 const bool leftMousePressed =
                     glfwGetMouseButton(
@@ -3013,6 +3600,8 @@ namespace editor
                     !brushPainting)
                 {
                     brushPainting = true;
+
+                    brushHasLastCenter = false;
 
                     brushPaintedVoxels.clear();
 
@@ -3071,24 +3660,30 @@ namespace editor
                             &centerX,
                             &centerY))
                     {
-                        for (int y = -brushRadius;
-                             y <= brushRadius;
-                             ++y)
-                        {
-                            for (int x = -brushRadius;
-                                 x <= brushRadius;
-                                 ++x)
-                            {
-                                if (x * x + y * y <=
-                                    brushRadius * brushRadius)
-                                {
-                                    tryPaintVoxel(
-                                        centerX + x,
-                                        centerY + y
-                                    );
-                                }
-                            }
-                        }
+                        paintBrushStroke(centerX, centerY);
+                    }
+                    else
+                    {
+                        // Cursor left the world : do not link across the gap.
+                        brushHasLastCenter = false;
+                    }
+                }
+                else if (brushPaintEnabled &&
+                         !leftMousePressed &&
+                         !isPlaying)
+                {
+                    // Hover : preview the brush on the voxels.
+                    int centerX;
+                    int centerY;
+
+                    if (HRL_GetVoxelAtScreenPosition(
+                            scene,
+                            static_cast<int>(mouseX),
+                            static_cast<int>(mouseY),
+                            &centerX,
+                            &centerY))
+                    {
+                        ApplyBrushPreview(centerX, centerY);
                     }
                 }
 
@@ -3121,11 +3716,15 @@ namespace editor
                         GLFW_KEY_F2
                     ) == GLFW_PRESS)
                 {
+                    BusyCursorScope busy_cursor;
+
                     auto world_save_data =
                         lynx::fs::ReadBinary(
                             editor_save_data
                         );
 
+
+                    ClearBrushPreview();
 
                     HRL_LoadVoxelWorldBuffer(
                         scene,
@@ -3134,7 +3733,7 @@ namespace editor
                     );
                 }
             }
-            else if (io.WantCaptureMouse)
+            else if (!SceneAcceptsMouse(io.WantCaptureMouse))
             {
                 if (brushPainting)
                 {
@@ -3217,11 +3816,95 @@ namespace editor
 
 
     // ImGui frame : all panels, shortcuts, popups. Ends with the ImGui render.
+    // "Viewport" window : the scene texture, stretched over the whole window.
+    static void DrawViewportWindow()
+    {
+        return;
+
+        sceneViewport.visible = false;
+        sceneViewport.hovered = false;
+
+        // First launch : cover the whole work area.
+        const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+
+        ImGui::SetNextWindowPos(
+            main_viewport->WorkPos,
+            ImGuiCond_FirstUseEver
+        );
+
+        ImGui::SetNextWindowSize(
+            main_viewport->WorkSize,
+            ImGuiCond_FirstUseEver
+        );
+
+        ImGui::PushStyleVar(
+            ImGuiStyleVar_WindowPadding,
+            ImVec2(0.f, 0.f)
+        );
+
+        const bool open =
+            ImGui::Begin(
+                "Viewport",
+                nullptr,
+                ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoScrollWithMouse
+            );
+
+        ImGui::PopStyleVar();
+
+        if (open)
+        {
+            const ImVec2 size = ImGui::GetContentRegionAvail();
+
+            const unsigned int texture_id =
+                HRL_GL_GetSceneTextureGL_ID(scene);
+
+            if (texture_id != 0 && size.x > 1.f && size.y > 1.f)
+            {
+                const ImVec2 pos = ImGui::GetCursorScreenPos();
+
+                // OpenGL textures are bottom-up : flip V.
+                ImGui::Image(
+                    (ImTextureID)(intptr_t)texture_id,
+                    size,
+                    ImVec2(0.f, 1.f),
+                    ImVec2(1.f, 0.f)
+                );
+
+                // Invisible button on top : it receives the clicks (so the
+                // window is not dragged) and keeps the mouse captured for
+                // the scene while a brush stroke goes outside the window.
+                ImGui::SetCursorScreenPos(pos);
+
+                ImGui::InvisibleButton(
+                    "##scene_viewport",
+                    size,
+                    ImGuiButtonFlags_MouseButtonLeft |
+                    ImGuiButtonFlags_MouseButtonRight |
+                    ImGuiButtonFlags_MouseButtonMiddle
+                );
+
+                sceneViewport.visible = true;
+                sceneViewport.hovered =
+                    ImGui::IsItemHovered() || ImGui::IsItemActive();
+                sceneViewport.x = pos.x;
+                sceneViewport.y = pos.y;
+                sceneViewport.w = size.x;
+                sceneViewport.h = size.y;
+            }
+        }
+
+        ImGui::End();
+    }
+
+
     void DrawUI(GLFWwindow* win)
     {
         lynx::Level* level = editor_level;
 
         BeginImGuiFrame();
+
+        DrawViewportWindow();
 
         DrawToolbar();
 
@@ -4121,12 +4804,6 @@ namespace editor
         if (ImGui::Button("Paint"))
         {
             brushPaintEnabled = true;
-
-
-            HRL_SetWidgetVisible(
-                brush_preview_widget,
-                HRL_TRUE
-            );
         }
 
 
@@ -4170,12 +4847,6 @@ namespace editor
             ))
         {
             brushPaintEnabled = false;
-
-
-            HRL_SetWidgetVisible(
-                brush_preview_widget,
-                HRL_FALSE
-            );
         }
 
 
@@ -4213,23 +4884,12 @@ namespace editor
 
         if (brushPaintEnabled)
         {
-            bool brush_radius_modified =
-                ImGui::SliderInt(
-                    "Brush Radius",
-                    &brushRadius,
-                    1,
-                    20
-                );
-
-
-            if (brush_radius_modified)
-            {
-                HRL_SetWidgetSize(
-                    brush_preview_widget,
-                    static_cast<float>(brushRadius) / 100.f,
-                    static_cast<float>(brushRadius) / 100.f
-                );
-            }
+            ImGui::SliderInt(
+                "Brush Radius",
+                &brushRadius,
+                1,
+                20
+            );
 
 
             ImGui::Checkbox(
@@ -4381,8 +5041,8 @@ namespace editor
                 }
 
 
-                if (i < 3)
-                    ImGui::SameLine();
+                if ((i + 1) % 8 != 0)
+									ImGui::SameLine();
 
 
                 ImGui::PopID();
@@ -4632,9 +5292,14 @@ static void MouseMove(
     double x,
     double y)
 {
+    double scene_x = x;
+    double scene_y = y;
+
+    MouseToScene(x, y, scene_x, scene_y);
+
     HRL_MouseMovedCallback(
-        static_cast<float>(x),
-        static_cast<float>(y)
+        static_cast<float>(scene_x),
+        static_cast<float>(scene_y)
     );
 
     if (haveLastMousePosition)
@@ -4829,6 +5494,10 @@ int main()
         ErrorCallback
     );
 
+
+    // Needs HRL (texture loading) : after HRL_InitContext, before editor::Init.
+    LoadCustomCursor(win);
+
     HRL_SetDebugLineThickness(
         3.f
     );
@@ -4987,7 +5656,7 @@ int main()
 
     auto font_data =
         lynx::fs::ReadBinary(
-            "Ubuntu-Regular.ttf"
+            "normal-font.ttf"
         );
 
 
@@ -5166,6 +5835,8 @@ int main()
 
     auto reload_game_module = [&]() -> bool
     {
+        BusyCursorScope busy_cursor;
+
         std::cout << "[RELOAD] Reloading libGameExample.dll\n";
 
         // 1. Editor side : stops the game, saves pending edits, drops every actor

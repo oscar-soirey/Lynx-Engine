@@ -332,7 +332,7 @@ bool Pawn::BeginAttack()
     return true;
 }
 
-void Pawn::Attack(float direction)
+void Pawn::Attack(float direction, float direction_y)
 {
     float voxel_x;
     float voxel_y;
@@ -347,10 +347,24 @@ void Pawn::Attack(float direction)
         return;
     }
 
-    const float center_x =
-        voxel_x + direction * attack_center_distance;
+    // Attaque verticale (haut / bas) ou horizontale (devant)
+    const bool vertical = direction_y != 0.f;
+    const float dir_y = direction_y > 0.f ? 1.f : -1.f;
 
-    const float center_y = voxel_y;
+    const float center_x =
+        vertical ? voxel_x : voxel_x + direction * attack_center_distance;
+
+    const float center_y =
+        vertical ? voxel_y + dir_y * attack_center_distance : voxel_y;
+
+    // Vrai si le point est derriere le Pawn par rapport a l'axe de l'attaque
+    auto is_behind = [&](float px, float py)
+    {
+        const float forward = vertical
+            ? (py - voxel_y) * dir_y
+            : (px - voxel_x) * direction;
+        return forward < -0.5f;
+    };
 
     const int min_x = static_cast<int>(
         std::floor(center_x - attack_radius - 1.f));
@@ -370,10 +384,7 @@ void Pawn::Attack(float direction)
 
     for (const collision::PawnHit& hit : hits)
     {
-        const float forward =
-            (hit.box.x - voxel_x) * direction;
-
-        if (forward < -0.5f)
+        if (is_behind(hit.box.x, hit.box.y))
             continue;
 
         hit.pawn->Hurt(this, hurt_amount_);
@@ -404,10 +415,7 @@ void Pawn::Attack(float direction)
                 continue;
             }
 
-            const float forward =
-                (static_cast<float>(x) - voxel_x) * direction;
-
-            if (forward < -0.5f)
+            if (is_behind(static_cast<float>(x), static_cast<float>(y)))
                 continue;
 
             const uint8_t type = HRL_GetVoxelType(

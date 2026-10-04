@@ -49,11 +49,16 @@ private:
 
 	bool attack_event_done_=false;
 
+	// Direction verticale de l'attaque en cours : +1 haut, -1 bas, 0 devant (lue au debut de l'attaque)
+	float attack_dir_y_ = 0.f;
+	static constexpr float kAttackAimThreshold = 0.5f;
+
 	int life=3;
 
 	//actions
 	lynx::InputAction jump_action_ = "jump";
 	lynx::InputAxis1D move_action_ = "move_x";
+	lynx::InputAxis1D move_y_action_ = "move_y";
 
 	lynx::InputAction attack_action_ = "attack";
 	lynx::InputAction cast_action_ = "cast";

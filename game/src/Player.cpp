@@ -18,7 +18,7 @@ Player::Player()
 
     //halo light autour du player
     point_light_ = HRL_CreateLight(lynx::GetScene(), HRL_POINT_LIGHT);
-    HRL_SetLightIntensity(point_light_, 20.f);
+    HRL_SetLightIntensity(point_light_, 5.f);
     HRL_SetLightColor(point_light_, 0.9f, 0.9f, 1.0f);
 }
 
@@ -126,7 +126,7 @@ void Player::Init()
 
     _Attack.add_event(1, [this]()
     {
-        Attack(facing_right_ ? 1.0f : -1.0f);
+        Attack(facing_right_ ? 1.0f : -1.0f, attack_dir_y_);
         whoosh_src_.Play();
     });
 
@@ -134,7 +134,7 @@ void Player::Init()
     {
         if (attack_event_done_) return;
         attack_event_done_ = true;
-        Attack(facing_right_ ? 1.0f : -1.0f);
+        Attack(facing_right_ ? 1.0f : -1.0f, attack_dir_y_);
         whoosh_src_.Play();
     });
 
@@ -257,6 +257,16 @@ void Player::ProcessInput()
     if (attack_action_.IsPressed() && BeginAttack())
     {
         attack_event_done_ = false;
+
+        // Haut / bas selon l'axe vertical tenu au moment du coup
+        const float aim_y = move_y_action_.GetValue();
+        if (aim_y > kAttackAimThreshold)
+            attack_dir_y_ = 1.f;
+        else if (aim_y < -kAttackAimThreshold)
+            attack_dir_y_ = -1.f;
+        else
+            attack_dir_y_ = 0.f;
+
         anim_manager_.set_trigger("start-attack");
     }
     if (cast_action_.IsPressed())

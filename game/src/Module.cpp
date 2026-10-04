@@ -1,7 +1,6 @@
 #include "GameClasses.h"
 #include "Collision.h"
 #include "Player.h"
-#include "Ennemies/a.h"
 #include "Ennemies/Mushroom.h"
 #include "Objects/Bouncy.h"
 
@@ -29,7 +28,6 @@ LYNX_LINK_MODULE(
 		LYNX_MODULE_REGISTER(StaticSprite);
 		LYNX_MODULE_REGISTER(Pawn);
 		LYNX_MODULE_REGISTER(Player);
-		LYNX_MODULE_REGISTER(A);
 		LYNX_MODULE_REGISTER(Mushroom);
 		LYNX_MODULE_REGISTER(Bouncy);
 )
