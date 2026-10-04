@@ -1511,14 +1511,14 @@ ImGuiStyle::ImGuiStyle()
 
 #ifndef IMGUI_DISABLE_PIXEL_STYLE
     // [PIXEL STYLE] Aseprite-like look. Purely visual: paddings/spacings are left untouched so layouts don't move.
-    // A rounding > 0 means "1 pixel notch on the corners" (see ImDrawList::AddRect/AddRectFilled), not an arc.
+    // A rounding > 0 means "stair-stepped pixel corners" (1..2 -> 1px, 3..4 -> 2px...), see ImDrawList::AddRect/AddRectFilled. Not an arc.
     WindowRounding              = 0.0f;
     ChildRounding               = 0.0f;
     PopupRounding               = 1.0f;
     FrameRounding               = 1.0f;
     ScrollbarRounding           = 1.0f;
     GrabRounding                = 1.0f;
-    TabRounding                 = 1.0f;
+    TabRounding                 = 3.0f;             // 2px stair-stepped corners
     PopupBorderSize             = 1.0f;
     FrameBorderSize             = 1.0f;             // Outlined buttons / fields / sliders
     TabBorderSize               = 1.0f;
@@ -3991,6 +3991,18 @@ void ImGui::RenderTextEllipsis(ImDrawList* draw_list, const ImVec2& pos_min, con
 }
 
 // Render a rectangle shaped with optional rounding and borders
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+// [PIXEL STYLE] Frames filled with a FrameBg* color (fields, checkboxes, sliders, progress bars...) or a pressed ButtonActive are drawn "sunken", everything else "raised".
+static bool ImPixelIsSunkenFill(const ImGuiStyle& style, ImU32 col)
+{
+    static const ImGuiCol sunken_cols[] = { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_ButtonActive };
+    for (int n = 0; n < IM_ARRAYSIZE(sunken_cols); n++)
+        if ((ImGui::ColorConvertFloat4ToU32(style.Colors[sunken_cols[n]]) & 0x00FFFFFF) == (col & 0x00FFFFFF))
+            return true;
+    return false;
+}
+#endif
+
 void ImGui::RenderFrame(ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, bool borders, float rounding)
 {
     ImGuiContext& g = *GImGui;
@@ -4001,6 +4013,9 @@ void ImGui::RenderFrame(ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, bool borders
     {
         window->DrawList->AddRect(p_min + ImVec2(1, 1), p_max + ImVec2(1, 1), GetColorU32(ImGuiCol_BorderShadow), rounding, 0, border_size);
         window->DrawList->AddRect(p_min, p_max, GetColorU32(ImGuiCol_Border), rounding, 0, border_size);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+        RenderPixelBevel(window->DrawList, p_min, p_max, fill_col, border_size, ImPixelIsSunkenFill(g.Style, fill_col), rounding);
+#endif
     }
 }
 
@@ -7469,6 +7484,9 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
             if (window->ViewportOwned)
                 title_bar_col |= IM_COL32_A_MASK; // No alpha
             window->DrawList->AddRectFilled(title_bar_rect.Min, title_bar_rect.Max, title_bar_col, window_rounding, ImDrawFlags_RoundCornersTop);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+            RenderPixelBevel(window->DrawList, title_bar_rect.Min, title_bar_rect.Max, title_bar_col, window_border_size, false, window_rounding, ImDrawFlags_RoundCornersTop);
+#endif
         }
 
         // Menu bar
@@ -7519,10 +7537,24 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
                 const ImGuiResizeGripDef& grip = resize_grip_def[resize_grip_n];
                 const ImVec2 corner = ImLerp(window->Pos, window->Pos + window->Size, grip.CornerPosN);
                 const float border_inner = IM_ROUND(window_border_size * 0.5f);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+                // [PIXEL STYLE] Staircase triangle with its right angle in the window corner, one 1px row per step
+                {
+                    const float cx = ImFloor(corner.x + 0.5f), cy = ImFloor(corner.y + 0.5f);
+                    const int sz = (int)resize_grip_draw_size, bi = (int)border_inner;
+                    for (int i = 0; i < sz - bi; i++)
+                    {
+                        const float xa = cx + grip.InnerDir.x * (float)bi,        xb = cx + grip.InnerDir.x * (float)(sz - i);
+                        const float ya = cy + grip.InnerDir.y * (float)(bi + i),  yb = cy + grip.InnerDir.y * (float)(bi + i + 1);
+                        window->DrawList->AddRectFilled(ImVec2(ImMin(xa, xb), ImMin(ya, yb)), ImVec2(ImMax(xa, xb), ImMax(ya, yb)), col);
+                    }
+                }
+#else
                 window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(border_inner, resize_grip_draw_size) : ImVec2(resize_grip_draw_size, border_inner)));
                 window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(resize_grip_draw_size, border_inner) : ImVec2(border_inner, resize_grip_draw_size)));
                 window->DrawList->PathArcToFast(ImVec2(corner.x + grip.InnerDir.x * (window_rounding + border_inner), corner.y + grip.InnerDir.y * (window_rounding + border_inner)), window_rounding, grip.AngleMin12, grip.AngleMax12);
                 window->DrawList->PathFillConvex(col);
+#endif
             }
         }
 

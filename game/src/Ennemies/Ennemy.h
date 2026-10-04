@@ -64,12 +64,12 @@ protected:
 	// Vision
 	bool HasLineOfSight() const;
 
-	float knockback_intensity_ = 20.0f;
+	float knockback_intensity_ = 30.0f;
 
 	// IA
 	bool process_behavior_tick_=true;
 	Actor *target_ = nullptr;
-	float see_radius_ = 300.f;
+	float see_radius_ = 15.f;
 
 	// Parametres du saut anti-blocage
 	float jump_velocity_ = 30.f;          // vitesse verticale du saut
@@ -104,7 +104,7 @@ protected:
 	// Parametres d'attaque
 	float attack_range_ = 3.f;      // distance (unites monde) a partir de laquelle l'ennemi attaque
 	float attack_damage_ = 10.f;
-	float attack_windup_ = 0.4f;    // delai entre le debut de l'attaque et l'instant du coup (s)
+	float attack_windup_ = 0.4f;    // delai entre le debut de l'attaque et l'instant du coup
 	float attack_duration_ = 0.8f;  // duree totale de l'attaque (s), doit etre >= windup
 	float attack_cooldown_ = 1.0f;  // delai avant de pouvoir re-attaquer (s)
 

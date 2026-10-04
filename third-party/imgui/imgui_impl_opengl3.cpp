@@ -607,6 +607,10 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
     ImVec2 clip_off = draw_data->DisplayPos;         // (0,0) unless using multi-viewports
     ImVec2 clip_scale = draw_data->FramebufferScale; // (1,1) unless using retina display which are often (2,2)
 
+#ifndef IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR
+    GLuint last_forced_linear_tex = 0xFFFFFFFFu;
+#endif
+
     // Render command lists
     for (const ImDrawList* draw_list : draw_data->CmdLists)
     {
@@ -666,6 +670,20 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
 
                 // Bind texture, Draw
                 GL_CALL(glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID()));
+#ifndef IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR
+                // [PIXEL STYLE] Force bilinear sampling on every texture used by Dear ImGui (font atlas, user images...), every time it is bound.
+                // Protects against the application (or another library) changing the filter to NEAREST behind our back, which makes text look blurry/uneven.
+                // Define IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR to let the application pick the filter of its own textures.
+                {
+                    const GLuint bound_tex = (GLuint)(intptr_t)pcmd->GetTexID();
+                    if (bound_tex != last_forced_linear_tex)
+                    {
+                        GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+                        GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+                        last_forced_linear_tex = bound_tex;
+                    }
+                }
+#endif
 #ifdef IMGUI_IMPL_OPENGL_MAY_HAVE_VTX_OFFSET
                 if (bd->GlVersion >= 320)
                     GL_CALL(glDrawElementsBaseVertex(GL_TRIANGLES, (GLsizei)pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, (void*)(intptr_t)(pcmd->IdxOffset * sizeof(ImDrawIdx)), (GLint)pcmd->VtxOffset));

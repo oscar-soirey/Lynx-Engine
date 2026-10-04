@@ -187,10 +187,13 @@ void ImGui::StyleColorsDark(ImGuiStyle* dst)
     ImVec4* colors = style->Colors;
 
 #ifndef IMGUI_DISABLE_PIXEL_STYLE
-    // [PIXEL STYLE] Aseprite-like dark theme: flat greys, near-black 1px outlines, one warm accent color.
-    // Tweak the palette here. (Define IMGUI_DISABLE_PIXEL_STYLE to restore the stock Dear ImGui dark theme.)
+    // [PIXEL STYLE] Aseprite-like theme. Tweak the palettes here.
+    //  - default: Aseprite "classic" (light grey faces, beige panels, blue-grey selection, black outlines). Colors sampled from Aseprite.
+    //  - #define IMGUI_PIXEL_THEME_DARK: flat dark greys with one warm accent color.
+    //  - #define IMGUI_DISABLE_PIXEL_STYLE: stock Dear ImGui dark theme.
     #define PXC(r, g, b)        ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, 1.00f)
     #define PXCA(r, g, b, a)    ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a) / 255.0f)
+#ifdef IMGUI_PIXEL_THEME_DARK
     const ImVec4 c_outline      = PXC( 15,  15,  15);   // 1px outlines
     const ImVec4 c_deep         = PXC( 30,  30,  30);   // Inset fields, scrollbar tracks, unfocused tabs
     const ImVec4 c_panel        = PXC( 46,  46,  46);   // Window background
@@ -266,6 +269,83 @@ void ImGui::StyleColorsDark(ImGuiStyle* dst)
     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.40f);
     colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
+#else
+    const ImVec4 c_outline      = PXC(  0,   0,   0);   // 1px outlines
+    const ImVec4 c_bg           = PXC(211, 203, 190);   // #d3cbbe Panels / tab bar strip
+    const ImVec4 c_bg_dark      = PXC(189, 181, 168);   // Tracks, inactive title bars
+    const ImVec4 c_bg_darker    = PXC(156, 149, 137);
+    const ImVec4 c_face         = PXC(198, 198, 198);   // #c6c6c6 Button / tab face
+    const ImVec4 c_face_hot     = PXC(222, 222, 222);
+    const ImVec4 c_face_down    = PXC(169, 169, 169);
+    const ImVec4 c_field        = PXC(255, 255, 255);   // Text fields, sliders, checkboxes
+    const ImVec4 c_sel          = PXC(124, 145, 157);   // #7c919d Selected tab / header / slider grab
+    const ImVec4 c_sel_hot      = PXC(140, 164, 179);   // #8ca4b3
+    const ImVec4 c_sel_light    = PXC(173, 202, 222);   // #adcade
+    const ImVec4 c_sel_dark     = PXC( 84,  99, 108);   // #54636c
+
+    colors[ImGuiCol_Text]                   = PXC(  0,   0,   0);
+    colors[ImGuiCol_TextDisabled]           = PXC(133, 133, 133);
+    colors[ImGuiCol_WindowBg]               = c_bg;
+    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_PopupBg]                = c_bg;
+    colors[ImGuiCol_Border]                 = c_outline;
+    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_FrameBg]                = c_field;
+    colors[ImGuiCol_FrameBgHovered]         = PXC(242, 242, 242);
+    colors[ImGuiCol_FrameBgActive]          = PXC(232, 232, 232);
+    colors[ImGuiCol_TitleBg]                = c_bg_dark;
+    colors[ImGuiCol_TitleBgActive]          = c_bg;
+    colors[ImGuiCol_TitleBgCollapsed]       = c_bg_dark;
+    colors[ImGuiCol_MenuBarBg]              = c_bg;
+    colors[ImGuiCol_ScrollbarBg]            = c_bg_dark;
+    colors[ImGuiCol_ScrollbarGrab]          = c_face;
+    colors[ImGuiCol_ScrollbarGrabHovered]   = c_face_hot;
+    colors[ImGuiCol_ScrollbarGrabActive]    = c_face_down;
+    colors[ImGuiCol_CheckMark]              = PXC(  0,   0,   0);
+    colors[ImGuiCol_SliderGrab]             = c_sel;
+    colors[ImGuiCol_SliderGrabActive]       = c_sel_hot;
+    colors[ImGuiCol_Button]                 = c_face;
+    colors[ImGuiCol_ButtonHovered]          = c_face_hot;
+    colors[ImGuiCol_ButtonActive]           = c_face_down;
+    colors[ImGuiCol_Header]                 = c_sel;
+    colors[ImGuiCol_HeaderHovered]          = c_sel_light;
+    colors[ImGuiCol_HeaderActive]           = c_sel_hot;
+    colors[ImGuiCol_Separator]              = PXC(140, 134, 124);
+    colors[ImGuiCol_SeparatorHovered]       = c_sel;
+    colors[ImGuiCol_SeparatorActive]        = c_sel_dark;
+    colors[ImGuiCol_ResizeGrip]             = c_bg_darker;
+    colors[ImGuiCol_ResizeGripHovered]      = c_sel;
+    colors[ImGuiCol_ResizeGripActive]       = c_sel_dark;
+    colors[ImGuiCol_InputTextCursor]        = PXC(  0,   0,   0);
+    colors[ImGuiCol_TabHovered]             = c_face_hot;
+    colors[ImGuiCol_Tab]                    = c_face;
+    colors[ImGuiCol_TabSelected]            = c_sel;
+    colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);   // No overline in Aseprite
+    colors[ImGuiCol_TabDimmed]              = PXC(177, 177, 177);
+    colors[ImGuiCol_TabDimmedSelected]      = PXC(143, 159, 169);
+    colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_DockingPreview]         = PXCA(124, 145, 157, 160);
+    colors[ImGuiCol_DockingEmptyBg]         = c_bg_darker;
+    colors[ImGuiCol_PlotLines]              = c_sel_dark;
+    colors[ImGuiCol_PlotLinesHovered]       = PXC(200,  84,  30);
+    colors[ImGuiCol_PlotHistogram]          = c_sel;
+    colors[ImGuiCol_PlotHistogramHovered]   = c_sel_hot;
+    colors[ImGuiCol_TableHeaderBg]          = c_face;
+    colors[ImGuiCol_TableBorderStrong]      = c_outline;
+    colors[ImGuiCol_TableBorderLight]       = PXC(160, 154, 142);
+    colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_TableRowBgAlt]          = ImVec4(0.00f, 0.00f, 0.00f, 0.05f);
+    colors[ImGuiCol_TextLink]               = PXC( 46,  98, 140);
+    colors[ImGuiCol_TextSelectedBg]         = PXCA(124, 145, 157, 150);
+    colors[ImGuiCol_TreeLines]              = PXC(140, 134, 124);
+    colors[ImGuiCol_DragDropTarget]         = PXC(200,  84,  30);
+    colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_UnsavedMarker]          = c_sel_dark;
+    colors[ImGuiCol_NavCursor]              = PXC( 46, 109, 164);
+    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.35f);
+    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.40f);
+#endif
     #undef PXC
     #undef PXCA
 #else
@@ -1579,14 +1659,9 @@ void ImDrawList::AddLine(const ImVec2& p1, const ImVec2& p2, ImU32 col, float th
 
 #ifndef IMGUI_DISABLE_PIXEL_STYLE
 // [PIXEL STYLE] Pixel-art rectangles (Aseprite-like).
-// Any rounding > 0 is turned into a square "notch" of IMGUI_PIXEL_CORNER_SIZE pixels cut out of the corner
-// (a one step staircase instead of an arc). Everything is drawn with axis-aligned rectangles snapped to the
-// pixel grid, so edges stay perfectly crisp, with or without anti-aliasing.
+// Any rounding > 0 is turned into a stair-stepped corner of N pixels (see ImGui::RenderPixelCornerSize()) instead of an arc.
+// Everything is drawn with axis-aligned rectangles snapped to the pixel grid, so edges stay perfectly crisp, with or without anti-aliasing.
 // Define IMGUI_DISABLE_PIXEL_STYLE (e.g. in imconfig.h) to get the stock Dear ImGui behavior back.
-#ifndef IMGUI_PIXEL_CORNER_SIZE
-#define IMGUI_PIXEL_CORNER_SIZE 1.0f
-#endif
-
 struct ImPixelRect
 {
     float x0, y0, x1, y1;   // Pixel-snapped bounds (max is exclusive)
@@ -1607,8 +1682,121 @@ static bool ImPixelRectSetup(ImPixelRect* r, const ImVec2& p_min, const ImVec2& 
     r->tr = (flags & ImDrawFlags_RoundCornersTopRight) != 0;
     r->br = (flags & ImDrawFlags_RoundCornersBottomRight) != 0;
     r->bl = (flags & ImDrawFlags_RoundCornersBottomLeft) != 0;
-    r->n = ImMin(IMGUI_PIXEL_CORNER_SIZE, ImFloor(ImMin(r->x1 - r->x0, r->y1 - r->y0) * 0.5f));
+    r->n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(r->x1 - r->x0, r->y1 - r->y0) * 0.5f));
     return r->n >= 1.0f;
+}
+#endif // IMGUI_DISABLE_PIXEL_STYLE
+
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+// Bevel colors derived from the face color, so that any palette gets a coherent relief.
+// Highlight: light faces go (almost) white, mid tones get a lighter tint. Shade: ~68% of the face.
+static ImU32 ImPixelBevelColor(ImU32 face, bool highlight)
+{
+    ImVec4 c = ImGui::ColorConvertU32ToFloat4(face);
+    if (highlight)
+    {
+        const float lum = c.x * 0.299f + c.y * 0.587f + c.z * 0.114f;
+        const float f = ImClamp((lum - 0.45f) * 3.2f, 0.20f, 1.0f);
+        c.x = ImLerp(c.x, 1.0f, f); c.y = ImLerp(c.y, 1.0f, f); c.z = ImLerp(c.z, 1.0f, f);
+    }
+    else
+    {
+        c.x *= 0.68f; c.y *= 0.68f; c.z *= 0.68f;
+    }
+    return ImGui::ColorConvertFloat4ToU32(c);   // Alpha is preserved
+}
+
+void ImGui::RenderPixelBevel(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, float inset, bool sunken, float rounding, ImDrawFlags flags)
+{
+    if ((face_col & IM_COL32_A_MASK) == 0)
+        return;
+    const float b = ImFloor(inset + 0.5f);
+    const float ox0 = ImFloor(p_min.x + 0.5f), oy0 = ImFloor(p_min.y + 0.5f), ox1 = ImFloor(p_max.x + 0.5f), oy1 = ImFloor(p_max.y + 0.5f);   // Outer rect
+    const float ix0 = ox0 + b, iy0 = oy0 + b, ix1 = ox1 - b, iy1 = oy1 - b;                                                                      // Inner rect
+    if (ix1 - ix0 < 3.0f || iy1 - iy0 < 3.0f)
+        return;
+
+    // Stair-stepped corners of the outline we are inside of
+    float ntl = 0.0f, ntr = 0.0f, nbr = 0.0f, nbl = 0.0f;
+    if (rounding >= 0.5f && (flags & ImDrawFlags_RoundCornersMask_) != ImDrawFlags_RoundCornersNone)
+    {
+        flags = FixRectCornerFlags(flags);
+        const float n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(ox1 - ox0, oy1 - oy0) * 0.5f));
+        ntl = (flags & ImDrawFlags_RoundCornersTopLeft) ? n : 0.0f;     ntr = (flags & ImDrawFlags_RoundCornersTopRight) ? n : 0.0f;
+        nbr = (flags & ImDrawFlags_RoundCornersBottomRight) ? n : 0.0f; nbl = (flags & ImDrawFlags_RoundCornersBottomLeft) ? n : 0.0f;
+    }
+    else if (rounding >= 0.5f)
+    {
+        const float n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(ox1 - ox0, oy1 - oy0) * 0.5f));
+        ntl = ntr = nbr = nbl = n;
+    }
+
+    const ImU32 hi = ImPixelBevelColor(face_col, true), sh = ImPixelBevelColor(face_col, false);
+    const ImU32 col_tl = sunken ? sh : hi, col_br = sunken ? hi : sh;
+    float sx, ex, sy, ey;
+    sx = ImMax(ix0, ox0 + ntl); ex = ImMin(ix1, ox1 - ntr);                     // Top row
+    if (ex > sx) draw_list->AddRectFilled(ImVec2(sx, iy0), ImVec2(ex, iy0 + 1.0f), col_tl);
+    sy = ImMax(iy0 + 1.0f, oy0 + ntl); ey = ImMin(iy1 - 1.0f, oy1 - nbl);       // Left column
+    if (ey > sy) draw_list->AddRectFilled(ImVec2(ix0, sy), ImVec2(ix0 + 1.0f, ey), col_tl);
+    sx = ImMax(ix0, ox0 + nbl); ex = ImMin(ix1 - 1.0f, ox1 - nbr);              // Bottom row
+    if (ex > sx) draw_list->AddRectFilled(ImVec2(sx, iy1 - 1.0f), ImVec2(ex, iy1), col_br);
+    sy = ImMax(iy0 + 1.0f, oy0 + ntr); ey = ImMin(iy1, oy1 - nbr);              // Right column
+    if (ey > sy) draw_list->AddRectFilled(ImVec2(ix1 - 1.0f, sy), ImVec2(ix1, ey), col_br);
+}
+
+void ImGui::RenderPixelBox(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, ImU32 outline_col, float rounding, ImDrawFlags flags, bool sunken)
+{
+    draw_list->AddRectFilled(p_min, p_max, face_col, rounding, flags);
+    draw_list->AddRect(p_min, p_max, outline_col, rounding, flags, 1.0f);
+    RenderPixelBevel(draw_list, p_min, p_max, face_col, 1.0f, sunken, rounding, flags);
+}
+
+// Horizontal span [x0,x1) of row 'j' of a disc of diameter 'D' (sampled at pixel centers: 5 -> 3,5,5,5,3). Returns false if the row is empty.
+static bool ImPixelDiscSpan(int D, int j, int* x0, int* x1)
+{
+    if (D <= 0 || j < 0 || j >= D)
+        return false;
+    const float r = (float)D * 0.5f;
+    const float dy = ((float)j + 0.5f) - r;
+    const float v = r * r - dy * dy;
+    if (v <= 0.0f)
+        return false;
+    const float hw = ImSqrt(v);
+    *x0 = (int)ImFloor(r - hw + 0.5f);
+    *x1 = (int)ImFloor(r + hw + 0.5f);
+    return *x1 > *x0;
+}
+
+void ImGui::RenderPixelDisc(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col)
+{
+    const float ox = ImFloor(p_min.x + 0.5f), oy = ImFloor(p_min.y + 0.5f);
+    for (int j = 0; j < diameter; j++)
+    {
+        int x0, x1;
+        if (ImPixelDiscSpan(diameter, j, &x0, &x1))
+            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + x1, oy + j + 1), col);
+    }
+}
+
+void ImGui::RenderPixelCircle(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col)
+{
+    const float ox = ImFloor(p_min.x + 0.5f), oy = ImFloor(p_min.y + 0.5f);
+    for (int j = 0; j < diameter; j++)
+    {
+        int x0, x1, ix0, ix1;
+        if (!ImPixelDiscSpan(diameter, j, &x0, &x1))
+            continue;
+        if (ImPixelDiscSpan(diameter - 2, j - 1, &ix0, &ix1))   // Inner disc is the same disc, 2px smaller, shifted by 1px
+        {
+            ix0 += 1; ix1 += 1;
+            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + ix0, oy + j + 1), col);
+            draw_list->AddRectFilled(ImVec2(ox + ix1, oy + j), ImVec2(ox + x1, oy + j + 1), col);
+        }
+        else
+        {
+            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + x1, oy + j + 1), col);
+        }
+    }
 }
 #endif // IMGUI_DISABLE_PIXEL_STYLE
 
@@ -1622,20 +1810,48 @@ void ImDrawList::AddRect(const ImVec2& p_min, const ImVec2& p_max, ImU32 col, fl
     ImPixelRect r;
     if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
     {
-        // Outline = 4 edges. Edges are shortened where a corner is notched, so that nothing overlaps (no double blending with alpha colors).
         const float t = ImMax(1.0f, ImFloor(thickness + 0.5f));
-        const float c = ImMax(r.n, t);                                  // Notch is at least as big as the border thickness
-        if (c * 2.0f > ImMin(r.x1 - r.x0, r.y1 - r.y0))
+        const int n = (int)r.n;
+        if (t <= 1.0f)
         {
-            AddRectFilled(p_min, p_max, col, rounding, flags);          // Too small to have a hollow center
-            return;
+            // 1px outline: 4 edges + the diagonal pixels of the stair-stepped corners. Nothing overlaps (no double blending with alpha colors).
+            if (n * 2 > (int)ImMin(r.x1 - r.x0, r.y1 - r.y0))
+            {
+                AddRectFilled(p_min, p_max, col, rounding, flags);      // Too small to have a hollow center
+                return;
+            }
+            const float tl = r.tl ? (float)n : 0.0f, tr = r.tr ? (float)n : 0.0f, br = r.br ? (float)n : 0.0f, bl = r.bl ? (float)n : 0.0f;
+            const int num_rects = 4 + (n - 1) * ((r.tl ? 1 : 0) + (r.tr ? 1 : 0) + (r.br ? 1 : 0) + (r.bl ? 1 : 0));
+            PrimReserve(6 * num_rects, 4 * num_rects);
+            PrimRect(ImVec2(r.x0 + tl, r.y0),        ImVec2(r.x1 - tr, r.y0 + 1.0f), col);                                       // Top
+            PrimRect(ImVec2(r.x0 + bl, r.y1 - 1.0f), ImVec2(r.x1 - br, r.y1),        col);                                       // Bottom
+            PrimRect(ImVec2(r.x0,        r.y0 + (r.tl ? tl : 1.0f)), ImVec2(r.x0 + 1.0f, r.y1 - (r.bl ? bl : 1.0f)), col);       // Left
+            PrimRect(ImVec2(r.x1 - 1.0f, r.y0 + (r.tr ? tr : 1.0f)), ImVec2(r.x1,        r.y1 - (r.br ? br : 1.0f)), col);       // Right
+            for (int i = 1; i < n; i++)
+            {
+                const float k = (float)i, m = (float)(n - i);
+                if (r.tl) PrimRect(ImVec2(r.x0 + m,        r.y0 + k),        ImVec2(r.x0 + m + 1.0f, r.y0 + k + 1.0f), col);
+                if (r.tr) PrimRect(ImVec2(r.x1 - m - 1.0f, r.y0 + k),        ImVec2(r.x1 - m,        r.y0 + k + 1.0f), col);
+                if (r.bl) PrimRect(ImVec2(r.x0 + m,        r.y1 - k - 1.0f), ImVec2(r.x0 + m + 1.0f, r.y1 - k),        col);
+                if (r.br) PrimRect(ImVec2(r.x1 - m - 1.0f, r.y1 - k - 1.0f), ImVec2(r.x1 - m,        r.y1 - k),        col);
+            }
         }
-        const float tl = r.tl ? c : 0.0f, tr = r.tr ? c : 0.0f, br = r.br ? c : 0.0f, bl = r.bl ? c : 0.0f;
-        PrimReserve(24, 16);
-        PrimRect(ImVec2(r.x0 + tl, r.y0),     ImVec2(r.x1 - tr, r.y0 + t), col);                                                    // Top
-        PrimRect(ImVec2(r.x0 + bl, r.y1 - t), ImVec2(r.x1 - br, r.y1),     col);                                                    // Bottom
-        PrimRect(ImVec2(r.x0,     r.y0 + (r.tl ? tl : t)), ImVec2(r.x0 + t, r.y1 - (r.bl ? bl : t)), col);                          // Left
-        PrimRect(ImVec2(r.x1 - t, r.y0 + (r.tr ? tr : t)), ImVec2(r.x1,     r.y1 - (r.br ? br : t)), col);                          // Right
+        else
+        {
+            // Thick outline: simple square notch, at least as big as the thickness so edges never overlap
+            const float c = ImMax((float)n, t);
+            if (c * 2.0f > ImMin(r.x1 - r.x0, r.y1 - r.y0))
+            {
+                AddRectFilled(p_min, p_max, col, rounding, flags);
+                return;
+            }
+            const float tl = r.tl ? c : 0.0f, tr = r.tr ? c : 0.0f, br = r.br ? c : 0.0f, bl = r.bl ? c : 0.0f;
+            PrimReserve(24, 16);
+            PrimRect(ImVec2(r.x0 + tl, r.y0),     ImVec2(r.x1 - tr, r.y0 + t), col);
+            PrimRect(ImVec2(r.x0 + bl, r.y1 - t), ImVec2(r.x1 - br, r.y1),     col);
+            PrimRect(ImVec2(r.x0,     r.y0 + (r.tl ? tl : t)), ImVec2(r.x0 + t, r.y1 - (r.bl ? bl : t)), col);
+            PrimRect(ImVec2(r.x1 - t, r.y0 + (r.tr ? tr : t)), ImVec2(r.x1,     r.y1 - (r.br ? br : t)), col);
+        }
         return;
     }
 #endif
@@ -1654,12 +1870,16 @@ void ImDrawList::AddRectFilled(const ImVec2& p_min, const ImVec2& p_max, ImU32 c
     ImPixelRect r;
     if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
     {
-        // Filled rect with notched corners = top band + middle band + bottom band (no overlap, no seams)
-        const float n = r.n;
-        PrimReserve(18, 12);
-        PrimRect(ImVec2(r.x0 + (r.tl ? n : 0.0f), r.y0),     ImVec2(r.x1 - (r.tr ? n : 0.0f), r.y0 + n), col);
-        PrimRect(ImVec2(r.x0,                     r.y0 + n), ImVec2(r.x1,                     r.y1 - n), col);
-        PrimRect(ImVec2(r.x0 + (r.bl ? n : 0.0f), r.y1 - n), ImVec2(r.x1 - (r.br ? n : 0.0f), r.y1),     col);
+        // Filled rect with stair-stepped corners = one row per step at the top and bottom + a middle band (no overlap, no seams)
+        const int n = (int)r.n;
+        PrimReserve(6 * (2 * n + 1), 4 * (2 * n + 1));
+        for (int i = 0; i < n; i++)
+        {
+            const float m = (float)(n - i), k = (float)i;
+            PrimRect(ImVec2(r.x0 + (r.tl ? m : 0.0f), r.y0 + k),        ImVec2(r.x1 - (r.tr ? m : 0.0f), r.y0 + k + 1.0f), col);
+            PrimRect(ImVec2(r.x0 + (r.bl ? m : 0.0f), r.y1 - k - 1.0f), ImVec2(r.x1 - (r.br ? m : 0.0f), r.y1 - k),        col);
+        }
+        PrimRect(ImVec2(r.x0, r.y0 + (float)n), ImVec2(r.x1, r.y1 - (float)n), col);
         return;
     }
 #endif
@@ -2572,8 +2792,15 @@ ImFontConfig::ImFontConfig()
 {
     memset(this, 0, sizeof(*this));
     FontDataOwnedByAtlas = true;
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Glyphs sit on whole pixels (no fractional advance) so bilinear sampling never blurs text. Oversampling is useless in that case.
+    PixelSnapH = true;
+    OversampleH = 1;
+    OversampleV = 1;
+#else
     OversampleH = 0; // Auto == 1 or 2 depending on size
     OversampleV = 0; // Auto == 1
+#endif
     GlyphMaxAdvanceX = FLT_MAX;
     RasterizerMultiply = 1.0f;
     RasterizerDensity = 1.0f;
@@ -6013,6 +6240,26 @@ void ImGui::RenderArrow(ImDrawList* draw_list, ImVec2 pos, ImU32 col, ImGuiDir d
     float r = h * 0.40f * scale;
     ImVec2 center = pos + ImVec2(h * 0.50f, h * 0.50f * scale);
 
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art triangle (a 45 degrees staircase): half base = 'half', depth = half + 1 rows
+    {
+        IM_ASSERT(dir != ImGuiDir_None && dir != ImGuiDir_COUNT);
+        const int half = ImMax(1, (int)ImFloor(r * 0.65f + 0.5f));
+        const int len = half + 1;
+        const float cx = ImFloor(center.x + 0.5f), cy = ImFloor(center.y + 0.5f);
+        const bool vertical = (dir == ImGuiDir_Up || dir == ImGuiDir_Down);
+        const float t0 = ImFloor(((vertical ? center.y : center.x) - (float)len * 0.5f) + 0.5f);     // Where the arrow starts along its axis
+        for (int i = 0; i < len; i++)
+        {
+            const int w = half - i;                                                                   // Half-width of this step (shrinks towards the tip)
+            const int k = (dir == ImGuiDir_Down || dir == ImGuiDir_Right) ? i : len - 1 - i;          // Position along the axis
+            if (vertical)
+                draw_list->AddRectFilled(ImVec2(cx - w, t0 + k), ImVec2(cx + w + 1.0f, t0 + k + 1.0f), col);
+            else
+                draw_list->AddRectFilled(ImVec2(t0 + k, cy - w), ImVec2(t0 + k + 1.0f, cy + w + 1.0f), col);
+        }
+    }
+#else
     ImVec2 a, b, c;
     switch (dir)
     {
@@ -6036,17 +6283,43 @@ void ImGui::RenderArrow(ImDrawList* draw_list, ImVec2 pos, ImU32 col, ImGuiDir d
         break;
     }
     draw_list->AddTriangleFilled(center + a, center + b, center + c, col);
+#endif
 }
 
 void ImGui::RenderBullet(ImDrawList* draw_list, ImVec2 pos, ImU32 col)
 {
     // FIXME-OPT: This should be baked in font now that it's easier.
     float font_size = draw_list->_Data->FontSize;
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art disc with an odd diameter, so that it is centered on a pixel (13px font -> 5px bullet)
+    const int D = ImMax(3, (int)ImFloor(font_size * 0.40f) | 1);
+    RenderPixelDisc(draw_list, ImVec2(pos.x - (float)D * 0.5f, pos.y - (float)D * 0.5f), D, col);
+#else
     draw_list->AddCircleFilled(pos, font_size * 0.20f, col, (font_size < 22) ? 8 : (font_size < 40) ? 12 : 0); // Hardcode optimal/nice tessellation threshold
+#endif
 }
 
 void ImGui::RenderCheckMark(ImDrawList* draw_list, ImVec2 pos, ImU32 col, float sz)
 {
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art check mark: two 45 degrees strokes (short one going down, long one going up), 'T' pixels thick, centered in the square.
+    const int S = (int)ImFloor(sz + 0.5f);
+    if (S >= 3)
+    {
+        const int T = ImMax(1, S / 6);
+        const int a = ImMax(2, (int)ImFloor((float)S * 0.25f + 0.5f));      // Short stroke length
+        const int b = ImMin(2 * a + 1, S - 1 - a);                           // Long stroke length
+        const int w = a + b + 1, h = b + T;
+        const float ox = ImFloor(pos.x + 0.5f) + (float)((S - w) / 2);
+        const float oy = ImFloor(pos.y + 0.5f) + (float)((S - h) / 2);
+        for (int x = 0; x < w; x++)
+        {
+            const int y = (x <= a) ? (b - a) + x : b - (x - a);
+            draw_list->AddRectFilled(ImVec2(ox + x, oy + y), ImVec2(ox + x + 1, oy + y + T), col);
+        }
+        return;
+    }
+#endif
     float thickness = ImMax(sz / 5.0f, 1.0f);
     sz -= thickness * 0.5f;
     pos += ImVec2(thickness * 0.25f, thickness * 0.25f);
@@ -6063,6 +6336,23 @@ void ImGui::RenderCheckMark(ImDrawList* draw_list, ImVec2 pos, ImU32 col, float 
 // Render an arrow. 'pos' is position of the arrow tip. half_sz.x is length from base to tip. half_sz.y is length on each side.
 void ImGui::RenderArrowPointingAt(ImDrawList* draw_list, ImVec2 pos, ImVec2 half_sz, ImGuiDir direction, ImU32 col)
 {
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art triangle: 'len' steps from the base to the tip, each step narrower than the previous one
+    if (direction != ImGuiDir_None && direction != ImGuiDir_COUNT)
+    {
+        const int len = ImMax(1, (int)ImFloor(half_sz.x + 0.5f));
+        const float hw = ImFloor(half_sz.y + 0.5f);
+        const float tx = ImFloor(pos.x + 0.5f), ty = ImFloor(pos.y + 0.5f);
+        for (int i = 0; i < len; i++)
+        {
+            const float w = ImFloor(hw * (1.0f - (float)i / (float)len) + 0.5f);                    // Half-width at distance 'i' from the base
+            if (direction == ImGuiDir_Right)     draw_list->AddRectFilled(ImVec2(tx - len + i, ty - w),     ImVec2(tx - len + i + 1, ty + w + 1), col);
+            else if (direction == ImGuiDir_Left) draw_list->AddRectFilled(ImVec2(tx + len - 1 - i, ty - w), ImVec2(tx + len - i, ty + w + 1),     col);
+            else if (direction == ImGuiDir_Down) draw_list->AddRectFilled(ImVec2(tx - w, ty - len + i),     ImVec2(tx + w + 1, ty - len + i + 1), col);
+            else                                 draw_list->AddRectFilled(ImVec2(tx - w, ty + len - 1 - i), ImVec2(tx + w + 1, ty + len - i),     col);
+        }
+    }
+#else
     switch (direction)
     {
     case ImGuiDir_Left:  draw_list->AddTriangleFilled(ImVec2(pos.x + half_sz.x, pos.y - half_sz.y), ImVec2(pos.x + half_sz.x, pos.y + half_sz.y), pos, col); return;
@@ -6071,6 +6361,7 @@ void ImGui::RenderArrowPointingAt(ImDrawList* draw_list, ImVec2 pos, ImVec2 half
     case ImGuiDir_Down:  draw_list->AddTriangleFilled(ImVec2(pos.x - half_sz.x, pos.y - half_sz.y), ImVec2(pos.x + half_sz.x, pos.y - half_sz.y), pos, col); return;
     case ImGuiDir_None: case ImGuiDir_COUNT: break; // Fix warnings
     }
+#endif
 }
 
 // This is less wide than RenderArrow() and we use in dock nodes instead of the regular RenderArrow() to denote a change of functionality,

@@ -17,7 +17,7 @@ void Mushroom::Init()
 	invert_right_left_=true;
 
 	move_speed_ = 5.f;
-	see_radius_ = 13.f;
+	see_radius_ = 20.f;
 
 	attack_range_ = 5.f;
 	attack_damage_ = 10.f;

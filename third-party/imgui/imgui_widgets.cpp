@@ -914,14 +914,28 @@ bool ImGui::CloseButton(ImGuiID id, const ImVec2& pos)
     // Render
     ImU32 bg_col = GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
     if (hovered)
-        window->DrawList->AddRectFilled(bb.Min, bb.Max, bg_col);
+        window->DrawList->AddRectFilled(bb.Min, bb.Max, bg_col, g.Style.FrameRounding);
     RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_Compact);
     const ImU32 cross_col = GetColorU32(ImGuiCol_Text);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art cross: a perfect (2*half+1)^2 'X' made of 1px squares
+    {
+        const float half = ImMax(1.0f, ImFloor(g.FontSize / 6.0f));
+        const float cx = ImFloor(bb.GetCenter().x), cy = ImFloor(bb.GetCenter().y);
+        for (float i = -half; i <= half; i += 1.0f)
+        {
+            window->DrawList->AddRectFilled(ImVec2(cx + i, cy + i), ImVec2(cx + i + 1.0f, cy + i + 1.0f), cross_col);
+            if (i != 0.0f)
+                window->DrawList->AddRectFilled(ImVec2(cx + i, cy - i), ImVec2(cx + i + 1.0f, cy - i + 1.0f), cross_col);
+        }
+    }
+#else
     const ImVec2 cross_center = bb.GetCenter() - ImVec2(0.5f, 0.5f);
     const float cross_extent = g.FontSize * 0.5f * 0.7071f - 1.0f;
     const float cross_thickness = 1.0f; // FIXME-DPI
     window->DrawList->AddLine(cross_center + ImVec2(+cross_extent, +cross_extent), cross_center + ImVec2(-cross_extent, -cross_extent), cross_col, cross_thickness);
     window->DrawList->AddLine(cross_center + ImVec2(+cross_extent, -cross_extent), cross_center + ImVec2(-cross_extent, +cross_extent), cross_col, cross_thickness);
+#endif
 
     return pressed;
 }
@@ -1114,7 +1128,11 @@ bool ImGui::ScrollbarEx(const ImRect& bb_frame, ImGuiID id, ImGuiAxis axis, ImS6
         grab_rect = ImRect(ImLerp(bb.Min.x, bb.Max.x, grab_v_norm), bb.Min.y, ImLerp(bb.Min.x, bb.Max.x, grab_v_norm) + grab_h_pixels, bb.Max.y);
     else
         grab_rect = ImRect(bb.Min.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm), bb.Max.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm) + grab_h_pixels);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    RenderPixelBox(window->DrawList, grab_rect.Min, grab_rect.Max, grab_col, GetColorU32(ImGuiCol_Border, alpha), style.ScrollbarRounding, 0, false);
+#else
     window->DrawList->AddRectFilled(grab_rect.Min, grab_rect.Max, grab_col, style.ScrollbarRounding);
+#endif
 
     return held;
 }
@@ -1373,6 +1391,25 @@ bool ImGui::RadioButton(const char* label, bool active)
         MarkItemEdited(id);
 
     RenderNavCursor(total_bb, id);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Pixel-art radio: sunken disc + 1px ring + a dot of about half its size
+    {
+        IM_UNUSED(radius); IM_UNUSED(center);
+        const int D = (int)ImFloor(square_sz + 0.5f);
+        const ImVec2 p0(ImFloor(check_bb.Min.x + 0.5f), ImFloor(check_bb.Min.y + 0.5f));
+        const ImU32 face_col = GetColorU32((held && hovered) ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+        RenderPixelDisc(window->DrawList, p0, D, face_col);
+        if (active)
+        {
+            int D2 = ImMax(3, D / 2);
+            if ((D - D2) & 1)
+                D2++;
+            RenderPixelDisc(window->DrawList, p0 + ImVec2((float)((D - D2) / 2), (float)((D - D2) / 2)), D2, GetColorU32(ImGuiCol_CheckMark));
+        }
+        if (style.FrameBorderSize > 0.0f)
+            RenderPixelCircle(window->DrawList, p0, D, GetColorU32(ImGuiCol_Border));
+    }
+#else
     const int num_segment = window->DrawList->_CalcCircleAutoSegmentCount(radius);
     window->DrawList->AddCircleFilled(center, radius, GetColorU32((held && hovered) ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), num_segment);
     if (active)
@@ -1386,6 +1423,7 @@ bool ImGui::RadioButton(const char* label, bool active)
         window->DrawList->AddCircle(center + ImVec2(1, 1), radius, GetColorU32(ImGuiCol_BorderShadow), num_segment, style.FrameBorderSize);
         window->DrawList->AddCircle(center, radius, GetColorU32(ImGuiCol_Border), num_segment, style.FrameBorderSize);
     }
+#endif
 
     ImVec2 label_pos = ImVec2(check_bb.Max.x + style.ItemInnerSpacing.x, check_bb.Min.y + style.FramePadding.y);
     if (g.LogEnabled)
@@ -3353,7 +3391,13 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
 
     // Render grab
     if (grab_bb.Max.x > grab_bb.Min.x)
+    {
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+        RenderPixelBox(window->DrawList, grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), GetColorU32(ImGuiCol_Border), style.GrabRounding, 0, false);
+#else
         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
+#endif
+    }
 
     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
     char value_buf[64];
@@ -3503,7 +3547,13 @@ bool ImGui::VSliderScalar(const char* label, const ImVec2& size, ImGuiDataType d
 
     // Render grab
     if (grab_bb.Max.y > grab_bb.Min.y)
+    {
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+        RenderPixelBox(window->DrawList, grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), GetColorU32(ImGuiCol_Border), style.GrabRounding, 0, false);
+#else
         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
+#endif
+    }
 
     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
     // For the vertical slider we allow centered text to overlap the frame padding
@@ -9662,7 +9712,11 @@ bool    ImGui::BeginTabBarEx(ImGuiTabBar* tab_bar, const ImRect& tab_bar_bb, ImG
 
     // Draw separator
     // (it would be misleading to draw this in EndTabBar() suggesting that it may be drawn over tabs, as tab bar are appendable)
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    const ImU32 col = GetColorU32(ImGuiCol_Border);     // [PIXEL STYLE] Outline-colored base line under all tabs
+#else
     const ImU32 col = GetColorU32((flags & ImGuiTabBarFlags_IsFocused) ? ImGuiCol_TabSelected : ImGuiCol_TabDimmedSelected);
+#endif
     if (g.Style.TabBarBorderSize > 0.0f)
     {
         const float y = tab_bar->BarRect.Max.y;
@@ -10685,7 +10739,7 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
                 // [PIXEL STYLE] Flat overline, inset by the same notch as the tab corners
                 const float ol_y = ImFloor(tl.y + 0.5f);
                 const float ol_t = ImMax(1.0f, ImFloor(style.TabBarOverlineSize + 0.5f));
-                display_draw_list->AddRectFilled(ImVec2(ImFloor(tl.x + 0.5f) + IMGUI_PIXEL_CORNER_SIZE, ol_y), ImVec2(ImFloor(tr.x + 0.5f) - IMGUI_PIXEL_CORNER_SIZE, ol_y + ol_t), overline_col);
+                display_draw_list->AddRectFilled(ImVec2(ImFloor(tl.x + 0.5f) + RenderPixelCornerSize(style.TabRounding), ol_y), ImVec2(ImFloor(tr.x + 0.5f) - RenderPixelCornerSize(style.TabRounding), ol_y + ol_t), overline_col);
 #else
                 float rounding = style.TabRounding;
                 display_draw_list->PathArcToFast(tl + ImVec2(+rounding, +rounding), rounding, 7, 9);
@@ -10799,21 +10853,14 @@ void ImGui::TabItemBackground(ImDrawList* draw_list, const ImRect& bb, ImGuiTabI
     const float y1 = bb.Min.y + 1.0f;
     const float y2 = bb.Max.y - g.Style.TabBarBorderSize;
 #ifndef IMGUI_DISABLE_PIXEL_STYLE
-    // [PIXEL STYLE] Notched top corners + 1px outline on 3 sides (the bottom edge is left open so the tab merges with the tab bar)
+    // [PIXEL STYLE] Stair-stepped top corners, 1px outline + bevel. The bottom outline row coincides with the black base line of the tab bar.
     {
         const float x0 = ImFloor(bb.Min.x + 0.5f), x1 = ImFloor(bb.Max.x + 0.5f);
-        const float ya = ImFloor(y1 + 0.5f), yb = ImFloor(y2 + 0.5f);
-        draw_list->AddRectFilled(ImVec2(x0, ya), ImVec2(x1, yb), col, rounding, ImDrawFlags_RoundCornersTop);
+        const float ya = ImFloor(y1 + 0.5f);
         if (g.Style.TabBorderSize > 0.0f)
-        {
-            const ImU32 border_col = GetColorU32(ImGuiCol_Border);
-            const float t = ImMax(1.0f, ImFloor(g.Style.TabBorderSize + 0.5f));
-            const float c = (rounding >= 0.5f) ? ImMax(IMGUI_PIXEL_CORNER_SIZE, t) : 0.0f;   // Corner notch (>= border thickness so edges never overlap)
-            const float side_y = ya + (c > 0.0f ? c : t);
-            draw_list->AddRectFilled(ImVec2(x0 + c, ya),   ImVec2(x1 - c, ya + t), border_col);   // Top
-            draw_list->AddRectFilled(ImVec2(x0,     side_y), ImVec2(x0 + t, yb),    border_col);   // Left
-            draw_list->AddRectFilled(ImVec2(x1 - t, side_y), ImVec2(x1,     yb),    border_col);   // Right
-        }
+            RenderPixelBox(draw_list, ImVec2(x0, ya), ImVec2(x1, ImFloor(bb.Max.y + 0.5f)), col, GetColorU32(ImGuiCol_Border), rounding, ImDrawFlags_RoundCornersTop, false);
+        else
+            draw_list->AddRectFilled(ImVec2(x0, ya), ImVec2(x1, ImFloor(y2 + 0.5f)), col, rounding, ImDrawFlags_RoundCornersTop);
     }
 #else
     draw_list->PathLineTo(ImVec2(bb.Min.x, y2));
@@ -10867,6 +10914,20 @@ void ImGui::TabItemLabelAndCloseButton(ImDrawList* draw_list, const ImRect& bb, 
 
     const float button_sz = g.FontSize;
     const ImVec2 button_pos(ImMax(bb.Min.x, bb.Max.x - frame_padding.x - button_sz), bb.Min.y + frame_padding.y);
+
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] Text (and close button) of the selected tab flip to white when its background is darkish (Aseprite's blue-grey active tab)
+    bool pixel_text_pushed = false;
+    if (is_contents_visible)
+    {
+        const ImVec4& tc = g.Style.Colors[ImGuiCol_TabSelected];
+        if (tc.x * 0.299f + tc.y * 0.587f + tc.z * 0.114f < 0.60f)
+        {
+            PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, g.Style.Colors[ImGuiCol_Text].w));
+            pixel_text_pushed = true;
+        }
+    }
+#endif
 
     // Close Button & Unsaved Marker
     // We are relying on a subtle and confusing distinction between 'hovered' and 'g.HoveredId' which happens because we are using ImGuiButtonFlags_AllowOverlapMode + SetItemAllowOverlap()
@@ -10927,6 +10988,11 @@ void ImGui::TabItemLabelAndCloseButton(ImDrawList* draw_list, const ImRect& bb, 
 #if 0
     if (!is_contents_visible)
         g.Style.Alpha = backup_alpha;
+#endif
+
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    if (pixel_text_pushed)
+        PopStyleColor();
 #endif
 
     if (out_just_closed)

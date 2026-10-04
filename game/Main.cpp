@@ -23,6 +23,8 @@
 #include <glfw/glfw3.h>
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "../third-party/stb/stb_image.h"
 
 #include <iostream>
 #include <cstdio>
@@ -40,6 +42,7 @@
 #include <vector>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <cctype>
 #include <cctype>
 
@@ -56,6 +59,67 @@
 bool isPlaying = false;
 
 HRL_id scene;
+
+static const char* const kEditorWindowsFile = "editor_windows.txt";
+
+struct EditorWindowVisibility
+{
+    bool viewport = true;
+    bool outliner = true;
+    bool placeActors = true;
+    bool contentBrowser = true;
+    bool details = true;
+    bool colorPicking = true;
+    bool config = true;
+    bool cameraShake = true;
+};
+
+static EditorWindowVisibility editorWindows;
+
+static void LoadEditorWindowVisibility()
+{
+    std::ifstream file(kEditorWindowsFile);
+    if (!file) return;
+
+    int viewport, outliner, placeActors, contentBrowser;
+    int details, colorPicking, config, cameraShake;
+
+    if (!(file >> viewport >> outliner >> placeActors >> contentBrowser
+               >> details >> colorPicking >> config >> cameraShake))
+        return;
+
+    editorWindows.viewport = viewport != 0;
+    editorWindows.outliner = outliner != 0;
+    editorWindows.placeActors = placeActors != 0;
+    editorWindows.contentBrowser = contentBrowser != 0;
+    editorWindows.details = details != 0;
+    editorWindows.colorPicking = colorPicking != 0;
+    editorWindows.config = config != 0;
+    editorWindows.cameraShake = cameraShake != 0;
+}
+
+static void SaveEditorWindowVisibility()
+{
+    std::ofstream file(kEditorWindowsFile, std::ios::trunc);
+    if (!file) return;
+
+    file << (editorWindows.viewport ? 1 : 0) << ' '
+         << (editorWindows.outliner ? 1 : 0) << ' '
+         << (editorWindows.placeActors ? 1 : 0) << ' '
+         << (editorWindows.contentBrowser ? 1 : 0) << ' '
+         << (editorWindows.details ? 1 : 0) << ' '
+         << (editorWindows.colorPicking ? 1 : 0) << ' '
+         << (editorWindows.config ? 1 : 0) << ' '
+         << (editorWindows.cameraShake ? 1 : 0) << '\n';
+}
+
+static bool EditorWindowCheckbox(const char* label, bool* value)
+{
+    const bool changed = ImGui::Checkbox(label, value);
+    if (changed) SaveEditorWindowVisibility();
+    return changed;
+}
+
 
 
 // =============================================================================
@@ -538,7 +602,9 @@ void InitImGui(GLFWwindow* window)
 
     ImGuiIO& io = ImGui::GetIO();
 
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // Tab is reserved by the Lynx editor (Painting / No Painting).
+    // Do not let ImGui use Tab for keyboard navigation between widgets.
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     // ImGui's GLFW backend calls glfwSetCursor(arrow) every frame, which would
@@ -1064,6 +1130,410 @@ static void AssignDefaultActorName(
 }
 
 
+
+// -----------------------------------------------------------------------------
+// Place Actors thumbnails
+// -----------------------------------------------------------------------------
+// Prefer an image whose filename matches the registered actor type. This is
+// intentionally filesystem-based so the editor does not have to construct a
+// temporary actor just to discover its sprite/texture.
+static std::unordered_map<std::string, HRL_id> actorPreviewTextures;
+static std::unordered_set<std::string> actorPreviewSearchDone;
+
+static bool IsPreviewImageExtension(
+    const std::filesystem::path& path)
+{
+    std::string ext =
+        path.extension().string();
+
+    std::transform(
+        ext.begin(),
+        ext.end(),
+        ext.begin(),
+        [](unsigned char c)
+        {
+            return static_cast<char>(std::tolower(c));
+        }
+    );
+
+    return ext == ".png" ||
+           ext == ".jpg" ||
+           ext == ".jpeg" ||
+           ext == ".bmp" ||
+           ext == ".tga" ||
+           ext == ".webp";
+}
+
+static HRL_id GetActorTypePreviewTexture(
+    const std::string& type_name)
+{
+    if (auto it = actorPreviewTextures.find(type_name);
+        it != actorPreviewTextures.end())
+    {
+        return it->second;
+    }
+
+    if (actorPreviewSearchDone.find(type_name) !=
+        actorPreviewSearchDone.end())
+    {
+        return HRL_INVALID_ID;
+    }
+
+    actorPreviewSearchDone.insert(type_name);
+
+    const std::filesystem::path root =
+        std::filesystem::current_path() / "assets";
+
+    std::error_code error;
+
+    if (!std::filesystem::exists(root, error))
+        return HRL_INVALID_ID;
+
+    std::string wanted = type_name;
+
+    std::transform(
+        wanted.begin(),
+        wanted.end(),
+        wanted.begin(),
+        [](unsigned char c)
+        {
+            return static_cast<char>(std::tolower(c));
+        }
+    );
+
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(
+             root,
+             std::filesystem::directory_options::skip_permission_denied,
+             error))
+    {
+        if (error)
+            break;
+
+        if (!entry.is_regular_file(error) ||
+            !IsPreviewImageExtension(entry.path()))
+        {
+            continue;
+        }
+
+        std::string stem =
+            entry.path().stem().string();
+
+        std::transform(
+            stem.begin(),
+            stem.end(),
+            stem.begin(),
+            [](unsigned char c)
+            {
+                return static_cast<char>(std::tolower(c));
+            }
+        );
+
+        if (stem != wanted)
+            continue;
+
+        const auto data =
+            lynx::fs::ReadBinary(
+                entry.path().string()
+            );
+
+        if (data.empty())
+            continue;
+
+        const HRL_id texture =
+            HRL_CreateTexture(
+                reinterpret_cast<const char*>(data.data()),
+                data.size()
+            );
+
+        if (texture != HRL_INVALID_ID)
+        {
+            actorPreviewTextures[type_name] =
+                texture;
+
+            return texture;
+        }
+    }
+
+    return HRL_INVALID_ID;
+}
+
+static void DrawActorTypePreview(
+    const std::string& type_name,
+    float size)
+{
+    const HRL_id texture =
+        GetActorTypePreviewTexture(
+            type_name
+        );
+
+    if (texture != HRL_INVALID_ID)
+    {
+        const unsigned int gl_texture =
+            HRL_GL_GetTextureGL_ID(texture);
+
+        if (gl_texture != 0)
+        {
+            ImGui::Image(
+                (ImTextureID)(intptr_t)gl_texture,
+                ImVec2(size, size),
+                ImVec2(0.f, 1.f),
+                ImVec2(1.f, 0.f)
+            );
+
+            return;
+        }
+    }
+
+    // Fallback icon when the actor has no image named after its class.
+    uint32_t hash = 2166136261u;
+
+    for (unsigned char c : type_name)
+    {
+        hash ^= c;
+        hash *= 16777619u;
+    }
+
+    const ImVec2 min =
+        ImGui::GetCursorScreenPos();
+
+    const ImVec2 max(
+        min.x + size,
+        min.y + size
+    );
+
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        min,
+        max,
+        IM_COL32(
+            static_cast<int>(80u + (hash & 0x7Fu)),
+            static_cast<int>(80u + ((hash >> 8) & 0x7Fu)),
+            static_cast<int>(80u + ((hash >> 16) & 0x7Fu)),
+            255
+        ),
+        5.f
+    );
+
+    char letter[2] =
+    {
+        type_name.empty() ? '?' : type_name.front(),
+        '\0'
+    };
+
+    const ImVec2 text_size =
+        ImGui::CalcTextSize(letter);
+
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(
+            min.x + (size - text_size.x) * 0.5f,
+            min.y + (size - text_size.y) * 0.5f
+        ),
+        IM_COL32(255, 255, 255, 255),
+        letter
+    );
+
+    ImGui::Dummy(
+        ImVec2(size, size)
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Place Actors drag/drop
+// -----------------------------------------------------------------------------
+// The dragged actor is a real actor instance. It is spawned when the drag
+// starts, follows the mouse every frame, and is only committed to the level
+// when the mouse is released over the scene. Cancelling the drag destroys it.
+static lynx::Actor* actor_drag_preview = nullptr;
+static std::string actor_drag_type;
+static bool actor_drag_active = false;
+
+static bool UpdateActorLocationFromMouse(lynx::Actor* actor)
+{
+    if (!actor)
+        return false;
+
+    double mouse_x = 0.0;
+    double mouse_y = 0.0;
+
+    glfwGetCursorPos(
+        glfwGetCurrentContext(),
+        &mouse_x,
+        &mouse_y
+    );
+
+    MouseToScene(
+        mouse_x,
+        mouse_y,
+        mouse_x,
+        mouse_y
+    );
+
+    int voxel_x = 0;
+    int voxel_y = 0;
+
+    if (!HRL_GetVoxelAtScreenPosition(
+            scene,
+            static_cast<int>(mouse_x),
+            static_cast<int>(mouse_y),
+            &voxel_x,
+            &voxel_y))
+    {
+        return false;
+    }
+
+    float world_x = 0.f;
+    float world_y = 0.f;
+
+    if (!HRL_VoxelToWorldCoordinates(
+            scene,
+            static_cast<float>(voxel_x) + 0.5f,
+            static_cast<float>(voxel_y) + 0.5f,
+            &world_x,
+            &world_y))
+    {
+        return false;
+    }
+
+    actor->transform.location.x = world_x;
+    actor->transform.location.y = world_y;
+    actor->transform.location.z = 0.f;
+
+    return true;
+}
+
+static void CancelActorPlacementDrag()
+{
+    if (actor_drag_preview && editor_level)
+    {
+        if (editing_actor == actor_drag_preview)
+        {
+            editing_actor = nullptr;
+            editing_object = HRL_INVALID_ID;
+
+            HRL_SetGizmoVisible(
+                gizmo,
+                HRL_FALSE
+            );
+        }
+
+        editor_level->DestroyActor(
+            actor_drag_preview
+        );
+    }
+
+    actor_drag_preview = nullptr;
+    actor_drag_type.clear();
+    actor_drag_active = false;
+}
+
+static void BeginActorPlacementDrag(
+    lynx::Level* level,
+    const std::string& type_name)
+{
+    if (!level || type_name.empty())
+        return;
+
+    CancelActorPlacementDrag();
+
+    actor_drag_preview =
+        level->SpawnActor(
+            type_name.c_str()
+        );
+
+    if (!actor_drag_preview)
+        return;
+
+    AssignDefaultActorName(
+        level,
+        actor_drag_preview,
+        type_name
+    );
+
+    actor_drag_type = type_name;
+    actor_drag_active = true;
+
+    // Position it immediately under the cursor.
+    UpdateActorLocationFromMouse(
+        actor_drag_preview
+    );
+
+    SetActorSelected(
+        actor_drag_preview
+    );
+}
+
+static void CommitActorPlacementDrag()
+{
+    if (!actor_drag_preview ||
+        !editor_level)
+    {
+        CancelActorPlacementDrag();
+        return;
+    }
+
+    const std::string actor_id =
+        actor_drag_preview->object_id_;
+
+    PushEditorUndo([actor_id]()
+    {
+        if (lynx::Actor* created =
+                FindEditorActor(actor_id))
+        {
+            if (editing_actor == created)
+            {
+                editing_actor = nullptr;
+                editing_object = HRL_INVALID_ID;
+
+                HRL_SetGizmoVisible(
+                    gizmo,
+                    HRL_FALSE
+                );
+            }
+
+            editor_level->DestroyActor(
+                created
+            );
+        }
+    });
+
+    SetActorSelected(
+        actor_drag_preview
+    );
+
+    MarkEditorDirty();
+
+    actor_drag_preview = nullptr;
+    actor_drag_type.clear();
+    actor_drag_active = false;
+}
+
+static void HandleActorPlacementDrag(
+    lynx::Level* level)
+{
+    if (!level || !actor_drag_active)
+        return;
+
+    // Keep the actual actor under the cursor, including while the cursor is
+    // moving across the scene. MouseToScene() falls back to raw window
+    // coordinates because the optional ImGui Viewport window is disabled.
+    UpdateActorLocationFromMouse(
+        actor_drag_preview
+    );
+
+    ImGuiIO& io = ImGui::GetIO();
+
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        // A release over the scene commits the actor. A release over an ImGui
+        // window cancels it, so dragging never accidentally places an actor in
+        // an editor panel.
+        if (!io.WantCaptureMouse)
+            CommitActorPlacementDrag();
+        else
+            CancelActorPlacementDrag();
+    }
+}
+
 void PlaceActorsWindow(lynx::Level* level)
 {
     if (!level)
@@ -1082,7 +1552,10 @@ void PlaceActorsWindow(lynx::Level* level)
 
     ImGui::Separator();
 
-    auto* factory = lynx::GetEngine()->GetFactory().GetInternalFactory();
+    auto* factory =
+        lynx::GetEngine()
+            ->GetFactory()
+            .GetInternalFactory();
 
     if (!factory)
     {
@@ -1117,32 +1590,70 @@ void PlaceActorsWindow(lynx::Level* level)
     {
         for (const std::string& type_name : actor_types)
         {
+            ImGui::PushID(type_name.c_str());
+
+            const float preview_size = 42.f;
+
+            ImGui::BeginGroup();
+
+            DrawActorTypePreview(
+                type_name,
+                preview_size
+            );
+
+            ImGui::SameLine();
+
             if (ImGui::Button(
                     type_name.c_str(),
-                    ImVec2(-1.0f, 0.0f)
+                    ImVec2(
+                        std::max(
+                            1.f,
+                            ImGui::GetContentRegionAvail().x
+                        ),
+                        preview_size
+                    )
                 ))
             {
+                // Keep the existing click-to-place behaviour.
                 lynx::Actor* actor =
-                    level->SpawnActor(type_name.c_str());
+                    level->SpawnActor(
+                        type_name.c_str()
+                    );
 
                 if (actor)
                 {
-                    AssignDefaultActorName(level, actor, type_name);
+                    AssignDefaultActorName(
+                        level,
+                        actor,
+                        type_name
+                    );
 
-                    const std::string actor_id = actor->object_id_;
+                    const std::string actor_id =
+                        actor->object_id_;
+
+                    UpdateActorLocationFromMouse(
+                        actor
+                    );
 
                     PushEditorUndo([actor_id]()
                     {
-                        if (lynx::Actor* created = FindEditorActor(actor_id))
+                        if (lynx::Actor* created =
+                                FindEditorActor(actor_id))
                         {
                             if (editing_actor == created)
                             {
                                 editing_actor = nullptr;
                                 editing_object = HRL_INVALID_ID;
-                                HRL_SetGizmoVisible(gizmo, HRL_FALSE);
+
+                                HRL_SetGizmoVisible(
+                                    gizmo,
+                                    HRL_FALSE
+                                );
                             }
 
-                            editor_level->DestroyActor(created);
+                            editor_level->DestroyActor(
+                                created
+                            );
                         }
                     });
 
@@ -1150,6 +1661,47 @@ void PlaceActorsWindow(lynx::Level* level)
                     MarkEditorDirty();
                 }
             }
+
+            // Dragging the row creates a real temporary actor immediately.
+            // The instance then follows the mouse until it is released.
+            if (ImGui::BeginDragDropSource(
+                    ImGuiDragDropFlags_SourceAllowNullID
+                ))
+            {
+                ImGui::SetDragDropPayload(
+                    "LYNX_ACTOR_TYPE",
+                    type_name.c_str(),
+                    type_name.size() + 1
+                );
+
+                if (!actor_drag_active)
+                {
+                    BeginActorPlacementDrag(
+                        level,
+                        type_name
+                    );
+                }
+
+                ImGui::BeginGroup();
+
+                ImGui::Text(
+                    "Placing %s",
+                    type_name.c_str()
+                );
+
+                ImGui::TextDisabled(
+                    "Release in the scene"
+                );
+
+                ImGui::EndGroup();
+
+                ImGui::EndDragDropSource();
+            }
+
+            ImGui::EndGroup();
+
+            ImGui::Separator();
+            ImGui::PopID();
         }
     }
 
@@ -2322,6 +2874,65 @@ static float GetCameraSpeedForHeight()
 static int brushRadius = 3;
 static int brushVoxelType = 4;
 
+// Available brush shapes. Radius is measured in voxels from the center.
+enum class BrushShape
+{
+    Single = 0,
+    Circle,
+    Square,
+    Diamond,
+    Horizontal,
+    Vertical,
+    Cross,
+    Line,
+    Rectangle,
+    RectangleOutline,
+    CircleOutline
+};
+
+static BrushShape brushShape = BrushShape::Circle;
+
+static bool IsDragShape(BrushShape shape)
+{
+    return shape == BrushShape::Line ||
+           shape == BrushShape::Rectangle ||
+           shape == BrushShape::RectangleOutline ||
+           shape == BrushShape::CircleOutline;
+}
+
+static int GetBrushIterationRadius()
+{
+    return brushShape == BrushShape::Single ? 0 : brushRadius;
+}
+
+static bool BrushContains(int x, int y)
+{
+    switch (brushShape)
+    {
+        case BrushShape::Single:
+            return x == 0 && y == 0;
+
+        case BrushShape::Square:
+            return true;
+
+        case BrushShape::Diamond:
+            return std::abs(x) + std::abs(y) <= brushRadius;
+
+        case BrushShape::Horizontal:
+            return y == 0;
+
+        case BrushShape::Vertical:
+            return x == 0;
+
+        case BrushShape::Cross:
+            return x == 0 || y == 0;
+
+        case BrushShape::Circle:
+        default:
+            return x * x + y * y <= brushRadius * brushRadius;
+    }
+}
+
 // Type actually used by the brush this frame : brushVoxelType, or 0 (empty)
 // while Shift is held in the editor. Refreshed every frame in Tick().
 static int brushActiveType = 4;
@@ -2453,11 +3064,13 @@ static void ApplyBrushPreview(int centerX, int centerY)
 {
     ClearBrushPreview();
 
-    for (int y = -brushRadius; y <= brushRadius; ++y)
+    const int iterationRadius = GetBrushIterationRadius();
+
+    for (int y = -iterationRadius; y <= iterationRadius; ++y)
     {
-        for (int x = -brushRadius; x <= brushRadius; ++x)
+        for (int x = -iterationRadius; x <= iterationRadius; ++x)
         {
-            if (x * x + y * y > brushRadius * brushRadius)
+            if (!BrushContains(x, y))
                 continue;
 
             const int vx = centerX + x;
@@ -2479,6 +3092,140 @@ static void ApplyBrushPreview(int centerX, int centerY)
     }
 }
 
+// Preview for drag-based tools. Like ApplyBrushPreview(), this temporarily
+// writes voxels and remembers their previous values so the preview can be
+// removed without creating an editor modification.
+static void PreviewStampBrush(int centerX, int centerY)
+{
+    const int iterationRadius = GetBrushIterationRadius();
+
+    for (int y = -iterationRadius; y <= iterationRadius; ++y)
+    {
+        for (int x = -iterationRadius; x <= iterationRadius; ++x)
+        {
+            if (!BrushContains(x, y))
+                continue;
+
+            const int vx = centerX + x;
+            const int vy = centerY + y;
+            const int previousType = HRL_GetVoxelType(scene, vx, vy);
+
+            if (!brushPaintEmptyVoxels && previousType == 0)
+                continue;
+
+            if (previousType == brushActiveType)
+                continue;
+
+            brushPreviewVoxels.push_back({ vx, vy, previousType });
+            HRL_SetVoxelType(scene, vx, vy, brushActiveType);
+        }
+    }
+}
+
+static void ApplyDragBrushPreview(int x0, int y0, int x1, int y1)
+{
+    ClearBrushPreview();
+
+    auto previewLine = [&](int ax, int ay, int bx, int by)
+    {
+        const int dx = std::abs(bx - ax);
+        const int dy = -std::abs(by - ay);
+        const int sx = (ax < bx) ? 1 : -1;
+        const int sy = (ay < by) ? 1 : -1;
+        int err = dx + dy;
+
+        while (true)
+        {
+            PreviewStampBrush(ax, ay);
+
+            if (ax == bx && ay == by)
+                break;
+
+            const int e2 = 2 * err;
+            if (e2 >= dy)
+            {
+                err += dy;
+                ax += sx;
+            }
+            if (e2 <= dx)
+            {
+                err += dx;
+                ay += sy;
+            }
+        }
+    };
+
+    switch (brushShape)
+    {
+        case BrushShape::Line:
+            previewLine(x0, y0, x1, y1);
+            break;
+
+        case BrushShape::Rectangle:
+        case BrushShape::RectangleOutline:
+        {
+            const int minX = std::min(x0, x1);
+            const int maxX = std::max(x0, x1);
+            const int minY = std::min(y0, y1);
+            const int maxY = std::max(y0, y1);
+            const bool outline = brushShape == BrushShape::RectangleOutline;
+
+            for (int y = minY; y <= maxY; ++y)
+            {
+                for (int x = minX; x <= maxX; ++x)
+                {
+                    if (outline &&
+                        x != minX && x != maxX &&
+                        y != minY && y != maxY)
+                        continue;
+
+                    PreviewStampBrush(x, y);
+                }
+            }
+            break;
+        }
+
+        case BrushShape::CircleOutline:
+        {
+            const float cx = (x0 + x1) * 0.5f;
+            const float cy = (y0 + y1) * 0.5f;
+            const float rx = std::max(0.5f, std::abs(x1 - x0) * 0.5f);
+            const float ry = std::max(0.5f, std::abs(y1 - y0) * 0.5f);
+            const int minX = static_cast<int>(std::floor(cx - rx)) - brushRadius;
+            const int maxX = static_cast<int>(std::ceil(cx + rx)) + brushRadius;
+            const int minY = static_cast<int>(std::floor(cy - ry)) - brushRadius;
+            const int maxY = static_cast<int>(std::ceil(cy + ry)) + brushRadius;
+            const float innerX = std::max(0.0f, rx - 1.0f);
+            const float innerY = std::max(0.0f, ry - 1.0f);
+
+            for (int y = minY; y <= maxY; ++y)
+            {
+                for (int x = minX; x <= maxX; ++x)
+                {
+                    const float nx = (x - cx) / rx;
+                    const float ny = (y - cy) / ry;
+                    const float outer = nx * nx + ny * ny;
+                    bool insideInner = false;
+
+                    if (innerX > 0.f && innerY > 0.f)
+                    {
+                        const float ix = (x - cx) / innerX;
+                        const float iy = (y - cy) / innerY;
+                        insideInner = ix * ix + iy * iy < 1.f;
+                    }
+
+                    if (outer <= 1.25f && !insideInner)
+                        PreviewStampBrush(x, y);
+                }
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Stroke interpolation : when the mouse moves faster than one brush radius
@@ -2490,13 +3237,136 @@ static bool brushHasLastCenter = false;
 static int brushLastCenterX = 0;
 static int brushLastCenterY = 0;
 
+// Start/end points used by drag-based tools (Line, Rectangle, ...).
+static bool brushDragHasStart = false;
+static int brushDragStartX = 0;
+static int brushDragStartY = 0;
+
+static void stampBrush(int centerX, int centerY);
+
+static void paintBrushLine(int x0, int y0, int x1, int y1)
+{
+    const int dx = std::abs(x1 - x0);
+    const int dy = -std::abs(y1 - y0);
+    const int sx = (x0 < x1) ? 1 : -1;
+    const int sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+
+    while (true)
+    {
+        stampBrush(x0, y0);
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        const int e2 = 2 * err;
+
+        if (e2 >= dy)
+        {
+            err += dy;
+            x0 += sx;
+        }
+
+        if (e2 <= dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+static void paintBrushRectangle(int x0, int y0, int x1, int y1, bool outline)
+{
+    const int minX = std::min(x0, x1);
+    const int maxX = std::max(x0, x1);
+    const int minY = std::min(y0, y1);
+    const int maxY = std::max(y0, y1);
+
+    for (int y = minY; y <= maxY; ++y)
+    {
+        for (int x = minX; x <= maxX; ++x)
+        {
+            if (outline &&
+                x != minX && x != maxX &&
+                y != minY && y != maxY)
+                continue;
+
+            stampBrush(x, y);
+        }
+    }
+}
+
+static void paintBrushCircleOutline(int x0, int y0, int x1, int y1)
+{
+    const float cx = (x0 + x1) * 0.5f;
+    const float cy = (y0 + y1) * 0.5f;
+    const float rx = std::max(0.5f, std::abs(x1 - x0) * 0.5f);
+    const float ry = std::max(0.5f, std::abs(y1 - y0) * 0.5f);
+
+    const int minX = static_cast<int>(std::floor(cx - rx)) - brushRadius;
+    const int maxX = static_cast<int>(std::ceil (cx + rx)) + brushRadius;
+    const int minY = static_cast<int>(std::floor(cy - ry)) - brushRadius;
+    const int maxY = static_cast<int>(std::ceil (cy + ry)) + brushRadius;
+
+    const float innerX = std::max(0.0f, rx - 1.0f);
+    const float innerY = std::max(0.0f, ry - 1.0f);
+
+    for (int y = minY; y <= maxY; ++y)
+    {
+        for (int x = minX; x <= maxX; ++x)
+        {
+            const float nx = (x - cx) / rx;
+            const float ny = (y - cy) / ry;
+            const float outer = nx * nx + ny * ny;
+
+            bool insideInner = false;
+            if (innerX > 0.f && innerY > 0.f)
+            {
+                const float ix = (x - cx) / innerX;
+                const float iy = (y - cy) / innerY;
+                insideInner = ix * ix + iy * iy < 1.f;
+            }
+
+            if (outer <= 1.25f && !insideInner)
+                stampBrush(x, y);
+        }
+    }
+}
+
+static void stampDragShape(int x0, int y0, int x1, int y1)
+{
+    switch (brushShape)
+    {
+        case BrushShape::Line:
+            paintBrushLine(x0, y0, x1, y1);
+            break;
+
+        case BrushShape::Rectangle:
+            paintBrushRectangle(x0, y0, x1, y1, false);
+            break;
+
+        case BrushShape::RectangleOutline:
+            paintBrushRectangle(x0, y0, x1, y1, true);
+            break;
+
+        case BrushShape::CircleOutline:
+            paintBrushCircleOutline(x0, y0, x1, y1);
+            break;
+
+        default:
+            break;
+    }
+}
+
 static void stampBrush(int centerX, int centerY)
 {
-    for (int y = -brushRadius; y <= brushRadius; ++y)
+    const int iterationRadius = GetBrushIterationRadius();
+
+    for (int y = -iterationRadius; y <= iterationRadius; ++y)
     {
-        for (int x = -brushRadius; x <= brushRadius; ++x)
+        for (int x = -iterationRadius; x <= iterationRadius; ++x)
         {
-            if (x * x + y * y <= brushRadius * brushRadius)
+            if (BrushContains(x, y))
                 tryPaintVoxel(centerX + x, centerY + y);
         }
     }
@@ -2771,6 +3641,32 @@ static void DrawToolbar()
             "unloads the DLL, loads it again and rebuilds the level."
         );
 
+        ImGui::SameLine();
+
+        // Use a regular button + popup instead of BeginMenu().
+        // BeginMenu() can open its submenu when merely hovering a toolbar item,
+        // which makes the rest of the toolbar difficult to use.
+        if (ImGui::Button("Windows"))
+            ImGui::OpenPopup("WindowsPopup");
+
+        if (ImGui::BeginPopup("WindowsPopup"))
+        {
+            ImGui::TextDisabled("Editor windows");
+            ImGui::Separator();
+            EditorWindowCheckbox("Viewport", &editorWindows.viewport);
+            EditorWindowCheckbox("Outliner", &editorWindows.outliner);
+            EditorWindowCheckbox("Place Actors", &editorWindows.placeActors);
+            EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser);
+            EditorWindowCheckbox("Details", &editorWindows.details);
+            EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking);
+            EditorWindowCheckbox("Paint", &editorWindows.config);
+            EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake);
+            ImGui::Separator();
+            ImGui::TextDisabled("All editor windows are hidden during Play.");
+            ImGui::EndPopup();
+        }
+        tooltip("Show or hide editor windows");
+
         // Master volume stays available in both modes.
         ImGui::SameLine();
         ImGui::TextDisabled("|");
@@ -2798,6 +3694,24 @@ static void DrawToolbar()
 
         tooltip("Master volume");
 
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+
+        ImGui::SetNextItemWidth(
+            ImGui::GetFontSize() * 8.f
+        );
+
+        ImGui::SliderFloat(
+            "##CameraSpeed",
+            &cameraSpeed,
+            1.f,
+            400.f,
+            "Camera %.0f"
+        );
+
+        tooltip("Camera speed");
+
         if (editor_dirty && !isPlaying)
         {
             ImGui::SameLine();
@@ -2821,8 +3735,6 @@ static void DrawToolbar()
 // Format : one line, "x y z".
 
 static const char* const kEditorCameraFile = "editor_camera.txt";
-
-
 static void LoadEditorCamera()
 {
     std::ifstream file(kEditorCameraFile);
@@ -3013,6 +3925,7 @@ namespace editor
 
 
         InitImGui(win);
+        LoadEditorWindowVisibility();
 
         // The editor starts 0.5.
         lynx::SetMasterVolume(
@@ -3074,6 +3987,7 @@ namespace editor
     void Shutdown()
     {
         SaveEditorCamera();
+        SaveEditorWindowVisibility();
 
         ShutdownImGui();
     }
@@ -3247,7 +4161,8 @@ namespace editor
 
         const ImGuiIO& io = ImGui::GetIO();
 
-        if (io.KeyCtrl && SceneAcceptsMouse(io.WantCaptureMouse))
+        if ((!brushPaintEnabled || io.KeyCtrl) &&
+            SceneAcceptsMouse(io.WantCaptureMouse))
         {
             HRL_id object =
                 HRL_GL_GetHoveredObject(
@@ -3273,14 +4188,39 @@ namespace editor
 
     void OnScroll(double yoffset)
     {
-        if (SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse))
+        if (!SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse))
+            return;
+
+        const ImGuiIO& io = ImGui::GetIO();
+
+        // Ctrl + wheel = brush size.
+        // Ctrl also freezes the camera Z.
+        if (io.KeyCtrl)
         {
-            camZ =
-                ClampCameraZ(
-                    camZ -
-                    static_cast<float>(yoffset) * 10.f
-                );
+            if (brushShape != BrushShape::Single)
+            {
+                const int delta =
+                    yoffset > 0.0
+                        ? 1
+                        : (yoffset < 0.0 ? -1 : 0);
+
+                brushRadius =
+                    std::clamp(
+                        brushRadius + delta,
+                        1,
+                        256
+                    );
+            }
+
+            return;
         }
+
+        // Normal wheel = camera Z.
+        camZ =
+            ClampCameraZ(
+                camZ -
+                static_cast<float>(yoffset) * 10.f
+            );
     }
 
 
@@ -3358,6 +4298,53 @@ namespace editor
             &mouseX,
             &mouseY
         );
+
+        // C = pick the voxel under the mouse. HRL expects framebuffer
+        // coordinates, while GLFW returns window coordinates. Do this
+        // conversion independently from the editor viewport conversion.
+        static bool c_was_down = false;
+        const bool c_down =
+            glfwGetKey(win, GLFW_KEY_C) == GLFW_PRESS;
+
+        if (c_down &&
+            !c_was_down &&
+            !isPlaying &&
+            !io.WantTextInput &&
+            !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow))
+        {
+            // Use exactly the same screen-coordinate calculation as actor/voxel
+            // placement. MouseToScene() is the authoritative conversion for the
+            // editor, so do not apply a separate framebuffer scaling here.
+            double screenMouseX = mouseX;
+            double screenMouseY = mouseY;
+
+            MouseToScene(
+                screenMouseX,
+                screenMouseY,
+                screenMouseX,
+                screenMouseY
+            );
+
+            int voxelX = 0;
+            int voxelY = 0;
+
+            if (HRL_GetVoxelAtScreenPosition(
+                    scene,
+                    static_cast<int>(screenMouseX),
+                    static_cast<int>(screenMouseY),
+                    &voxelX,
+                    &voxelY))
+            {
+                brushVoxelType =
+                    HRL_GetVoxelType(
+                        scene,
+                        voxelX,
+                        voxelY
+                    );
+            }
+        }
+
+        c_was_down = c_down;
 
         // Window pixels -> scene pixels (brush, picking...).
         MouseToScene(mouseX, mouseY, mouseX, mouseY);
@@ -3585,8 +4572,7 @@ namespace editor
             // Editor mouse interaction
             // ----------------------------------------------------
 
-            if (!io.KeyCtrl &&
-                SceneAcceptsMouse(io.WantCaptureMouse))
+            if (SceneAcceptsMouse(io.WantCaptureMouse))
             {
                 const bool leftMousePressed =
                     glfwGetMouseButton(
@@ -3595,28 +4581,128 @@ namespace editor
                     ) == GLFW_PRESS;
 
 
+                const bool dragShape = IsDragShape(brushShape);
+
                 if (brushPaintEnabled &&
                     leftMousePressed &&
                     !brushPainting)
                 {
                     brushPainting = true;
-
                     brushHasLastCenter = false;
-
                     brushPaintedVoxels.clear();
-
                     currentStrokeChanges.clear();
+                    brushDragHasStart = false;
+
+                    if (dragShape)
+                    {
+                        int startX;
+                        int startY;
+
+                        if (HRL_GetVoxelAtScreenPosition(
+                                scene,
+                                static_cast<int>(mouseX),
+                                static_cast<int>(mouseY),
+                                &startX,
+                                &startY))
+                        {
+                            brushDragStartX = startX;
+                            brushDragStartY = startY;
+                            brushDragHasStart = true;
+                        }
+                    }
                 }
 
+                // Drag tools are committed only when the mouse is released:
+                // press = start point, release = end point.
+                if (dragShape &&
+                    brushPainting &&
+                    leftMousePressed &&
+                    brushDragHasStart &&
+                    !isPlaying)
+                {
+                    int endX;
+                    int endY;
+
+                    if (HRL_GetVoxelAtScreenPosition(
+                            scene,
+                            static_cast<int>(mouseX),
+                            static_cast<int>(mouseY),
+                            &endX,
+                            &endY))
+                    {
+                        ApplyDragBrushPreview(
+                            brushDragStartX,
+                            brushDragStartY,
+                            endX,
+                            endY
+                        );
+                    }
+                    else
+                    {
+                        ClearBrushPreview();
+                    }
+                }
+
+                if (brushPaintEnabled &&
+                    leftMousePressed &&
+                    !dragShape)
+                {
+                    if (!brushHasLastCenter)
+                        brushPaintedVoxels.clear();
+
+                    int centerX;
+                    int centerY;
+
+                    if (HRL_GetVoxelAtScreenPosition(
+                            scene,
+                            static_cast<int>(mouseX),
+                            static_cast<int>(mouseY),
+                            &centerX,
+                            &centerY))
+                    {
+                        paintBrushStroke(centerX, centerY);
+                    }
+                    else
+                    {
+                        // Cursor left the world : do not link across the gap.
+                        brushHasLastCenter = false;
+                    }
+                }
 
                 if ((!leftMousePressed ||
                      !brushPaintEnabled) &&
                     brushPainting)
                 {
+                    if (dragShape && brushDragHasStart)
+                    {
+                        int endX;
+                        int endY;
+
+                        if (HRL_GetVoxelAtScreenPosition(
+                                scene,
+                                static_cast<int>(mouseX),
+                                static_cast<int>(mouseY),
+                                &endX,
+                                &endY))
+                        {
+                            ClearBrushPreview();
+                            stampDragShape(
+                                brushDragStartX,
+                                brushDragStartY,
+                                endX,
+                                endY
+                            );
+                        }
+                        else
+                        {
+                            ClearBrushPreview();
+                        }
+                    }
+
                     brushPainting = false;
-
+                    brushHasLastCenter = false;
+                    brushDragHasStart = false;
                     brushPaintedVoxels.clear();
-
 
                     if (!currentStrokeChanges.empty())
                     {
@@ -3641,17 +4727,26 @@ namespace editor
                         });
                     }
 
-
                     currentStrokeChanges.clear();
                 }
 
-
-                if (brushPaintEnabled &&
-                    leftMousePressed)
+                if ((!leftMousePressed || io.KeyCtrl) &&
+                    !isPlaying)
                 {
                     int centerX;
                     int centerY;
 
+                    if (dragShape)
+                    {
+                        // A drag tool keeps showing its full preview between
+                        // the press and release. Once released, fall back to
+                        // the normal hover preview at the cursor.
+                        if (brushDragHasStart)
+                        {
+                            // The release path above already committed it.
+                            ClearBrushPreview();
+                        }
+                    }
 
                     if (HRL_GetVoxelAtScreenPosition(
                             scene,
@@ -3660,33 +4755,18 @@ namespace editor
                             &centerX,
                             &centerY))
                     {
-                        paintBrushStroke(centerX, centerY);
-                    }
-                    else
-                    {
-                        // Cursor left the world : do not link across the gap.
-                        brushHasLastCenter = false;
-                    }
-                }
-                else if (brushPaintEnabled &&
-                         !leftMousePressed &&
-                         !isPlaying)
-                {
-                    // Hover : preview the brush on the voxels.
-                    int centerX;
-                    int centerY;
-
-                    if (HRL_GetVoxelAtScreenPosition(
-                            scene,
-                            static_cast<int>(mouseX),
-                            static_cast<int>(mouseY),
-                            &centerX,
-                            &centerY))
-                    {
-                        ApplyBrushPreview(centerX, centerY);
+                        if (dragShape)
+                        {
+                            // For drag tools, the hover state is a single
+                            // point until a new drag begins.
+                            ApplyBrushPreview(centerX, centerY);
+                        }
+                        else
+                        {
+                            ApplyBrushPreview(centerX, centerY);
+                        }
                     }
                 }
-
 
                 // ------------------------------------------------
                 // F1 save
@@ -3771,6 +4851,62 @@ namespace editor
             }
         }
 
+
+
+        // --------------------------------------------------------
+        // Tab : toggle Painting / No Painting
+        // --------------------------------------------------------
+        static bool tab_was_down = false;
+
+        const bool tab_down =
+            glfwGetKey(
+                win,
+                GLFW_KEY_TAB
+            ) == GLFW_PRESS;
+
+        if (tab_down &&
+            !tab_was_down &&
+            !isPlaying &&
+            !io.WantTextInput)
+        {
+            brushPaintEnabled = !brushPaintEnabled;
+
+            // End any current stroke cleanly when leaving Painting mode.
+            if (!brushPaintEnabled && brushPainting)
+            {
+                brushPainting = false;
+                brushHasLastCenter = false;
+                brushDragHasStart = false;
+                brushPaintedVoxels.clear();
+
+                if (!currentStrokeChanges.empty())
+                {
+                    auto stroke =
+                        std::move(currentStrokeChanges);
+
+                    PushEditorUndo([stroke = std::move(stroke)]() mutable
+                    {
+                        for (auto it = stroke.rbegin();
+                             it != stroke.rend();
+                             ++it)
+                        {
+                            HRL_SetVoxelType(
+                                scene,
+                                it->x,
+                                it->y,
+                                it->previousType
+                            );
+                        }
+
+                        MarkEditorDirty();
+                    });
+                }
+
+                currentStrokeChanges.clear();
+            }
+        }
+
+        tab_was_down = tab_down;
 
 
         // --------------------------------------------------------
@@ -3904,11 +5040,20 @@ namespace editor
 
         BeginImGuiFrame();
 
-        DrawViewportWindow();
+        // Actor placement uses the main scene directly. The optional ImGui
+        // "Viewport" window is deliberately not involved.
+        if (!isPlaying)
+            HandleActorPlacementDrag(level);
+
+        if (!isPlaying && editorWindows.viewport)
+            DrawViewportWindow();
 
         DrawToolbar();
 
-        ImGuiIO& io =
+        // While playing, the toolbar is the only ImGui window that remains visible.
+        if (!isPlaying)
+        {
+            ImGuiIO& io =
             ImGui::GetIO();
 
 
@@ -3979,7 +5124,7 @@ namespace editor
         // Outliner
         // --------------------------------------------------------
 
-        if (!isPlaying)
+        if (!isPlaying && editorWindows.outliner)
         {
             ImGui::Begin("Outliner");
 
@@ -4341,18 +5486,22 @@ namespace editor
             // Place Actors
             // --------------------------------------------------------
 
-            PlaceActorsWindow(level);
+            if (editorWindows.placeActors)
+                PlaceActorsWindow(level);
 
 
             // --------------------------------------------------------
             // Content Browser
             // --------------------------------------------------------
 
-            DrawContentBrowser(level);
+            if (editorWindows.contentBrowser)
+                DrawContentBrowser(level);
 
 
             // --------------------------------------------------------
-            // Details
+            if (editorWindows.details)
+            {
+// Details
             // --------------------------------------------------------
 
             static bool details_undo_active = false;
@@ -4743,8 +5892,14 @@ namespace editor
 
 
         // --------------------------------------------------------
+                    }
+
+        // --------------------------------------------------------
         // Color Picking
         // --------------------------------------------------------
+
+        if (editorWindows.colorPicking)
+        {
 
         ImGui::Begin(
             "Color Picking"
@@ -4778,18 +5933,16 @@ namespace editor
 
 
         // --------------------------------------------------------
+        }
+
+        // --------------------------------------------------------
         // Config
         // --------------------------------------------------------
 
-        ImGui::Begin("Config");
+        if (editorWindows.config)
+        {
 
-
-        ImGui::SliderFloat(
-            "Camera Speed",
-            &cameraSpeed,
-            1.f,
-            400.f
-        );
+        ImGui::Begin("Paint");
 
 
         // --------------------------------------------------------
@@ -4798,6 +5951,10 @@ namespace editor
 
         ImGui::Text(
             "Brush Mode"
+        );
+
+        ImGui::TextDisabled(
+            "Tab = switch mode"
         );
 
 
@@ -4888,8 +6045,226 @@ namespace editor
                 "Brush Radius",
                 &brushRadius,
                 1,
-                20
+                50
             );
+
+            // ----------------------------------------------------
+            // Brush shapes
+            // ----------------------------------------------------
+
+            ImGui::Text("Brush");
+
+            struct BrushShapeButton
+            {
+                BrushShape shape;
+                const char* name;
+            };
+
+            static const BrushShapeButton brushShapeButtons[] =
+            {
+                { BrushShape::Single,      "Single" },
+                { BrushShape::Circle,      "Circle" },
+                { BrushShape::Square,      "Square" },
+                { BrushShape::Diamond,     "Diamond" },
+                { BrushShape::Horizontal,  "Horizontal" },
+                { BrushShape::Vertical,    "Vertical" },
+                { BrushShape::Cross,            "Cross" },
+                { BrushShape::Line,             "Line" },
+                { BrushShape::Rectangle,        "Rectangle" },
+                { BrushShape::RectangleOutline, "Rectangle Outline" },
+                { BrushShape::CircleOutline,    "Circle Outline" }
+            };
+
+            auto drawBrushShapeIcon = [](
+                ImDrawList* drawList,
+                const ImVec2& min,
+                const ImVec2& max,
+                BrushShape shape
+            )
+            {
+                const ImVec2 center(
+                    (min.x + max.x) * 0.5f,
+                    (min.y + max.y) * 0.5f
+                );
+
+                const float iconSize =
+                    std::min(max.x - min.x, max.y - min.y) * 0.62f;
+
+                const float cell = iconSize / 9.f;
+                const int iconRadius = 4;
+                const ImU32 iconColor = IM_COL32(
+                    225, 225, 225, 255
+                );
+
+                for (int y = -iconRadius; y <= iconRadius; ++y)
+                {
+                    for (int x = -iconRadius; x <= iconRadius; ++x)
+                    {
+                        bool filled = false;
+
+                        switch (shape)
+                        {
+                            case BrushShape::Single:
+                                filled = x == 0 && y == 0;
+                                break;
+
+                            case BrushShape::Circle:
+                                filled = x * x + y * y <= 10;
+                                break;
+
+                            case BrushShape::Square:
+                                filled = true;
+                                break;
+
+                            case BrushShape::Diamond:
+                                filled = std::abs(x) + std::abs(y) <= 4;
+                                break;
+
+                            case BrushShape::Horizontal:
+                                filled = y == 0;
+                                break;
+
+                            case BrushShape::Vertical:
+                                filled = x == 0;
+                                break;
+
+                            case BrushShape::Cross:
+                                filled = x == 0 || y == 0;
+                                break;
+
+                            case BrushShape::Line:
+                                filled = y == 0;
+                                break;
+
+                            case BrushShape::Rectangle:
+                                filled = std::abs(x) <= 3 && std::abs(y) <= 3;
+                                break;
+
+                            case BrushShape::RectangleOutline:
+                                filled = (std::abs(x) == 3 || std::abs(y) == 3) &&
+                                         std::abs(x) <= 3 && std::abs(y) <= 3;
+                                break;
+
+                            case BrushShape::CircleOutline:
+                                {
+                                    const int d = x * x + y * y;
+                                    filled = d >= 8 && d <= 18;
+                                }
+                                break;
+                        }
+
+                        if (!filled)
+                            continue;
+
+                        const ImVec2 cellMin(
+                            center.x + (x - 0.5f) * cell,
+                            center.y + (y - 0.5f) * cell
+                        );
+
+                        const ImVec2 cellMax(
+                            cellMin.x + cell,
+                            cellMin.y + cell
+                        );
+
+                        drawList->AddRectFilled(
+                            cellMin,
+                            cellMax,
+                            iconColor,
+                            1.f
+                        );
+                    }
+                }
+            };
+
+            for (int i = 0;
+                 i < static_cast<int>(IM_ARRAYSIZE(brushShapeButtons));
+                 ++i)
+            {
+                const BrushShapeButton& brushButton =
+                    brushShapeButtons[i];
+
+                ImGui::PushID(
+                    static_cast<int>(brushButton.shape)
+                );
+
+                const ImVec2 buttonSize(52.f, 52.f);
+
+                if (i > 0)
+                    ImGui::SameLine();
+
+                const ImVec2 cursor = ImGui::GetCursorScreenPos();
+
+                const bool pressed =
+                    ImGui::InvisibleButton(
+                        "##BrushShape",
+                        buttonSize
+                    );
+
+                const bool hovered =
+                    ImGui::IsItemHovered();
+
+                ImDrawList* drawList =
+                    ImGui::GetWindowDrawList();
+
+                const ImU32 background =
+                    hovered
+                        ? IM_COL32(70, 70, 70, 255)
+                        : IM_COL32(45, 45, 45, 255);
+
+                drawList->AddRectFilled(
+                    cursor,
+                    ImVec2(
+                        cursor.x + buttonSize.x,
+                        cursor.y + buttonSize.y
+                    ),
+                    background,
+                    4.f
+                );
+
+                drawBrushShapeIcon(
+                    drawList,
+                    cursor,
+                    ImVec2(
+                        cursor.x + buttonSize.x,
+                        cursor.y + buttonSize.y
+                    ),
+                    brushButton.shape
+                );
+
+                const bool selected =
+                    brushShape == brushButton.shape;
+
+                drawList->AddRect(
+                    ImVec2(
+                        cursor.x + 1.f,
+                        cursor.y + 1.f
+                    ),
+                    ImVec2(
+                        cursor.x + buttonSize.x - 1.f,
+                        cursor.y + buttonSize.y - 1.f
+                    ),
+                    selected
+                        ? IM_COL32(255, 255, 255, 255)
+                        : IM_COL32(90, 90, 90, 255),
+                    4.f,
+                    0,
+                    selected ? 2.f : 1.f
+                );
+
+                if (pressed)
+                    brushShape = brushButton.shape;
+
+                if (hovered)
+                    ImGui::SetTooltip("%s", brushButton.name);
+
+                ImGui::PopID();
+            }
+
+            // Radius has no effect on the single-voxel brush.
+            if (brushShape == BrushShape::Single)
+            {
+                ImGui::TextDisabled("Single voxel");
+            }
 
 
             ImGui::Checkbox(
@@ -5050,12 +6425,15 @@ namespace editor
         }
 
 
-        ImGui::End();
-
+            ImGui::End();
+        }
 
         // --------------------------------------------------------
         // Camera Shake
         // --------------------------------------------------------
+
+        if (editorWindows.cameraShake)
+        {
 
         ImGui::Begin(
             "Camera Shake"
@@ -5136,7 +6514,9 @@ namespace editor
 
 
         // --------------------------------------------------------
-        // Level drag & drop
+        }
+
+// Level drag & drop
         // --------------------------------------------------------
 
         HandleLevelAssetDrop(level);
@@ -5238,6 +6618,7 @@ namespace editor
             ImGui::EndPopup();
         }
 
+        } // !isPlaying: hide every editor window while the game is running
 
         EndImGuiFrame();
     }
@@ -5322,15 +6703,30 @@ static void MouseButtonCallback(
     int action,
     int mods)
 {
-    const bool blocked = editor::BlockGameInput();
+    // An ImGui window must completely own the click.
+    // Keep the decision made on PRESS until RELEASE so a click that starts
+    // on an ImGui window can never leak a release into the game.
+    static bool gameMouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1] = {};
 
-    if (action == GLFW_PRESS && !blocked)
+    const bool editorOwnsMouse = editor::WantsMouse();
+    const bool blocked = editor::BlockGameInput() || editorOwnsMouse;
+
+    if (button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST)
     {
-        lynx::InjectMouseButtonDown(button);
-    }
-    else if (action == GLFW_RELEASE && !blocked)
-    {
-        lynx::InjectMouseButtonUp(button);
+        if (action == GLFW_PRESS)
+        {
+            gameMouseButtonDown[button] = !blocked;
+
+            if (!blocked)
+                lynx::InjectMouseButtonDown(button);
+        }
+        else if (action == GLFW_RELEASE)
+        {
+            if (gameMouseButtonDown[button])
+                lynx::InjectMouseButtonUp(button);
+
+            gameMouseButtonDown[button] = false;
+        }
     }
 
     if (button == GLFW_MOUSE_BUTTON_LEFT &&
@@ -5450,6 +6846,31 @@ int main()
     glfwMaximizeWindow(win);
 
     glfwMakeContextCurrent(win);
+
+    const auto iconFile = lynx::fs::ReadBinary("icon.png");
+    if (!iconFile.empty() && iconFile.size() <= static_cast<size_t>(std::numeric_limits<int>::max()))
+    {
+        int iconWidth = 0;
+        int iconHeight = 0;
+        stbi_uc* iconPixels = stbi_load_from_memory(
+            iconFile.data(), static_cast<int>(iconFile.size()),
+            &iconWidth, &iconHeight, nullptr, 4);
+        if (iconPixels)
+        {
+            GLFWimage icon{ iconWidth, iconHeight, iconPixels };
+            glfwSetWindowIcon(win, 1, &icon);
+            stbi_image_free(iconPixels);
+        }
+        else
+        {
+            std::cerr << "[WINDOW] Could not decode icon.png: "
+                      << stbi_failure_reason() << "\\n";
+        }
+    }
+    else
+    {
+        std::cerr << "[WINDOW] icon.png not found or too large\\n";
+    }
 
 
     glfwSetFramebufferSizeCallback(

@@ -54,13 +54,6 @@ Index of this file:
 #include "imgui.h"
 #endif
 
-// [PIXEL STYLE] Size (in pixels) of the notch cut out of rounded corners. Define IMGUI_DISABLE_PIXEL_STYLE to restore stock rendering.
-#ifndef IMGUI_DISABLE_PIXEL_STYLE
-#ifndef IMGUI_PIXEL_CORNER_SIZE
-#define IMGUI_PIXEL_CORNER_SIZE 1.0f
-#endif
-#endif
-
 #include <stdio.h>      // FILE*, sscanf
 #include <stdlib.h>     // NULL, malloc, free, qsort, atoi, atof
 #include <math.h>       // sqrtf, fabsf, fmodf, powf, floorf, ceilf, cosf, sinf
@@ -3876,6 +3869,18 @@ namespace ImGui
     IMGUI_API void          RenderFrameBorder(ImVec2 p_min, ImVec2 p_max, float rounding = 0.0f);
     IMGUI_API void          RenderColorRectWithAlphaCheckerboard(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, float grid_step, ImVec2 grid_off, float rounding = 0.0f, ImDrawFlags flags = 0);
     IMGUI_API void          RenderNavCursor(const ImRect& bb, ImGuiID id, ImGuiNavRenderCursorFlags flags = ImGuiNavRenderCursorFlags_None); // Navigation highlight
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+    // [PIXEL STYLE] 1px bevel (light on top/left, dark on bottom/right; inverted if 'sunken'), colors derived from 'face_col'. 'inset' = outline thickness to stay inside of.
+    // 'rounding'/'flags' = same as the outline being followed, so the relief hugs the stair-stepped corners.
+    IMGUI_API void      RenderPixelBevel(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, float inset, bool sunken, float rounding = 0.0f, ImDrawFlags flags = 0);
+    // [PIXEL STYLE] Pixel-art discs and 1px rings (e.g. radio buttons). 'p_min' = top-left of the square the circle is inscribed in, 'diameter' in pixels.
+    IMGUI_API void      RenderPixelDisc(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col);
+    IMGUI_API void      RenderPixelCircle(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col);
+    // [PIXEL STYLE] Filled face + 1px outline + bevel.
+    IMGUI_API void      RenderPixelBox(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, ImU32 outline_col, float rounding, ImDrawFlags flags, bool sunken);
+    // [PIXEL STYLE] A 'rounding' value is turned into a pixel-art corner: a stair of N steps (rounding 1..2 -> 1px, 3..4 -> 2px, 5..6 -> 3px...)
+    inline float        RenderPixelCornerSize(float rounding) { return rounding < 0.5f ? 0.0f : ImMax(1.0f, ImFloor((rounding + 1.0f) * 0.5f)); }
+#endif
 #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
     inline    void          RenderNavHighlight(const ImRect& bb, ImGuiID id, ImGuiNavRenderCursorFlags flags = ImGuiNavRenderCursorFlags_None) { RenderNavCursor(bb, id, flags); } // Renamed in 1.91.4
 #endif
