@@ -1,0 +1,39 @@
+# =============================================================================
+# Lynx engine package (generated in the engine build folder)
+# -----------------------------------------------------------------------------
+# A game project uses the engine with :
+#
+#     find_package(Lynx REQUIRED)
+#     target_link_libraries(MyGame PRIVATE Lynx::Lynx Lynx::HRL)
+#
+# CMake finds this file through its package registry (written when the engine
+# is configured), or through -DLynx_DIR=<engine build folder>.
+# =============================================================================
+
+set(LYNX_SOURCE_DIR "@CMAKE_SOURCE_DIR@")
+set(LYNX_BUILD_DIR  "@CMAKE_BINARY_DIR@")
+
+# The game DLL shares C++ objects with lynx.dll (std::string, std::vector...) :
+# it must be built by the same compiler.
+set(LYNX_CXX_COMPILER_ID      "@CMAKE_CXX_COMPILER_ID@")
+set(LYNX_CXX_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@")
+
+if(CMAKE_CXX_COMPILER_ID AND NOT CMAKE_CXX_COMPILER_ID STREQUAL LYNX_CXX_COMPILER_ID)
+	message(FATAL_ERROR
+		"The Lynx engine (${LYNX_BUILD_DIR}) was built with ${LYNX_CXX_COMPILER_ID} "
+		"${LYNX_CXX_COMPILER_VERSION}, this project uses ${CMAKE_CXX_COMPILER_ID} "
+		"${CMAKE_CXX_COMPILER_VERSION}. Use the same compiler (ex : -G \"MinGW Makefiles\" "
+		"with the MinGW of the engine).")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/LynxTargets.cmake")
+
+# HRL (renderer) : games call it directly.
+if(NOT TARGET Lynx::HRL)
+	add_library(Lynx::HRL UNKNOWN IMPORTED)
+	set_target_properties(Lynx::HRL PROPERTIES
+		IMPORTED_LOCATION "@HRL_LIB@"
+	)
+endif()
+
+set(Lynx_FOUND TRUE)

@@ -6,7 +6,7 @@
 
 #include "TextEditor.h"
 
-#include "imgui.h"
+#include "../imgui/imgui.h"
 
 // TODO
 // - multiline comments vs single-line: latter is blocking start of a ML

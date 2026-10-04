@@ -1,0 +1,77 @@
+{
+    "action-mappings": {
+        "jump": [
+            "KEY_SPACE",
+            "GAMEPAD_A"
+        ],
+        "attack": [
+            "MOUSE_LEFT",
+            "GAMEPAD_X"
+        ],
+        "cast": [
+            "KEY_E",
+            "GAMEPAD_RIGHT_TRIGGER"
+        ],
+        "select-character": [
+            "MOUSE_RIGHT",
+            "GAMEPAD_LEFT_BUMPER"
+        ],
+        "Ekip": [
+            "KEY_V"
+        ]
+    },
+    "axis-mappings": {
+        "move_x": [
+            {
+                "key": "KEY_A",
+                "scale": -1.0
+            },
+            {
+                "key": "KEY_D",
+                "scale": 1.0
+            },
+            {
+                "key": "KEY_LEFT",
+                "scale": -1.0
+            },
+            {
+                "key": "KEY_RIGHT",
+                "scale": 1.0
+            },
+            {
+                "key": "GAMEPAD_LEFT_X",
+                "scale": 1.0
+            }
+        ],
+        "move_y": [
+            {
+                "key": "KEY_W",
+                "scale": 1.0
+            },
+            {
+                "key": "KEY_S",
+                "scale": -1.0
+            },
+            {
+                "key": "GAMEPAD_LEFT_Y",
+                "scale": 1.0
+            }
+        ],
+        "look_x": [
+            {
+                "key": "GAMEPAD_RIGHT_X",
+                "scale": 1.0
+            }
+        ],
+        "select-axis": [
+            {
+                "key": "MOUSE_WHEEL",
+                "scale": 1.0
+            },
+            {
+                "key": "GAMEPAD_RIGHT_Y",
+                "scale": -1.0
+            }
+        ]
+    }
+}

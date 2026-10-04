@@ -68,7 +68,9 @@ namespace lynx
         bool IsReleased();
 
     private:
-        std::vector<int> keys_;
+        // The keys are looked up by name at every call : a reload of
+        // input.json (editor "Input Settings") applies immediately.
+        std::string name_;
     };
 
     typedef struct {
@@ -84,7 +86,7 @@ namespace lynx
         float GetValue();
 
     private:
-        std::vector<action_t> actions_;
+        std::string name_;
     };
 }
 

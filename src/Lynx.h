@@ -7,6 +7,8 @@
 #include "core/Factory.h"
 #include "core/Localization.h"
 #include "core/RessourceManager.h"
+#include "core/Utils.h"
+#include "core/Voxels.h"
 
 #include "core/data/DataEnum.h"
 #include "core/data/EventDispatcher.h"
@@ -17,9 +19,13 @@
 
 #include "gameplay/Object.h"
 #include "gameplay/Actor.h"
+#include "gameplay/Component.h"
+#include "gameplay/Components.h"
 #include "gameplay/Input.h"
 #include "gameplay/CameraShake.h"
 #include "gameplay/AnimationSystem.h"
+
+#include "scripting/Scripting.h"
 
 #include "audio/AudioSource.h"
 #include "audio/AudioListener.h"

@@ -2,4 +2,5 @@
 cd build
 cmake -S .. -B .
 cmake --build . -j12
-ImGuiEditor.exe
+LynxEditor.exe
+pause

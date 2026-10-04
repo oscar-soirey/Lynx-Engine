@@ -12,6 +12,7 @@
 #include <iostream>
 
 #include "data/Typename.h"
+#include "../gameplay/Private/ECS.h"
 
 namespace lynx
 {
@@ -241,7 +242,11 @@ namespace lynx
 			// std::erase retourne le nombre d'elements retires : 0 si l'acteur
 			// a deja ete detruit (DestroyActor appele deux fois) -> pas de double delete.
 			if (std::erase(actors_, a) > 0)
+			{
+				// EndPlay des composants tant que l'acteur est encore entier
+				ecs::OnActorDestroyed(a);
 				delete a;
+			}
 		}
 		destroy_queue_.clear();
 	}

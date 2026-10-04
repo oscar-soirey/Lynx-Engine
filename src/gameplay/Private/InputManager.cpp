@@ -1,4 +1,5 @@
 #include "InputManager.h"
+#include "../InputNames.h"
 
 #include <algorithm>
 #include <vector>
@@ -32,59 +33,23 @@ static std::string read_file(const char* path)
     };
 }
 
-static int ParseInputCode(const std::string& value)
+// Input code from a json value : "KEY_SPACE", "GAMEPAD_A", "32" or 32.
+// 0 when unknown (see InputNames.h).
+static int ParseInputCode(const nlohmann::json& value)
 {
-    // Keep support for the old numeric format.
-    char* end = nullptr;
-    const long numeric = std::strtol(value.c_str(), &end, 10);
+    if (value.is_number_integer())
+        return value.get<int>();
 
-    if (end && *end == '\0')
-        return static_cast<int>(numeric);
+    if (!value.is_string())
+        return 0;
 
-    using namespace lynx;
+    const std::string text = value.get<std::string>();
+    const int code = lynx::input_names::CodeOf(text);
 
-    static const std::unordered_map<std::string, int> names =
-    {
-        {"MOUSE_LEFT", MOUSE_LEFT},
-        {"MOUSE_RIGHT", MOUSE_RIGHT},
-        {"MOUSE_MIDDLE", MOUSE_MIDDLE},
-        {"MOUSE_BUTTON_4", MOUSE_BUTTON_4},
-        {"MOUSE_BUTTON_5", MOUSE_BUTTON_5},
-        {"MOUSE_BUTTON_6", MOUSE_BUTTON_6},
-        {"MOUSE_BUTTON_7", MOUSE_BUTTON_7},
-        {"MOUSE_BUTTON_8", MOUSE_BUTTON_8},
+    if (code == 0)
+        std::fprintf(stderr, "[Input] unknown input '%s'\n", text.c_str());
 
-        {"MOUSE_X", MOUSE_X},
-        {"MOUSE_Y", MOUSE_Y},
-        {"MOUSE_WHEEL", MOUSE_WHEEL},
-
-        {"GAMEPAD_A", GAMEPAD_A},
-        {"GAMEPAD_B", GAMEPAD_B},
-        {"GAMEPAD_X", GAMEPAD_X},
-        {"GAMEPAD_Y", GAMEPAD_Y},
-        {"GAMEPAD_LEFT_BUMPER", GAMEPAD_LEFT_BUMPER},
-        {"GAMEPAD_RIGHT_BUMPER", GAMEPAD_RIGHT_BUMPER},
-        {"GAMEPAD_BACK", GAMEPAD_BACK},
-        {"GAMEPAD_START", GAMEPAD_START},
-        {"GAMEPAD_GUIDE", GAMEPAD_GUIDE},
-        {"GAMEPAD_LEFT_THUMB", GAMEPAD_LEFT_THUMB},
-        {"GAMEPAD_RIGHT_THUMB", GAMEPAD_RIGHT_THUMB},
-        {"GAMEPAD_DPAD_UP", GAMEPAD_DPAD_UP},
-        {"GAMEPAD_DPAD_RIGHT", GAMEPAD_DPAD_RIGHT},
-        {"GAMEPAD_DPAD_DOWN", GAMEPAD_DPAD_DOWN},
-        {"GAMEPAD_DPAD_LEFT", GAMEPAD_DPAD_LEFT},
-
-        {"GAMEPAD_LEFT_X", GAMEPAD_LEFT_X},
-        {"GAMEPAD_LEFT_Y", GAMEPAD_LEFT_Y},
-        {"GAMEPAD_RIGHT_X", GAMEPAD_RIGHT_X},
-        {"GAMEPAD_RIGHT_Y", GAMEPAD_RIGHT_Y},
-        {"GAMEPAD_LEFT_TRIGGER", GAMEPAD_LEFT_TRIGGER},
-        {"GAMEPAD_RIGHT_TRIGGER", GAMEPAD_RIGHT_TRIGGER}
-    };
-
-    auto it = names.find(value);
-
-    return it != names.end() ? it->second : 0;
+    return code;
 }
 
 namespace lynx
@@ -109,40 +74,52 @@ namespace lynx
             return;
         }
 
-        if (j.contains("action-mappings"))
+        // A (re)load replaces every mapping : the editor reloads the file
+        // after each save.
+        action_mappings.clear();
+        axis_mappings.clear();
+
+        if (j.contains("action-mappings") && j["action-mappings"].is_object())
         {
             for (const auto& [name, keys] : j["action-mappings"].items())
             {
                 std::vector<int> keycodes;
 
-                for (const auto& k : keys)
+                if (keys.is_array())
                 {
-                    keycodes.emplace_back(
-                        ParseInputCode(k.get<std::string>())
-                    );
+                    for (const auto& k : keys)
+                    {
+                        if (const int code = ParseInputCode(k))
+                            keycodes.emplace_back(code);
+                    }
                 }
 
                 action_mappings[name] = std::move(keycodes);
             }
         }
 
-        if (j.contains("axis-mappings"))
+        if (j.contains("axis-mappings") && j["axis-mappings"].is_object())
         {
             for (const auto& [name, actions] : j["axis-mappings"].items())
             {
                 std::vector<action_t> acts;
 
-                for (const auto& a : actions)
+                if (actions.is_array())
                 {
-                    action_t act;
+                    for (const auto& a : actions)
+                    {
+                        if (!a.is_object() || !a.contains("key"))
+                            continue;
 
-                    act.key = ParseInputCode(
-                        a["key"].get<std::string>()
-                    );
+                        action_t act;
+                        act.key = ParseInputCode(a["key"]);
+                        act.value = (a.contains("scale") && a["scale"].is_number())
+                            ? a["scale"].get<float>()
+                            : 1.f;
 
-                    act.value = a["scale"].get<float>();
-
-                    acts.emplace_back(act);
+                        if (act.key != 0)
+                            acts.emplace_back(act);
+                    }
                 }
 
                 axis_mappings[name] = std::move(acts);

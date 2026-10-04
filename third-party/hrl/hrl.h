@@ -123,7 +123,8 @@ typedef enum HRL_EVoxelRenderMode {
 	HRL_VOXEL_FLAT = 0,
 	/**
 	 * Marching squares contour: flat edges stay on the voxel boundaries,
-	 * staircases become 45 degree slopes and isolated corners are cut.
+	 * staircases become 45 degree slopes and isolated corners are cut. The
+	 * boundary between two different voxel types follows the same contour.
 	 */
 	HRL_VOXEL_SMOOTH,
 	/**
@@ -131,6 +132,9 @@ typedef enum HRL_EVoxelRenderMode {
 	 * whose neighbor is empty) is cut at 45 degrees over 25% of the voxel
 	 * width. Each exposed side is flat over its middle 50% and slopes over
 	 * its outer 25% on both ends. Fully enclosed voxels stay square.
+	 * Between two different voxel types, straight boundaries stay straight
+	 * and only staircase corners (a voxel corner whose two side neighbors are
+	 * of another type) get the same 25% chamfer, filled by the neighbor type.
 	 */
 	HRL_VOXEL_BLOCKY
 } HRL_EVoxelRenderMode;
@@ -1176,6 +1180,11 @@ extern "C" {
 	/**
 	 * @brief Sets the physical side length of one voxel square in world units.
 	 *
+	 * This is a display setting of the scene, not part of the voxel data: it is
+	 * not written by the save functions, and loading a world keeps the scene's
+	 * current size. It can be changed at any time; visible chunks are rebuilt
+	 * on the next frame and coordinate conversions use the new size at once.
+	 *
 	 * @param _sceneid Scene receiving the voxel world.
 	 * @param _size    Side length of one voxel square in world units.
 	 */
@@ -1314,8 +1323,10 @@ extern "C" {
 	 * @brief Loads a voxel world from a serialized memory buffer.
 	 *
 	 * The buffer must have been produced by HRL_SaveVoxelWorldAll() or use the
-	 * same HRL voxel-world serialization format. World dimensions, voxel physical
-	 * size, chunk size and voxel types are restored. Existing type configuration
+	 * same HRL voxel-world serialization format. World dimensions, chunk size and
+	 * voxel types are restored. The voxel physical size is not stored in the
+	 * file: the scene keeps its current HRL_SetVoxelPhysicalSize() value (files
+	 * written by older versions still load; their stored size is ignored). Existing type configuration
 	 * (colors, emissive colors and user-defined collision flags) is kept.
 	 */
 	HRL_API int HRL_LoadVoxelWorldBuffer(HRL_id _sceneid, const void* _buffer, size_t _size);

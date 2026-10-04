@@ -5,6 +5,8 @@
 
 #include "../Common.h"
 
+#include <string>
+
 #ifdef _WIN32
 #include <Windows.h>
 #define SYSTEM_MODULE HMODULE
@@ -32,6 +34,13 @@ namespace lynx
 		// true tant que la bibliotheque est chargee.
 		bool IsLoaded() const;
 
+		// Adresse d'une fonction exportee par la dll (nullptr si absente ou si
+		// la dll n'est pas chargee). Voir core/GameModuleAPI.h.
+		void* GetSymbol(const char* name) const;
+
+		// Chemin donne au constructeur.
+		const std::string& GetPath() const { return path_; }
+
 		// Invalide tout ce qui vient de la bibliotheque, puis la decharge :
 		//   1. supprime le niveau courant de l'engine (detruit tous les acteurs
 		//      pendant que le code de la dll est encore mappe),
@@ -41,6 +50,8 @@ namespace lynx
 		void Unload();
 
 	private:
+		std::string path_;
+
 		// Ce qui doit etre invalide avant de decharger la dll.
 		void InvalidateReferences();
 

@@ -1,0 +1,16 @@
+// Voxel types of the project (type id = position in the list + 1, 0 = empty).
+// Format : see src/core/Voxels.h in the engine.
+{
+    "voxels": [
+        { "name": "Vert sature",            "color": "75d420", "collision": "SOLID" },
+        { "name": "Vert fonce",             "color": "66b321", "collision": "SOLID" },
+        { "name": "Vert kaki",              "color": "9fb127", "collision": "SOLID" },
+        { "name": "Viorose clair",          "color": "b21ab4", "collision": "SOLID", "flags": ["ROCK"] },
+        { "name": "Viorose sombre",         "color": "851588", "collision": "SOLID", "flags": ["SAND"] },
+        { "name": "Viorose violet sombre",  "color": "7625a4", "collision": "SOLID", "flags": ["ROCK"] },
+        { "name": "Viorose blanc emissif",  "color": "d21ab4", "collision": "SOLID", "flags": ["ROCK"], "emissive": "ffffff" },
+        { "name": "Mossrite vert",          "color": "51fa34", "collision": "SOLID", "flags": ["ROCK"] },
+        { "name": "Evenement (jaune)",      "color": "ffd700", "collision": "SOLID", "flags": ["ROCK"], "emissive": "ffffff", "on_destroyed": "example" },
+        { "name": "Indestructible",         "color": "3a3a4a", "collision": "SOLID", "flags": ["ROCK"], "indestructible": true }
+    ]
+}

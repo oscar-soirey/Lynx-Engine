@@ -25,6 +25,12 @@ namespace lynx
 	public:
 		~Engine();
 
+		static Engine& Get()
+		{
+			static Engine engine_instance("", false); //Supprimer les parametres du constructeur
+			return engine_instance;
+		}
+
 
 		void ProgressOneFrame(float dt);
 
@@ -35,13 +41,20 @@ namespace lynx
 		void DeleteCurrentLevel();
 		Level* GetCurrentLevel() const;
 
+		static Level* OpenLevel(const char* file_name)
+		{
+			return Engine::Get().CreateLevel(file_name);
+		}
+		static Level* CurrentLevel()
+		{
+			return Engine::Get().GetCurrentLevel();
+		}
+
 		void SetGlobalTimeDilatation(float td);
 		void SetGlobalTimeDilatation(float dilation, float duration);
 		float GetGlobalTimeDilatation() const;
 
-
-		void SetWindowHandle(LynxWindow* win);
-
+		//static void SetGlobalTimeDilatation(float td);
 
 		FactoryObject& GetFactory();
 
@@ -78,18 +91,15 @@ namespace lynx
 
 
 	//singleton functions
-	LYNX_API Engine* CreateEngine(const char* config_file, bool release);
-	LYNX_API Engine* GetEngine();
+	[[deprecated]] LYNX_API Engine* CreateEngine(const char* config_file, bool release);
+	[[deprecated]] LYNX_API Engine* GetEngine();
 
-	LYNX_API void SetSceneID(uint32_t id);
-	LYNX_API uint32_t GetScene();
+	[[deprecated]] LYNX_API void SetSceneID(uint32_t id);
+	[[deprecated]] LYNX_API uint32_t GetScene();
 
-	LYNX_API void SetViewportID(uint32_t id);
-	LYNX_API uint32_t GetViewport();
+	[[deprecated]] LYNX_API void SetViewportID(uint32_t id);
+	[[deprecated]] LYNX_API uint32_t GetViewport();
 
 	//Utility functions
 	LYNX_API std::string GetEngineVersion();
-
-	//apelle un callback apres un certain temps donné
-	LYNX_API void AsyncFunc(float time, std::function<void()> callback);
 }

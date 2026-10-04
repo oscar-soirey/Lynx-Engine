@@ -12,6 +12,8 @@
 #include "audio/AudioCommon.h"
 #include "audio/AudioListener.h"
 #include "Private/SystemModule.h"
+#include "../gameplay/Private/ECS.h"
+#include "../scripting/Private/ScriptSystem.h"
 
 
 namespace lynx
@@ -22,11 +24,15 @@ namespace lynx
 		if (release) asset_src = fs::AssetSource::Archive;
 		fs::Init(asset_src);
 		InitializeAudio();
+		scripting::Init();
 	}
 
 	Engine::~Engine()
 	{
 		delete current_level_;
+		current_level_ = nullptr;
+		// apres le niveau : les acteurs detruits liberent leurs scripts
+		scripting::Shutdown();
 		ShutdownAudio();
 		HRL_Shutdown();
 	}
@@ -62,6 +68,14 @@ namespace lynx
 			a->Update(game_dt);
 		}
 
+		if (current_level_)
+		{
+			// Les spawns faits par les composants sont differes jusqu'a
+			// Level::Update (voir Level::IterationScope).
+			Level::IterationScope scope(*current_level_);
+			ecs::Update(game_dt);
+		}
+
 
 		if (game_tick_enabled_)
 		{
@@ -70,6 +84,17 @@ namespace lynx
 				if (a->input_enabled_)
 					a->ProcessInput();
 				a->Tick(game_dt);
+			}
+
+			if (current_level_)
+			{
+				// Les spawns faits par les scripts / systemes sont differes
+				// jusqu'a Level::Update (voir Level::IterationScope).
+				Level::IterationScope scope(*current_level_);
+
+				// Composants : BeginPlay des nouveaux, puis Tick (scripts JS,
+				// Velocity, Lifetime, composants du jeu...)
+				ecs::Tick(game_dt);
 			}
 
 			InputTick();
@@ -132,20 +157,21 @@ namespace lynx
 		{
 			a->StartGame();
 		}
+
+		// apres StartGame : les composants voient les acteurs deja initialises
+		ecs::BeginPlay();
 	}
 
 	void Engine::EndGame()
 	{
 		game_tick_enabled_ = false;
+
+		ecs::EndPlay();
+
 		for (auto& a: current_level_->GetActors())
 		{
 			a->EndGame();
 		}
-	}
-
-	void Engine::SetWindowHandle(LynxWindow *win)
-	{
-		win_ = win;
 	}
 
 
@@ -210,8 +236,13 @@ namespace lynx
 	}
 
 
-	void AsyncFunc(float time, const std::function<void()>& callback)
+
+
+	std::string GetEngineVersion()
 	{
-		//engine_->async_registered_.emplace(time, callback);
+		return std::string(std::to_string(LYNX_VERSION_YEAR)
+			+ std::to_string(LYNX_VERSION_MAJOR)
+			+ std::to_string(LYNX_VERSION_MINOR)
+			);
 	}
 }

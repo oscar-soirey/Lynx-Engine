@@ -1,6 +1,7 @@
 #include "SystemModule.h"
 
 #include "../Engine.h"
+#include "../Voxels.h"
 
 #include <iostream>
 #include <filesystem>
@@ -10,11 +11,20 @@ namespace lynx
 #ifdef _WIN32
 	SysModule::SysModule(const char *shared_file_path)
 	{
+		path_ = shared_file_path ? shared_file_path : "";
+
 		//charger la dll
-		std::filesystem::path fs_path = shared_file_path;
+		std::filesystem::path fs_path = path_;
 		std::string dll_path = fs_path.string();
 
-		sysmodule_ = LoadLibraryA(dll_path.c_str());
+		// Chemin absolu (ex : dll d'un projet ouvert dans l'editeur) : les
+		// dependances de la dll sont aussi cherchees dans SON dossier.
+		// Les dll deja chargees (lynx.dll, hrl.dll...) sont reutilisees telles
+		// quelles par Windows, quel que soit leur dossier.
+		if (fs_path.is_absolute())
+			sysmodule_ = LoadLibraryExA(dll_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+		else
+			sysmodule_ = LoadLibraryA(dll_path.c_str());
 		if (!sysmodule_)
 		{
 			std::cout << "DLL module loading error : unable to load dll: " << dll_path << std::endl;
@@ -76,6 +86,21 @@ namespace lynx
 		return sysmodule_ != nullptr;
 	}
 
+#ifdef _WIN32
+	void* SysModule::GetSymbol(const char* name) const
+	{
+		if (!sysmodule_ || !name)
+			return nullptr;
+
+		return reinterpret_cast<void*>(GetProcAddress(sysmodule_, name));
+	}
+#else
+	void* SysModule::GetSymbol(const char*) const
+	{
+		return nullptr;
+	}
+#endif
+
 	void SysModule::InvalidateReferences()
 	{
 		// Les acteurs (et leurs vtables), les composants, les comportements...
@@ -90,6 +115,9 @@ namespace lynx
 
 		// Ensuite seulement, on retire les classes de la factory.
 		UnregisterFactory();
+
+		// Les evenements de voxels pointent vers des fonctions de la dll.
+		voxels::ClearDestroyedEvents();
 	}
 
 #ifdef _WIN32

@@ -9,14 +9,14 @@
 namespace lynx
 {
     InputAction::InputAction(const char *name):
-        keys_(GetActionKeys(name))
+        name_(name ? name : "")
     { }
 
     bool InputAction::IsPressed()
     {
         const auto& just = GetJustPressedKeys();
 
-        for (int k : keys_)
+        for (int k : GetActionKeys(name_.c_str()))
         {
             if (std::find(just.begin(), just.end(), k) != just.end())
                 return true;
@@ -29,7 +29,7 @@ namespace lynx
     {
         const auto& pressed = GetPressedKeys();
 
-        for (int k : keys_)
+        for (int k : GetActionKeys(name_.c_str()))
         {
             if (std::find(pressed.begin(), pressed.end(), k) != pressed.end())
                 return true;
@@ -42,7 +42,7 @@ namespace lynx
     {
         const auto& just = GetJustReleasedKeys();
 
-        for (int k : keys_)
+        for (int k : GetActionKeys(name_.c_str()))
         {
             if (std::find(just.begin(), just.end(), k) != just.end())
                 return true;
@@ -52,7 +52,7 @@ namespace lynx
     }
 
     InputAxis1D::InputAxis1D(const char *name):
-        actions_(GetAxisActions(name))
+        name_(name ? name : "")
     { }
 
     float InputAxis1D::GetValue()
@@ -60,7 +60,7 @@ namespace lynx
         float val = 0.f;
         const auto& pressed = GetPressedKeys();
 
-        for (const auto& a : actions_)
+        for (const auto& a : GetAxisActions(name_.c_str()))
         {
             // Analog devices (mouse movement / gamepad axes).
             const float analog = GetAnalogValue(a.key);

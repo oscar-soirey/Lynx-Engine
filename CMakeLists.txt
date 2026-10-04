@@ -21,6 +21,14 @@ file(GLOB PHYSFS_SOURCE
 	"${CMAKE_SOURCE_DIR}/third-party/physfs/win/*.c"
 )
 
+add_subdirectory(third-party/quickjs-ng)
+
+set(HRL_LIB  "${CMAKE_CURRENT_SOURCE_DIR}/third-party/hrl/lib/libhrldll.dll.a")
+set(GLFW_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third-party/glfw/lib/libglfw3.a")
+
+
+## Engine (lynx.dll)
+
 add_library(Lynx SHARED
 		#Dependencies
 		third-party/inih/ini.c
@@ -31,6 +39,7 @@ add_library(Lynx SHARED
 		src/core/Filesystem.cpp
 		src/core/Level.cpp
 		src/core/RessourceManager.cpp
+		src/core/Voxels.cpp
 
 		src/core/data/IniParser.cpp
 		src/core/Private/SystemModule.cpp
@@ -43,6 +52,7 @@ add_library(Lynx SHARED
 		src/gameplay/CameraShake.cpp
 		src/gameplay/AnimationSystem.cpp
 		src/gameplay/AIBehavior.cpp
+		src/gameplay/Components.cpp
 
 		src/audio/AudioDecoder.cpp
 		src/audio/Audio2D.cpp
@@ -52,6 +62,8 @@ add_library(Lynx SHARED
 
 		src/widgets/WidgetScene.cpp
 		src/widgets/WidgetContainers.cpp
+
+		src/scripting/ScriptSystem.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -66,93 +78,81 @@ target_compile_definitions(Lynx
 )
 
 target_link_libraries(Lynx PRIVATE
-		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/hrl/lib/libhrldll.dll.a"
-		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/glfw/lib/libglfw3.a"
+		${HRL_LIB}
+		${GLFW_LIB}
 		OpenAL::OpenAL
+		qjs
 )
 
-
-##Game example
-add_library(GameExample SHARED
-		game/src/Module.cpp
-		game/src/GameClasses.cpp
-		game/src/Player.cpp
-		game/src/Ennemies/Ennemy.cpp
-		game/src/Ennemies/Mushroom.cpp
-		game/src/Projectile.cpp
-		game/src/Collision.cpp
-		game/src/Objects/Bouncy.cpp
+# What a game needs to compile against the engine : the engine headers
+# (<Lynx.h>, <core/...>) and the third-party headers they use (<hrl/hrl.h>...).
+target_include_directories(Lynx INTERFACE
+		"$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+		"$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third-party>"
 )
 
-target_link_libraries(GameExample
-		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/hrl/lib/libhrldll.dll.a"
-		Lynx
-)
+target_compile_features(Lynx INTERFACE cxx_std_20)
 
 
-##ImGui Editor
+## Lynx Editor (engine executable : opens a game project, see src/editor/README.md)
 
 file(GLOB ImGUI_SOURCE
 		"${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp"
 )
 
-add_executable(ImGuiEditor src/icon.rc
+add_executable(LynxEditor src/icon.rc
 		${ImGUI_SOURCE}
+		third-party/imgui_textedit/TextEditor.cpp
 		third-party/glad/glad.c
-		game/main.cpp
+
+		src/host/GameProject.cpp
+
+		src/editor/EditorMain.cpp
+		src/editor/ProjectBrowser.cpp
+		src/editor/InputSettingsEditor.cpp
 )
 
-target_link_libraries(ImGuiEditor PRIVATE
-		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/hrl/lib/libhrldll.dll.a"
-		"${CMAKE_CURRENT_SOURCE_DIR}/third-party/glfw/lib/libglfw3.a"
+target_link_libraries(LynxEditor PRIVATE
+		${HRL_LIB}
+		${GLFW_LIB}
 		Lynx
 		opengl32
 )
 
 
 
-##qt editor
+## Lynx Runtime (engine executable : plays a project without the editor)
 
-if(false)
+add_executable(LynxRuntime src/icon.rc
+		third-party/glad/glad.c
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
-find_package(KDDockWidgets-Qt6 REQUIRED)
-
-add_executable(LynxEditor
-		src/editor/main.cpp
-		src/editor/common.cpp
-		src/editor/ui/application.cpp
-		src/editor/ui/editor_window.cpp
-		src/editor/ui/title_bar.cpp
-		src/editor/widgets/viewport.cpp
-		src/editor/tabs/window_tab.cpp
-		src/editor/tabs/main_tab.cpp
-		src/editor/window/main_window.cpp
-		src/editor/window/editor_settings.cpp
-		src/editor/window/setting_sections/general.cpp
-		src/editor/utils/editor_dispatcher.cpp
-		src/editor/window/loading_window.cpp
-		src/editor/widgets/content_browser.cpp
-		src/editor/tabs/text_editor/text_editor_tab.cpp
-		src/editor/tabs/text_editor/code_editor.cpp
-		src/editor/tabs/text_editor/syntax_highlighter.cpp
-		src/editor/tabs/text_editor/lua_syntax_highlighter.cpp
-		src/icon.rc
-)
-set_target_properties(LynxEditor PROPERTIES
-		ENABLE_EXPORTS TRUE
-)
-target_compile_definitions(LynxEditor PRIVATE
-		EDITOR_BUILD
+		src/host/GameProject.cpp
+		src/runtime/RuntimeMain.cpp
 )
 
-target_link_libraries(LynxEditor
-		PRIVATE
-		Qt6::Core
-		Qt6::Gui
-		Qt6::Widgets
-		KDAB::kddockwidgets
+target_link_libraries(LynxRuntime PRIVATE
+		${HRL_LIB}
+		${GLFW_LIB}
 		Lynx
+		opengl32
 )
 
-endif()
+
+## Package for the game projects (find_package(Lynx), see cmake/LynxConfig.cmake.in)
+# A game project (ex : Blocky) can be anywhere on the computer : configuring
+# the engine writes its build folder in the CMake package registry
+# (Windows : HKEY_CURRENT_USER\Software\Kitware\CMake\Packages\Lynx).
+
+export(TARGETS Lynx
+		NAMESPACE Lynx::
+		FILE "${CMAKE_BINARY_DIR}/LynxTargets.cmake"
+)
+
+configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxConfig.cmake.in"
+		"${CMAKE_BINARY_DIR}/LynxConfig.cmake"
+		@ONLY
+)
+
+set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+export(PACKAGE Lynx)
