@@ -34,11 +34,14 @@ namespace lynx::host
 		std::vector<std::filesystem::path> modules;
 
 		// The one the editor loads (absolute). Defaults to modules[0].
+		// Empty when the game was never built (the editor compiles it first).
 		std::filesystem::path module_path;
 	};
 
 	// Checks `folder` and fills `out`. On failure returns false and explains
-	// why in `error` (no assets/ folder, no game DLL in build/...).
+	// why in `error` (no assets/ folder, no game DLL and nothing to build it...).
+	// A project that was never built is valid when CanBuildProject() : then
+	// `modules` is empty.
 	bool InspectProject(
 		const std::filesystem::path& folder,
 		GameProject& out,
@@ -57,6 +60,14 @@ namespace lynx::host
 		const std::filesystem::path& dll_path,
 		const char* symbol
 	);
+
+	// The project has a Build.bat or a CMakeLists.txt at its root.
+	bool CanBuildProject(const std::filesystem::path& root);
+
+	// Why the game DLL must be compiled before being loaded, empty = up to date.
+	// `blocking` : loading the current DLL would fail or crash (missing, or
+	// older than the engine DLL). Otherwise only the game sources are newer.
+	std::string GetBuildReason(const GameProject& project, bool& blocking);
 
 	// File of the engine DLL loaded by the editor (lynx), empty if unknown.
 	std::filesystem::path GetEngineModulePath();

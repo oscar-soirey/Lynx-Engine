@@ -135,6 +135,27 @@ Pawn::Pawn()
 {
     HPROPERTY(collider_width_, lynx::Exposed);
     HPROPERTY(collider_height_, lynx::Exposed);
+
+    // Reglages de mouvement : editables (Details) et accessibles en JavaScript
+    // (class X extends Pawn : this.move_speed_ = 6).
+    HPROPERTY(move_speed_, lynx::Exposed);
+    HPROPERTY(jump_speed_, lynx::Exposed);
+    HPROPERTY(gravity_, lynx::Exposed);
+    HPROPERTY(air_control_, lynx::Exposed);
+    HPROPERTY(max_jump_count, lynx::Exposed);
+
+    // Fonctions appelables depuis JavaScript (this.Move(1), this.Jump()...).
+    HFUNCTION(Move);
+    HFUNCTION(Jump);
+    HFUNCTION(StopJumping);
+    HFUNCTION(LaunchPawn);
+    HFUNCTION(BeginAttack);
+    HFUNCTION(Attack);
+    HFUNCTION(FinishAttack);
+    HFUNCTION(IsAttacking);
+    HFUNCTION(IsFacingRight);
+    HFUNCTION(IsGroundWithinDistance);
+    HFUNCTION(SetXOffset);
 }
 
 Pawn::~Pawn()

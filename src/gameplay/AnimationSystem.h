@@ -76,6 +76,11 @@ namespace lynx
 
    bool is_finished() const override { return finished_; }
 
+   // Frame courante, a partir de 0.
+   int current_frame() const { return current_frame_; }
+
+   int frame_count() const { return frame_count_; }
+
    void update(double dt) override;
 
    // time of one image

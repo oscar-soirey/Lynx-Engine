@@ -20,8 +20,6 @@ Player::Player()
     point_light_ = HRL_CreateLight(lynx::GetScene(), HRL_POINT_LIGHT);
     HRL_SetLightIntensity(point_light_, 5.f);
     HRL_SetLightColor(point_light_, 0.9f, 0.9f, 1.0f);
-		
-		printf("hello\n");
 }
 
 Player::~Player() 

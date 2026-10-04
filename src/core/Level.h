@@ -32,6 +32,12 @@ namespace lynx
 		};
 
 		Actor* SpawnActor(const char* _className);
+
+		/**
+		 * Ajoute au niveau un acteur deja construit (ex : new Player() en
+		 * JavaScript) : Init() puis ajout (differe si le niveau est parcouru).
+		 */
+		void AddSpawnedActor(Actor* actor);
 		void DestroyActor(Actor* _act);
 
 		template<typename T>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx Engine — Documentation</title><meta name="description" content="Lynx is a game engine for small games and massive open worlds with dynamic voxel destruction. JavaScript scripting, no C++ required."><link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a class="active" href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></nav></header>
+<main>
+<section class="hero"><div class="hero-copy"><p class="eyebrow">GAME ENGINE / SCRIPTABLE / PIXEL-FIRST</p><h1>BUILD.<br><span>PLAY. SCRIPT.</span></h1><p class="lead">Lynx is a game engine for everything from small games to massive open worlds with dynamic voxel destruction. It is built around Actors, components, levels, and lightweight JavaScript scripting powered by QuickJS. No C++ required to make a game.</p><div class="actions"><a class="button primary" href="scripting.html">Read JavaScript Guide</a><a class="button" href="api.html">Explore API</a></div></div><div class="pixel-engine" aria-label="Pixel art engine preview"><div class="pixel-screen" id="scene"><div class="stars"></div><div class="pixel-sun"></div><div class="cloud c1"></div><div class="cloud c2"></div>
+<img class="fcube f1" src="assets/cube-purple.png" alt=""><img class="fcube f2" src="assets/cube-yellow.png" alt=""><img class="fcube f3" src="assets/cube-green.png" alt="">
+<img class="mush" src="assets/mushroom.png" alt=""><div class="pixel-ground"></div><div class="hero-sprite"></div></div><div class="pixel-console">LYNX // RUNTIME</div></div></section>
+<section class="section"><div class="nocpp"><div><p class="eyebrow">NO C++ REQUIRED</p><h2>You never have to code in C++</h2><p>The engine core is written in C++, but you are never forced to write C++ yourself. Gameplay lives in JavaScript, and levels, voxels and Actors are built from the editor. C++ stays optional, for the day you want to add your own components.</p></div><div class="badges"><span class="badge on">JavaScript</span><span class="badge on">Editor</span><span class="badge">C++ optional</span></div></div></section>
+<section class="section"><div class="section-head"><p class="eyebrow">MADE FOR ANY SCALE</p><h2>From small games to massive open worlds</h2></div><div class="cards">
+<article class="card"><div class="icon">MINI</div><h3>Small games</h3><p>One level, a few Actors and a script are enough to get something playable. The editor does the rest.</p></article>
+<article class="card"><div class="icon">OPEN</div><h3>Massive open worlds</h3><p>Paint large voxel worlds in the editor, then fill them with Actors, audio and scripted behavior.</p></article>
+<article class="card"><div class="icon">BOOM</div><h3>Dynamic destruction</h3><p>Voxels can be destroyed while the game runs. Each type in <code>voxels.json</code> defines its collision, emissive behavior and destruction rules.</p></article></div></section>
+<section class="section"><div class="section-head"><p class="eyebrow">THE EDITOR</p><h2>Paint voxels, place Actors, press Play</h2></div>
+<figure class="shot"><div class="shot-bar"><i></i><i></i><i></i><span>LynxEditor — Viewport</span></div><img src="editor.png" alt="Lynx editor: voxel painting, Details panel and Content Browser" loading="lazy"><figcaption>Paint brush, Details inspector, Content Browser and Place Actors, all in one window. <b>Reload Game</b> swaps the game DLL without restarting.</figcaption></figure></section>
+<div class="vox-divider" aria-hidden="true"></div>
+<section class="section"><div class="section-head"><p class="eyebrow">THE ENGINE</p><h2>A clear C++ core, driven by components</h2></div><div class="cards">
+<article class="card"><div class="icon">ACT</div><h3>Actors</h3><p><code>Actor</code> objects represent things in the world. They own a transform, an identifier, scripts, and can receive components.</p></article>
+<article class="card"><div class="icon">ECS</div><h3>Components</h3><p>The engine uses an EnTT-based ECS registry. Components have their own lifecycle and stay separate from the public engine API.</p></article>
+<article class="card"><div class="icon">LVL</div><h3>Levels</h3><p>A <code>Level</code> contains active Actors. Spawns and destruction can be deferred while the engine is iterating safely.</p></article>
+<article class="card"><div class="icon">ANI</div><h3>Animation</h3><p>Animations, blend spaces, state transitions, frame events, parameters, and triggers are available from the native C++ systems.</p></article>
+<article class="card"><div class="icon">SFX</div><h3>Audio</h3><p>Audio sources can be attached to Actors, moved through the world, looped, and configured with volume, pitch, and spatialization.</p></article>
+<article class="card"><div class="icon">VX</div><h3>Voxel</h3><p>Voxel types are described in <code>voxels.json</code>, including colors, collision flags, emissive behavior, and destruction rules.</p></article>
+</div></section>
+<section class="section dark-panel"><div class="split"><div><p class="eyebrow">WHY JAVASCRIPT?</p><h2>Fast gameplay iteration without recompiling the engine</h2><p>The scripting layer stays deliberately small: a JavaScript file defines behavior and receives its owning Actor through the global <code>parent</code>.</p><p>The same file can be attached to multiple Actors. Its source is compiled once, while each attachment keeps its own execution environment and state.</p></div><pre class="code-window"><span class="comment">// scripts/Player.js</span>
+<span class="kw">function</span> BeginPlay() {
+  parent.position = vec3(5, 0, 0);
+}
+
+<span class="kw">function</span> Update(dt) {
+  <span class="kw">if</span> (Input.held(<span class="str">"move_x"</span>)) {
+    parent.position.x +=
+      Input.axis(<span class="str">"move_x"</span>) * 5 * dt;
+  }
+}</pre></div></section>
+<div class="vox-divider" aria-hidden="true"></div>
+<section class="section"><div class="section-head"><p class="eyebrow">AT A GLANCE</p><h2>The script pipeline</h2></div><div class="flow"><div><b>01</b><strong>.JS FILE</strong><span>Loaded from the project assets.</span></div><div><b>02</b><strong>COMPILE</strong><span>Evaluated by QuickJS and cached.</span></div><div><b>03</b><strong>INSTANCE</strong><span>One behavior instance per attachment.</span></div><div><b>04</b><strong>BEGINPLAY</strong><span>Called when gameplay starts.</span></div><div><b>05</b><strong>UPDATE(dt)</strong><span>Runs on every game tick.</span></div><div><b>06</b><strong>ENDPLAY</strong><span>Called during stop or removal.</span></div></div></section>
+<section class="section"><div class="section-head"><p class="eyebrow">STANDING ON</p><h2>Built on proven libraries</h2></div><div class="chips"><a class="chip" href="thirdparty.html#hrl"><img class="chip-logo real wide" src="assets/libs/hrl.png" alt="">HRL</a><a class="chip" href="thirdparty.html#entt"><img class="chip-logo lib-cube" src="assets/cube-green.png" alt="">EnTT</a><a class="chip" href="thirdparty.html#quickjs"><img class="chip-logo lib-cube" src="assets/cube-yellow.png" alt="">QuickJS</a><a class="chip" href="thirdparty.html#glfw"><img class="chip-logo lib-cube" src="assets/cube-purple.png" alt="">GLFW</a><a class="chip" href="thirdparty.html#imgui"><img class="chip-logo lib-cube" src="assets/cube-pink.png" alt="">Dear ImGui</a></div><p><a class="button" href="thirdparty.html">See all third-party libs</a></p></section>
+<div class="vox-divider" aria-hidden="true"></div>
+<section class="section callout"><p class="eyebrow">DOCUMENTATION</p><h2>Start with scripting</h2><p>The JavaScript section explains the instance model, lifecycle, Actor properties, transforms, levels, input, time control, reflection, hot reload, and common gameplay patterns.</p><a class="button primary" href="scripting.html">Open Complete Guide</a></section>
+</main><footer><span>LYNX ENGINE</span><span><img class="foot-logo" src="assets/logo-white.png" alt="">Documentation generated from the engine source code.</span></footer>
+<script src="site.js" defer></script></body></html>

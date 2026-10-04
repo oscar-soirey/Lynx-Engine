@@ -4,5 +4,5 @@ cd /d "%~dp0"
 
 if not exist build\CMakeCache.txt call GenerateProjectFiles.bat
 
-cmake --build build -j12
+cmake --build build
 if errorlevel 1 pause

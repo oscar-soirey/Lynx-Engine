@@ -53,6 +53,11 @@ add_library(Lynx SHARED
 		src/gameplay/AnimationSystem.cpp
 		src/gameplay/AIBehavior.cpp
 		src/gameplay/Components.cpp
+		src/gameplay/SpriteComponents.cpp
+		src/gameplay/CameraComponent.cpp
+		src/gameplay/BoxColliderComponent.cpp
+		src/gameplay/SoundSourceComponent.cpp
+		src/gameplay/LightComponent.cpp
 
 		src/audio/AudioDecoder.cpp
 		src/audio/Audio2D.cpp
@@ -64,6 +69,7 @@ add_library(Lynx SHARED
 		src/widgets/WidgetContainers.cpp
 
 		src/scripting/ScriptSystem.cpp
+		src/scripting/ComponentBindings.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -110,6 +116,14 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/EditorMain.cpp
 		src/editor/ProjectBrowser.cpp
 		src/editor/InputSettingsEditor.cpp
+		src/editor/GameBuild.cpp
+		src/editor/StartupBuild.cpp
+
+		src/editor/commands/CommandRegistry.cpp
+		src/editor/commands/CommandServer.cpp
+		src/editor/commands/CommandUtils.cpp
+		src/editor/commands/CommandsWindow.cpp
+		src/editor/commands/ScriptRunner.cpp
 )
 
 target_link_libraries(LynxEditor PRIVATE
@@ -117,6 +131,16 @@ target_link_libraries(LynxEditor PRIVATE
 		${GLFW_LIB}
 		Lynx
 		opengl32
+		ws2_32      # command server (Python scripts / MCP)
+		shell32
+)
+
+# Python tools next to the editor : lynx_editor module + MCP server (see python/README.md)
+add_custom_command(TARGET LynxEditor POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${CMAKE_CURRENT_SOURCE_DIR}/python"
+				"$<TARGET_FILE_DIR:LynxEditor>/python"
+		COMMENT "Copying the Python tools (lynx_editor, lynx_mcp.py)"
 )
 
 

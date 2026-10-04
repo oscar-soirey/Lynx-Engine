@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx — Architecture</title><link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"></head>
+<body><header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a class="active" href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></nav></header>
+<main class="docs"><section class="doc-hero"><p class="eyebrow">ARCHITECTURE</p><h1>How Lynx is organized</h1><p>This page describes the major building blocks visible in the source: Engine, Level, Actor, Components, ECS, Factory, animation, audio, voxels, and scripting.</p></section><div class="note"><b>No C++ required.</b> You can build a whole game with JavaScript and the editor. C++ is only needed if you choose to extend the engine.</div>
+<section class="doc-grid"><aside class="toc"><h3>ON THIS PAGE</h3><a href="#engine">Engine</a><a href="#level">Level</a><a href="#actor">Actor</a><a href="#component">Components / ECS</a><a href="#factory">Factory</a><a href="#systems">Systems</a><a href="#lifecycle">Frame lifecycle</a></aside><div class="doc-content">
+<article id="engine"><h2>Engine</h2><p><code>lynx::Engine</code> coordinates execution. It owns the current level, the object factory, and the game state. The host application provides the delta through <code>ProgressOneFrame(float dt)</code>.</p><pre><span class="kw">Engine</span>* engine = lynx::GetEngine();
+engine-&gt;StartGame();
+engine-&gt;ProgressOneFrame(dt);
+engine-&gt;EndGame();</pre><div class="note">The window and GLFW belong to the host application; the engine only keeps an opaque handle.</div></article>
+<article id="level"><h2>Level</h2><p>A Level owns the active Actors. <code>SpawnActor()</code> creates an Actor from its class name; <code>DestroyActor()</code> removes it. When an operation happens during an iteration, it can be queued and applied safely afterward.</p><ul><li><code>GetActorFromID()</code>: find an actor by identifier.</li><li><code>GetActors()</code>: iterate over actors in the level.</li><li><code>CountActorsOfClass()</code>: count a class.</li><li><code>SaveToFile()</code>: save the level.</li></ul></article>
+<article id="actor"><h2>Actor</h2><p>An Actor is an <code>Object</code> associated with a Lynx ECS entity. It exposes a transform and scripts and can receive components through <code>AddComponent&lt;T&gt;()</code>.</p><pre><span class="kw">struct</span> Health : lynx::Component {
+  <span class="kw">float</span> hp = 100.f;
+  <span class="kw">void</span> Tick(<span class="kw">float</span> dt) <span class="kw">override</span> {
+    <span class="kw">if</span> (hp &lt;= 0)
+      lynx::GetEngine()-&gt;GetCurrentLevel()
+        -&gt;DestroyActor(GetOwner());
+  }
+};
+
+actor-&gt;AddComponent&lt;Health&gt;();</pre></article>
+<article id="component"><h2>Components and ECS</h2><p>Each component type is identified automatically by a stable hash of its type name. The internal registry is based on EnTT. An Actor can have at most one component of a given type.</p><div class="table-wrap"><table><tr><th>Stage</th><th>When?</th></tr><tr><td>OnAttach()</td><td>Immediately after the component is added.</td></tr><tr><td>BeginPlay()</td><td>When the game starts, or on the next tick if added during gameplay.</td></tr><tr><td>Update(dt)</td><td>Every frame, even outside gameplay.</td></tr><tr><td>Tick(dt)</td><td>Every game tick when <code>tick_enabled</code> is active.</td></tr><tr><td>EndPlay()</td><td>Game stop, removal, or destruction.</td></tr><tr><td>~Component()</td><td>Final destruction.</td></tr></table></div></article>
+<article id="factory"><h2>Factory and game modules</h2><p>The engine maintains a global factory of <code>Object</code> constructors. A game module can register its classes with <code>LYNX_MODULE_REGISTER</code> and synchronize the factory while a DLL is loaded or unloaded.</p><pre>LYNX_LINK_MODULE(
+  LYNX_MODULE_REGISTER(MyPlayer);
+  LYNX_MODULE_REGISTER(MyEnemy);
+);</pre></article>
+<article id="systems"><h2>Integrated systems</h2><div class="cards compact"><div class="card"><h3>Animation</h3><p><code>animation</code>, <code>blend_space</code>, and <code>anim_manager</code> handle playback, frame events, parameters, triggers, and transitions.</p></div><div class="card"><h3>Audio</h3><p><code>AudioSource</code> can play sounds, attach to Actors, and use volume, pitch, looping, and spatialization.</p></div><div class="card"><h3>Voxel</h3><p>Voxel types come from <code>voxels.json</code>. Flags are used for collision and gameplay rules.</p></div></div></article>
+<article id="lifecycle"><h2>A game frame</h2><div class="timeline"><div><b>HOST</b><span>provides <code>dt</code></span></div><div><b>ENGINE</b><span>advances one frame</span></div><div><b>LEVEL</b><span>updates Actors</span></div><div><b>ECS</b><span>updates component systems</span></div><div><b>SCRIPTS</b><span><code>BeginPlay</code> then <code>Update(dt)</code></span></div><div><b>DEFERRED</b><span>spawns and destruction are finalized</span></div></div></article>
+</div></section></main><footer><span>LYNX ENGINE</span><span>Architecture</span></footer><script src="site.js" defer></script></body></html>

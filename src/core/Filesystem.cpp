@@ -1,5 +1,6 @@
 #include "filesystem.h"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -261,6 +262,83 @@ namespace lynx::fs
         }
 
         return true;
+    }
+
+    namespace
+    {
+        void ListArchive(const std::string& folder, bool recursive, std::vector<std::string>& out)
+        {
+            char** list = PHYSFS_enumerateFiles(folder.c_str());
+
+            if (!list)
+                return;
+
+            for (char** it = list; *it; ++it)
+            {
+                const std::string path = folder.empty() ? *it : folder + "/" + *it;
+
+                PHYSFS_Stat stat{};
+
+                if (!PHYSFS_stat(path.c_str(), &stat))
+                    continue;
+
+                if (stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+                {
+                    if (recursive)
+                        ListArchive(path, true, out);
+                }
+                else if (stat.filetype == PHYSFS_FILETYPE_REGULAR)
+                {
+                    out.push_back(path);
+                }
+            }
+
+            PHYSFS_freeList(list);
+        }
+    }
+
+    std::vector<std::string> ListFiles(const std::string& folder, bool recursive)
+    {
+        std::vector<std::string> out;
+
+        if (!g_initialized || (!folder.empty() && !IsSafePath(folder)))
+            return out;
+
+        if (g_source == AssetSource::Directory)
+        {
+            const std::filesystem::path root = std::filesystem::current_path() / "assets";
+            const std::filesystem::path dir = root / folder;
+            std::error_code ec;
+
+            if (!std::filesystem::is_directory(dir, ec))
+                return out;
+
+            auto add = [&](const std::filesystem::directory_entry& entry)
+            {
+                std::error_code e;
+
+                if (entry.is_regular_file(e))
+                    out.push_back(std::filesystem::relative(entry.path(), root, e).generic_string());
+            };
+
+            if (recursive)
+            {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(dir, ec))
+                    add(entry);
+            }
+            else
+            {
+                for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+                    add(entry);
+            }
+        }
+        else if (g_source == AssetSource::Archive)
+        {
+            ListArchive(folder, recursive, out);
+        }
+
+        std::sort(out.begin(), out.end());
+        return out;
     }
 
     AssetSource GetSource()

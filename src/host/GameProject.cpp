@@ -359,26 +359,158 @@ namespace lynx::host
 			return false;
 		}
 
-		if (!fs::is_directory(out.build_dir, ec))
-		{
-			error = "This folder has no \"build\" folder (build the game first):\n" +
-			        out.build_dir.string();
-			return false;
-		}
-
 		// build/*.dll and build/<config>/*.dll
-		out.modules = FindGameModules(out.build_dir, 1);
+		if (fs::is_directory(out.build_dir, ec))
+			out.modules = FindGameModules(out.build_dir, 1);
 
 		if (out.modules.empty())
 		{
+			// Not built yet : fine if the editor can compile it when opening.
+			if (CanBuildProject(root))
+				return true;
+
 			error = "No game DLL in \"build\" (a DLL exporting FactoryRegisterClasses,\n"
-			        "see LYNX_LINK_MODULE). Build the game first.";
+			        "see LYNX_LINK_MODULE), and no Build.bat / CMakeLists.txt to build it.";
 			return false;
 		}
 
 		out.module_path = out.modules.front();
 
 		return true;
+	}
+
+
+	bool CanBuildProject(const fs::path& root)
+	{
+		std::error_code ec;
+
+		return fs::is_regular_file(root / "Build.bat", ec) ||
+		       fs::is_regular_file(root / "CMakeLists.txt", ec);
+	}
+
+
+	namespace
+	{
+		bool IsSourceFile(const fs::path& file)
+		{
+			std::string ext = file.extension().string();
+
+			for (char& c : ext)
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			static const char* const kExtensions[] = {
+				".cpp", ".cxx", ".cc", ".c", ".h", ".hpp", ".hxx", ".inl", ".cmake", ".rc",
+			};
+
+			for (const char* e : kExtensions)
+			{
+				if (ext == e)
+					return true;
+			}
+
+			return file.filename() == "CMakeLists.txt";
+		}
+
+		// Newest game source (src/, include/, CMake files of the root). `found`
+		// false = no source at all.
+		fs::file_time_type NewestSourceTime(const fs::path& root, fs::path& newest_file, bool& found)
+		{
+			found = false;
+			fs::file_time_type newest{};
+
+			const auto consider = [&](const fs::path& file)
+			{
+				std::error_code ec;
+
+				if (!IsSourceFile(file) || !fs::is_regular_file(file, ec))
+					return;
+
+				const auto time = fs::last_write_time(file, ec);
+
+				if (ec)
+					return;
+
+				if (!found || time > newest)
+				{
+					newest = time;
+					newest_file = file;
+					found = true;
+				}
+			};
+
+			std::error_code ec;
+
+			for (const auto& entry : fs::directory_iterator(root, ec))
+				consider(entry.path());
+
+			for (const char* folder : { "src", "include", "source", "cmake" })
+			{
+				const fs::path dir = root / folder;
+				ec.clear();
+
+				if (!fs::is_directory(dir, ec))
+					continue;
+
+				fs::recursive_directory_iterator it(
+					dir, fs::directory_options::skip_permission_denied, ec);
+
+				for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+					consider(it->path());
+			}
+
+			return newest;
+		}
+	}
+
+
+	std::string GetBuildReason(const GameProject& project, bool& blocking)
+	{
+		blocking = false;
+		std::error_code ec;
+
+		if (project.module_path.empty() || !fs::is_regular_file(project.module_path, ec))
+		{
+			blocking = true;
+			return "The game has not been compiled yet (no game DLL in build/).";
+		}
+
+		const auto module_time = fs::last_write_time(project.module_path, ec);
+
+		if (ec)
+			return {};
+
+		// Older than the engine : the engine classes it embeds may not match
+		// anymore -> crash. Never loaded as it is.
+		const fs::path engine_module = GetEngineModulePath();
+
+		if (!engine_module.empty())
+		{
+			std::error_code engine_error;
+			const auto engine_time = fs::last_write_time(engine_module, engine_error);
+
+			if (!engine_error && module_time < engine_time)
+			{
+				blocking = true;
+				return "The engine was rebuilt after the game: the game DLL must be compiled again\n"
+				       "against this engine (loading it as it is would crash).";
+			}
+		}
+
+		// Sources edited since the last build : the DLL works, but is old.
+		fs::path newest_file;
+		bool found = false;
+		const auto source_time = NewestSourceTime(project.root, newest_file, found);
+
+		if (found && module_time < source_time)
+		{
+			std::error_code relative_error;
+			const fs::path relative = fs::relative(newest_file, project.root, relative_error);
+
+			return "The game sources changed since the last build (" +
+			       (relative_error ? newest_file : relative).generic_string() + ").";
+		}
+
+		return {};
 	}
 
 

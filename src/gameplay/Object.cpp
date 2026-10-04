@@ -2,7 +2,8 @@
  *
  */
 
-#include "object.h"
+#include "Object.h"
+#include "../core/data/Typename.h"
 
 #include <sstream>
 #include <charconv>
@@ -268,5 +269,40 @@ namespace lynx
 	const ordered_map<std::string, property>& Object::GetProperties() const
 	{
 		return properties_;
+	}
+
+	void Object::AddDynamicProperty(const std::string& name, const PropVariantType& value, Access access)
+	{
+		if (properties_.contains(name))
+			return;
+
+		dynamic_values_.push_back(std::make_unique<PropVariantType>(value));
+		PropVariantType& stored = *dynamic_values_.back();
+
+		property p{};
+		p.access = access;
+		p.observable = nullptr;
+		p.property_member = std::visit([](auto& v) -> PropVariantTypePtr { return &v; }, stored);
+
+		properties_[name] = p;
+	}
+
+	bool Object::CallFunctionByName(const std::string& name, const std::vector<PropVariantType>& args,
+	                                std::optional<PropVariantType>* result)
+	{
+		if (!functions_.contains(name))
+			return false;
+
+		auto r = functions_[name].call(args);
+
+		if (result)
+			*result = std::move(r);
+
+		return true;
+	}
+
+	std::string Object::GetTypeName() const
+	{
+		return script_class_.empty() ? ETypeName(*this) : script_class_;
 	}
 }

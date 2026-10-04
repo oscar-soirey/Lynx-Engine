@@ -410,9 +410,16 @@ namespace lynx::editor
 				const std::vector<fs::path>& modules = state.inspected.modules;
 
 				state.module_index =
+					modules.empty() ? 0 :
 					std::clamp(state.module_index, 0, static_cast<int>(modules.size()) - 1);
 
-				if (modules.size() == 1)
+				if (modules.empty())
+				{
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.35f, 1.f));
+					ImGui::TextWrapped("Game DLL : not built yet. It will be compiled when the project opens.");
+					ImGui::PopStyleColor();
+				}
+				else if (modules.size() == 1)
 				{
 					ImGui::Text("Game DLL : %s", relative(modules.front()).c_str());
 				}
@@ -544,6 +551,10 @@ namespace lynx::editor
 			ImGui::NewFrame();
 
 			DrawBrowser(state);
+
+			// No text selection cursor (I-beam).
+			if (ImGui::GetMouseCursor() == ImGuiMouseCursor_TextInput)
+				ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
 			ImGui::Render();
 

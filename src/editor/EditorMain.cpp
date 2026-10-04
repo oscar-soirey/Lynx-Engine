@@ -32,6 +32,7 @@
 
 #include <iostream>
 #include <cstdio>
+#include <cwchar>
 #include <cstring>
 #include <algorithm>
 #include <filesystem>
@@ -61,7 +62,17 @@
 
 #include "../host/GameProject.h"
 #include "InputSettingsEditor.h"
+#include "GameBuild.h"
 #include "ProjectBrowser.h"
+#include "StartupBuild.h"
+#include "commands/CommandRegistry.h"
+#include "commands/CommandServer.h"
+#include "commands/CommandUtils.h"
+#include "commands/CommandsWindow.h"
+#include "commands/ScriptRunner.h"
+#include <array>
+#include <chrono>
+#include <ctime>
 
 bool isPlaying = false;
 
@@ -86,6 +97,7 @@ struct EditorWindowVisibility
     bool config = true;
     bool cameraShake = true;
     bool inputSettings = false;
+    bool commands = false;
 };
 
 static EditorWindowVisibility editorWindows;
@@ -115,6 +127,10 @@ static void LoadEditorWindowVisibility()
     int inputSettings = 0;
     if (file >> inputSettings)
         editorWindows.inputSettings = inputSettings != 0;
+
+    int commands = 0;
+    if (file >> commands)
+        editorWindows.commands = commands != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -130,7 +146,8 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.colorPicking ? 1 : 0) << ' '
          << (editorWindows.config ? 1 : 0) << ' '
          << (editorWindows.cameraShake ? 1 : 0) << ' '
-         << (editorWindows.inputSettings ? 1 : 0) << '\n';
+         << (editorWindows.inputSettings ? 1 : 0) << ' '
+         << (editorWindows.commands ? 1 : 0) << '\n';
 }
 
 static bool EditorWindowCheckbox(const char* label, bool* value)
@@ -700,6 +717,12 @@ void BeginImGuiFrame()
 
 void EndImGuiFrame()
 {
+    // No text selection cursor (I-beam) in the editor : text fields, code
+    // editor... keep the arrow. Read by the GLFW backend / our cursor code
+    // at the next frame.
+    if (ImGui::GetMouseCursor() == ImGuiMouseCursor_TextInput)
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+
     ImGui::Render();
 
     ImGui_ImplOpenGL3_RenderDrawData(
@@ -1096,7 +1119,7 @@ static EditorActorSnapshot CaptureActorSnapshot(
     if (!actor)
         return snapshot;
 
-    snapshot.type_name = lynx::ETypeName(*actor);
+    snapshot.type_name = actor->GetTypeName();
     snapshot.object_id = actor->object_id_;
     snapshot.transform = actor->transform;
 
@@ -3342,6 +3365,10 @@ struct AppSettings
     float cameraSpeed = 50.f;
     HRL_EVoxelRenderMode voxelRenderMode = HRL_VOXEL_BLOCKY;
     float voxelPhysicalSize = 0.3f;
+
+    // Hot reload of the game DLL.
+    bool reloadAfterBuild = true;     // "Compile" -> reload when it succeeded
+    bool autoReloadOnChange = true;   // build/<game>.dll rebuilt outside the editor
 };
 
 static AppSettings appSettings;
@@ -3370,6 +3397,8 @@ static void SaveSettings()
     file << "physical_voxel_size "
          << appSettings.voxelPhysicalSize
          << "\n";
+    file << "reload_after_build " << (appSettings.reloadAfterBuild ? 1 : 0) << "\n";
+    file << "auto_reload_on_change " << (appSettings.autoReloadOnChange ? 1 : 0) << "\n";
 }
 
 static void LoadSettings()
@@ -3427,6 +3456,18 @@ static void LoadSettings()
             if (file >> value && std::isfinite(value))
                 appSettings.voxelPhysicalSize =
                     std::clamp(value, 0.001f, 100.f);
+        }
+        else if (key == "reload_after_build")
+        {
+            int value = 1;
+            if (file >> value)
+                appSettings.reloadAfterBuild = value != 0;
+        }
+        else if (key == "auto_reload_on_change")
+        {
+            int value = 1;
+            if (file >> value)
+                appSettings.autoReloadOnChange = value != 0;
         }
         else
         {
@@ -4170,6 +4211,21 @@ static void TogglePlayMode()
 // editor::ConsumeReloadRequest().
 static bool reload_game_requested = false;
 
+// Hot reload wanted (build finished / DLL changed on disk) while playing :
+// done at the next Stop, the game is not interrupted.
+static bool hot_reload_pending = false;
+
+// build/<game>.dll changed but auto reload is off : shown in the toolbar.
+static bool module_changed_notice = false;
+
+static void RequestHotReload()
+{
+    if (isPlaying)
+        hot_reload_pending = true;
+    else
+        reload_game_requested = true;
+}
+
 // Raised by the toolbar "Project > Open another project...". The editor closes
 // (through the usual "Save before quitting?" dialog) and main() starts a new
 // editor process on the project browser.
@@ -4194,6 +4250,10 @@ static void ShowEditorWarning(const std::string& text)
 
     editor_warning_pending = true;
 }
+
+
+// Commands for Python scripts / AI tools (actor.spawn, voxel.fill, asset.write...).
+#include "EditorCommands.inl"
 
 
 // Top bar. Every button has a keyboard shortcut that keeps working.
@@ -4335,8 +4395,32 @@ static void DrawToolbar()
         // frame (the panels are still holding actor pointers at this point).
         ImGui::SameLine();
 
+        // Compile the game (Build.bat of the project) while the editor runs :
+        // the editor uses a copy of the DLL, build/<game>.dll is free.
+        ImGui::BeginDisabled(lynx::editor::game_build::IsRunning());
+
+        if (ImGui::Button("Compile"))
+            lynx::editor::game_build::Start();
+
+        ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip(
+                "Compile the game (Build.bat of the project)%s",
+                appSettings.reloadAfterBuild
+                    ? "\nthen reload it if the build succeeded."
+                    : "."
+            );
+        }
+
+        ImGui::SameLine();
+
         if (ImGui::Button("Reload Game"))
+        {
+            module_changed_notice = false;
             reload_game_requested = true;
+        }
 
         if (ImGui::IsItemHovered())
         {
@@ -4346,6 +4430,47 @@ static void DrawToolbar()
                 "unloads the DLL, loads it again and rebuilds the level.",
                 currentProject.module_path.filename().string().c_str()
             );
+        }
+
+        // Build state / DLL rebuilt outside the editor.
+        {
+            const std::string build_status = lynx::editor::game_build::ToolbarStatus();
+
+            if (!build_status.empty())
+            {
+                ImGui::SameLine();
+
+                const bool failed = build_status == "Build failed";
+
+                if (failed)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
+
+                ImGui::TextUnformatted(build_status.c_str());
+
+                if (failed)
+                    ImGui::PopStyleColor();
+
+                if (ImGui::IsItemClicked())
+                    lynx::editor::game_build::WindowOpen() = true;
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Click : build output");
+            }
+            else if (hot_reload_pending)
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(reload at Stop)");
+            }
+            else if (module_changed_notice)
+            {
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.35f, 1.f));
+                ImGui::TextUnformatted("DLL rebuilt");
+                ImGui::PopStyleColor();
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The game DLL was rebuilt : \"Reload Game\" to use it.");
+            }
         }
 
         ImGui::SameLine();
@@ -4362,6 +4487,32 @@ static void DrawToolbar()
         if (ImGui::BeginPopup("SettingsPopup"))
         {
             ImGui::TextDisabled("Application settings");
+            ImGui::Separator();
+
+            if (ImGui::Checkbox(
+                    "Reload the game after \"Compile\"",
+                    &appSettings.reloadAfterBuild
+                ))
+            {
+                SaveSettings();
+            }
+
+            if (ImGui::Checkbox(
+                    "Reload the game when its DLL is rebuilt",
+                    &appSettings.autoReloadOnChange
+                ))
+            {
+                SaveSettings();
+            }
+
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(
+                    "Build.bat or CLion rebuilt build/<game>.dll while the editor runs.\n"
+                    "While playing, the reload waits for Stop."
+                );
+            }
+
             ImGui::Separator();
 
             if (ImGui::Checkbox(
@@ -4501,6 +4652,7 @@ static void DrawToolbar()
             EditorWindowCheckbox("Paint", &editorWindows.config);
             EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake);
             EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings);
+            EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands);
             ImGui::Separator();
             ImGui::TextDisabled("All editor windows are hidden during Play.");
             ImGui::EndPopup();
@@ -5070,7 +5222,7 @@ namespace editor
 
         switch (imgui_cursor)
         {
-        case ImGuiMouseCursor_TextInput: kind = kCursorText;       break;
+        // ImGuiMouseCursor_TextInput : arrow (no text selection cursor).
         case ImGuiMouseCursor_ResizeEW:  kind = kCursorResizeEW;   break;
         case ImGuiMouseCursor_ResizeNS:  kind = kCursorResizeNS;   break;
         case ImGuiMouseCursor_ResizeNWSE:kind = kCursorResizeNWSE; break;
@@ -6000,7 +6152,7 @@ namespace editor
                         continue;
 
                     std::string typeName =
-                        lynx::ETypeName(*actor);
+                        actor->GetTypeName();
 
                     std::string label = typeName;
 
@@ -6390,7 +6542,7 @@ namespace editor
             else
             {
                 std::string typeName =
-                    lynx::ETypeName(*editing_actor);
+                    editing_actor->GetTypeName();
 
                 ImGui::Text(
                     "%s",
@@ -7413,12 +7565,24 @@ namespace editor
         // Input Settings (project input.json)
         // --------------------------------------------------------
 
+        lynx::editor::game_build::DrawWindow();
+
         {
             const bool was_open = editorWindows.inputSettings;
 
             lynx::editor::input_settings::Draw(&editorWindows.inputSettings);
 
             if (was_open != editorWindows.inputSettings)
+                SaveEditorWindowVisibility();
+        }
+
+        // Python scripts / editor console / AI (MCP) connection.
+        {
+            const bool was_open = editorWindows.commands;
+
+            lynx::editor::commands_window::Draw(&editorWindows.commands);
+
+            if (was_open != editorWindows.commands)
                 SaveEditorWindowVisibility();
         }
 
@@ -7763,6 +7927,91 @@ static bool EnterProjectDirectory(const lynx::host::GameProject& project)
 }
 
 
+// Compiles the game before loading it when needed (DLL missing, older than the
+// engine, or older than its sources). A DLL built against another version of
+// the engine is NEVER loaded : it would crash the editor.
+// Returns true when currentProject.module_path can be loaded. false : go back
+// to the project browser with `message`, or quit when `message` is empty.
+static bool PrepareGameModule(lynx::host::GameProject& project, std::string& message)
+{
+    message.clear();
+
+    for (;;)
+    {
+        bool blocking = false;
+        const std::string reason = lynx::host::GetBuildReason(project, blocking);
+
+        if (reason.empty())
+            return true;
+
+        if (!lynx::host::CanBuildProject(project.root))
+        {
+            // Nothing to build with : the user builds it himself.
+            if (!blocking)
+                return true;
+
+            message = reason + "\n\nNo Build.bat / CMakeLists.txt in the project : build the game, then open it again.";
+            return false;
+        }
+
+        lynx::editor::game_build::Init(project.root, project.module_path);
+
+        switch (lynx::editor::RunStartupBuild(project, reason, !blocking))
+        {
+        case lynx::editor::StartupBuildResult::OpenAnyway:
+            return true;
+
+        case lynx::editor::StartupBuildResult::OtherProject:
+            message = "Choose a project.";
+            return false;
+
+        case lynx::editor::StartupBuildResult::Quit:
+            return false;
+
+        case lynx::editor::StartupBuildResult::Built:
+            break;
+        }
+
+        // The DLL may not have existed before : look for it again (same file
+        // name as before when there are several).
+        const std::filesystem::path previous = project.module_path;
+        lynx::host::GameProject rebuilt;
+        std::string error;
+
+        if (!lynx::host::InspectProject(project.root, rebuilt, error) || rebuilt.modules.empty())
+        {
+            message = "The build succeeded, but no game DLL was found in build/ "
+                      "(a DLL exporting FactoryRegisterClasses, see LYNX_LINK_MODULE).";
+            return false;
+        }
+
+        for (const auto& module : rebuilt.modules)
+        {
+            if (!previous.empty() && module.filename() == previous.filename())
+            {
+                rebuilt.module_path = module;
+                break;
+            }
+        }
+
+        project = rebuilt;
+
+        std::cout << "[PROJECT] Game DLL : " << project.module_path.string() << "\n";
+
+        // Still "out of date" after a successful build : the build tool found
+        // nothing to do (ex : only a file outside the build was touched). The
+        // DLL matches its sources : load it rather than building forever.
+        bool still_blocking = false;
+        const std::string still = lynx::host::GetBuildReason(project, still_blocking);
+
+        if (!still.empty())
+            std::cout << "[BUILD] Nothing was rebuilt (" << still << ") : loading the DLL.\n";
+
+        return true;
+    }
+}
+
+
 // input.json (key bindings) is read with a plain file path, not through
 // lynx::fs. Its place is the project root ; build/ (the old working directory)
 // and the editor folder are fallbacks.
@@ -7795,8 +8044,62 @@ static void LoadInputConfig()
 }
 
 
+#ifdef _WIN32
+// Last resort : a crash that nothing caught. Instead of the editor vanishing
+// without a word, say where it happened (game DLL -> recompile the game).
+static LONG WINAPI EditorCrashFilter(EXCEPTION_POINTERS* info)
+{
+    const DWORD code = info && info->ExceptionRecord ? info->ExceptionRecord->ExceptionCode : 0;
+    void* address = info && info->ExceptionRecord ? info->ExceptionRecord->ExceptionAddress : nullptr;
+
+    wchar_t module_file[MAX_PATH] = L"?";
+    uintptr_t offset = 0;
+    HMODULE module = nullptr;
+
+    if (address &&
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            static_cast<LPCWSTR>(address), &module) &&
+        module)
+    {
+        GetModuleFileNameW(module, module_file, MAX_PATH);
+        offset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(module);
+    }
+
+    const std::wstring file = module_file;
+    const std::wstring name = std::filesystem::path(file).filename().wstring();
+
+    // The game DLL is loaded from its shadow copy (%TEMP%\\LynxEditor\\<pid>).
+    const bool in_game =
+        file.find(L"LynxEditor") != std::wstring::npos ||
+        (!currentProject.module_path.empty() &&
+         name.find(currentProject.module_path.stem().wstring()) == 0);
+
+    wchar_t text[1024];
+    swprintf(text, 1024,
+             L"The editor crashed (exception 0x%08lX) in %ls at +0x%llX.\n\n%ls",
+             static_cast<unsigned long>(code), name.c_str(),
+             static_cast<unsigned long long>(offset),
+             in_game
+                 ? L"The crash comes from the game code. If the engine was changed, compile the game "
+                   L"again (the editor compiles it when opening the project if it is out of date)."
+                 : L"Unsaved changes are lost. Check the console for the last messages.");
+
+    std::wcerr << L"[CRASH] " << text << L"\n";
+    std::wcerr.flush();
+
+    MessageBoxW(nullptr, text, L"Lynx Editor", MB_OK | MB_ICONERROR | MB_TOPMOST);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
+
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(EditorCrashFilter);
+#endif
     // ------------------------------------------------------------
     // Project
     // ------------------------------------------------------------
@@ -7828,11 +8131,16 @@ int main(int argc, char** argv)
     // Loads the project's game DLL. The absolute path makes Windows also look
     // for its dependencies in build/ ; lynx.dll / hrl.dll already loaded by the
     // editor are shared with it.
-    auto load_game_module = [&]() -> bool
+    //
+    // The editor loads a COPY of the DLL (temp folder) : build/<game>.dll is
+    // never locked, the game can be rebuilt while the editor runs.
+    std::filesystem::path loadedModuleCopy;
+
+    auto load_module_file = [&](const std::filesystem::path& file) -> bool
     {
         gameModule =
             std::make_unique<lynx::SysModule>(
-                currentProject.module_path.string().c_str()
+                file.string().c_str()
             );
 
         if (!gameModule->IsLoaded())
@@ -7847,24 +8155,75 @@ int main(int argc, char** argv)
         return true;
     };
 
-    while (!load_game_module())
+    auto load_game_module = [&]() -> bool
     {
-        const std::string message =
-            "Could not load the game DLL:\n" +
-            currentProject.module_path.string() +
-            "\n\nIt must be built against this version of the Lynx engine, and the DLLs it "
-            "needs (other than lynx.dll) must be next to it in build/.";
+#ifdef _WIN32
+        // The copy lives in another folder : DLLs the game needs that are next
+        // to it in build/ must still be found.
+        SetDllDirectoryW(currentProject.module_path.parent_path().wstring().c_str());
+#endif
 
-        std::cerr << "[PROJECT] " << message << "\n";
+        std::string copy_error;
+        const std::filesystem::path copy =
+            lynx::editor::game_build::MakeShadowCopy(currentProject.module_path, copy_error);
 
-        if (!lynx::editor::RunProjectBrowser(currentProject, message, currentProject.root))
-            return 0;
+        if (copy.empty())
+        {
+            // No copy : load the file itself (it stays locked until exit).
+            std::cerr << "[RELOAD] " << copy_error << " -> loading the DLL directly\n";
 
-        if (!EnterProjectDirectory(currentProject))
-            return 1;
+            if (!load_module_file(currentProject.module_path))
+                return false;
+
+            loadedModuleCopy.clear();
+        }
+        else
+        {
+            if (!load_module_file(copy))
+                return false;
+
+            loadedModuleCopy = copy;
+        }
+
+        lynx::editor::game_build::MarkModuleLoaded();
+        return true;
+    };
+
+    // Compile the game first if needed, then load it. Any failure goes back
+    // to the project browser : the editor never runs with a broken game DLL.
+    {
+        std::string message;
+
+        for (;;)
+        {
+            if (PrepareGameModule(currentProject, message))
+            {
+                if (load_game_module())
+                    break;
+
+                message =
+                    "Could not load the game DLL:\n" +
+                    currentProject.module_path.string() +
+                    "\n\nIt must be built against this version of the Lynx engine, and the DLLs it "
+                    "needs (other than lynx.dll) must be next to it in build/.";
+            }
+
+            if (message.empty())
+                return 0;   // Quit
+
+            std::cerr << "[PROJECT] " << message << "\n";
+
+            if (!lynx::editor::RunProjectBrowser(currentProject, message, currentProject.root))
+                return 0;
+
+            if (!EnterProjectDirectory(currentProject))
+                return 1;
+        }
     }
 
     lynx::host::AddRecentProject(currentProject.root);
+
+    lynx::editor::game_build::Init(currentProject.root, currentProject.module_path);
 
     // Game DLL not rebuilt after an engine change : warn (crash otherwise).
     ShowEditorWarning(
@@ -8250,6 +8609,18 @@ int main(int argc, char** argv)
         currentProject.root / "input.json"
     );
 
+    // Commands (Python scripts, AI through MCP) : registry, local server,
+    // script runner. The python/ folder (lynx_editor module, MCP server) is
+    // copied next to the editor by CMake.
+    RegisterEditorCommands();
+
+    lynx::editor::script_runner::Init(
+        currentProject.root,
+        lynx::host::GetEditorDirectory() / "python"
+    );
+
+    lynx::editor::command_server::Start(currentProject.root);
+
 
     // Apply the persisted voxel surface mode after the voxel world and its
     // type definitions are ready.
@@ -8332,16 +8703,36 @@ int main(int argc, char** argv)
 
         level = nullptr;
 
+        const std::filesystem::path previousCopy = loadedModuleCopy;
+
         // 3. Load the DLL again and register its actor classes.
         if (!load_game_module())
         {
-            // No actor class : rebuilding the level now would lose every actor
-            // at the next save. Stop here (the level was saved in step 1).
             std::cerr << "[RELOAD] ERROR: could not load "
                       << currentProject.module_path.string()
                       << "\n";
-            return false;
+
+            // Back to the previous build (its copy is still on disk).
+            if (previousCopy.empty() || !load_module_file(previousCopy))
+            {
+                // No actor class : rebuilding the level now would lose every
+                // actor at the next save. Stop here (saved in step 1).
+                return false;
+            }
+
+            loadedModuleCopy = previousCopy;
+
+            // Do not retry this build in a loop.
+            lynx::editor::game_build::MarkModuleLoaded();
+
+            ShowEditorWarning(
+                "The new game DLL could not be loaded :\n" +
+                currentProject.module_path.string() +
+                "\n\nThe previous build is still used."
+            );
         }
+
+        module_changed_notice = false;
 
         // Voxel types : assets/voxels.json may have been edited too.
         if (lynx::voxels::LoadFile("voxels.json"))
@@ -8392,6 +8783,59 @@ int main(int argc, char** argv)
         // --------------------------------------------------------
         // Game DLL reload : between two frames, no ImGui frame is open
         // --------------------------------------------------------
+
+        // --------------------------------------------------------
+        // Hot reload : "Compile" finished, or the DLL was rebuilt outside
+        // --------------------------------------------------------
+
+        {
+            bool build_success = false;
+
+            const bool build_finished =
+                lynx::editor::game_build::PollFinished(build_success);
+
+            // editor.compile commands waiting for the end of the build.
+            if (build_finished)
+                NotifyCommandBuildFinished(build_success);
+
+            if (build_finished && build_success)
+            {
+                if (appSettings.reloadAfterBuild)
+                {
+                    RequestHotReload();
+                }
+                else
+                {
+                    // Built on purpose without reload : no automatic reload
+                    // from the file watcher either, just the notice.
+                    lynx::editor::game_build::MarkModuleLoaded();
+                    module_changed_notice = true;
+                }
+            }
+
+            if (lynx::editor::game_build::ModuleChangedOnDisk())
+            {
+                if (appSettings.autoReloadOnChange)
+                {
+                    if (!hot_reload_pending && !reload_game_requested)
+                    {
+                        std::cout << "[RELOAD] " << currentProject.module_path.filename().string()
+                                  << " was rebuilt\n";
+                        RequestHotReload();
+                    }
+                }
+                else
+                {
+                    module_changed_notice = true;
+                }
+            }
+
+            if (hot_reload_pending && !isPlaying)
+            {
+                hot_reload_pending = false;
+                reload_game_requested = true;
+            }
+        }
 
         if (editor::ConsumeReloadRequest())
         {
@@ -8450,6 +8894,15 @@ int main(int argc, char** argv)
             lastFrameTime =
                 glfwGetTime();
         }
+
+
+        // --------------------------------------------------------
+        // Commands from Python scripts / AI tools : between two frames,
+        // after the reloads / restores above (the level is valid).
+        // --------------------------------------------------------
+
+        lynx::editor::commands_window::Update();
+        lynx::editor::command_server::Poll();
 
 
         // --------------------------------------------------------
@@ -8576,6 +9029,9 @@ int main(int argc, char** argv)
 
         editor::DrawUI(win);
 
+        // Screenshots / frame waits asked by commands (the frame is drawn).
+        ProcessFrameEndCommands();
+
 
         glfwSwapBuffers(win);
     }
@@ -8584,6 +9040,10 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
     // Shutdown
     // ------------------------------------------------------------
+
+    lynx::editor::game_build::Shutdown();
+    lynx::editor::script_runner::Shutdown();
+    lynx::editor::command_server::Stop();
 
     // Closed while playing : the game ends first (music...).
     if (isPlaying && gameHooks.on_game_end)

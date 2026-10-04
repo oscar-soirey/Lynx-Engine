@@ -1,4 +1,5 @@
 #include "Private/ScriptSystem.h"
+#include "Private/ScriptInternal.h"
 #include "Scripting.h"
 
 #include "../core/Engine.h"
@@ -12,9 +13,11 @@
 
 #include <quickjs-ng/quickjs.h>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -98,6 +101,32 @@ namespace lynx
 
 			// > 0 pendant un appel JS : on differe alors les liberations
 			int call_depth = 0;
+
+			// ---- Classes (class Player extends Actor) ----
+			JSValue actor_proto = JS_UNDEFINED;   // Actor.prototype (= proto de la classe JS Actor)
+			JSValue actor_ctor = JS_UNDEFINED;    // constructeur global Actor
+
+			// Constructeurs JS des classes C++ (Actor, Pawn...) : index = magic
+			std::vector<std::string> native_names;
+			std::unordered_map<std::string, JSValue> native_ctors;
+
+			// Classes de script (assets/classes/) : nom -> constructeur
+			struct ScriptClass
+			{
+				JSValue ctor = JS_UNDEFINED;
+				std::string file;
+			};
+			std::unordered_map<std::string, ScriptClass> classes;
+			bool classes_loaded = false;
+
+			// Construction demandee par la factory (niveau, Level.spawn, editeur)
+			bool factory_pending = false;
+			JSValue factory_target = JS_UNDEFINED;   // emprunte (classes[...])
+			Actor* factory_result = nullptr;
+
+			// Fonctions JS utilitaires (compilees a l'init)
+			JSValue fn_is_actor_class = JS_UNDEFINED;
+			JSValue fn_static_properties = JS_UNDEFINED;
 		};
 
 		State* g = nullptr;
@@ -386,6 +415,8 @@ namespace lynx
 		// Objets JS : Actor / Transform / Vec3Ref
 		// ====================================================================
 
+		void DefineReflectedMembers(JSContext* ctx, JSValueConst obj, Actor* a);
+
 		JSValue GetActorObject(JSContext* ctx, uint32_t entity)
 		{
 			if (entity == ecs::kNullEntity || !ecs::GetActor(entity))
@@ -400,6 +431,9 @@ namespace lynx
 				return obj;
 			JS_SetOpaque(obj, EncodeEntity(entity));
 			g->actor_objects.emplace(entity, JS_DupValue(ctx, obj));
+
+			// Proprietes HPROPERTY et fonctions HFUNCTION du C++ : obj.nom
+			DefineReflectedMembers(ctx, obj, ecs::GetActor(entity));
 			return obj;
 		}
 
@@ -615,7 +649,7 @@ namespace lynx
 			switch (magic)
 			{
 				case kId:        return JS_NewString(ctx, a->object_id_.c_str());
-				case kClassName: return JS_NewString(ctx, ETypeName(*a).c_str());
+				case kClassName: return JS_NewString(ctx, a->GetTypeName().c_str());
 				case kEntity:    return JS_NewUint32(ctx, a->GetEntity());
 				case kTransform: return NewTransformRef(ctx, a->GetEntity());
 				case kPosition:  return NewVec3Ref(ctx, a->GetEntity(), VecField::Location);
@@ -818,7 +852,7 @@ namespace lynx
 			Actor* a = JSToActor(this_val);
 			if (!a)
 				return JS_NewString(ctx, "Actor(<destroyed>)");
-			const std::string s = "Actor(" + ETypeName(*a) + ", \"" + a->object_id_ + "\")";
+			const std::string s = "Actor(" + a->GetTypeName() + ", \"" + a->object_id_ + "\")";
 			return JS_NewString(ctx, s.c_str());
 		}
 
@@ -1087,6 +1121,10 @@ namespace lynx
 			DefFuncMagic(ctx, actor_proto, "hasScript", ActorScriptOp, 1, kHasScript);
 			DefFunc(ctx, actor_proto, "call", ActorCall, 1);
 			DefFunc(ctx, actor_proto, "toString", ActorToString, 0);
+
+			// addComponent / getComponent... et les classes des composants
+			script_detail::RegisterComponentBindings(ctx, actor_proto);
+
 			JS_SetClassProto(ctx, g_actor_class, actor_proto);
 		}
 
@@ -1130,6 +1168,805 @@ namespace lynx
 			JS_FreeValue(ctx, global);
 		}
 
+
+		// ====================================================================
+		// Classes : class Player extends Actor { BeginPlay() { } }
+		//
+		//  - Actor, et chaque classe C++ de la factory (Pawn...), est un
+		//    constructeur JS. new Player() cree l'acteur C++ de la classe C++
+		//    la plus proche, avec Player.prototype comme prototype.
+		//  - Les fichiers de assets/classes/ sont charges avant chaque niveau ;
+		//    leurs classes rejoignent la factory (niveaux, Level.spawn, editeur).
+		//  - BeginPlay / Update(dt) / EndPlay de la classe sont appeles par un
+		//    composant interne (ScriptClassComponent).
+		// ====================================================================
+
+		bool SameObject(JSValueConst a, JSValueConst b)
+		{
+			return JS_IsObject(a) && JS_IsObject(b) && JS_VALUE_GET_PTR(a) == JS_VALUE_GET_PTR(b);
+		}
+
+		/** Appelle obj.name(...) sur l'objet de l'acteur. false si pas de methode. */
+		bool CallClassMethod(Actor* a, const char* name, int argc, JSValueConst* argv, JSValue* result = nullptr)
+		{
+			if (result)
+				*result = JS_UNDEFINED;
+
+			if (!g || !a)
+				return false;
+
+			auto it = g->actor_objects.find(a->GetEntity());
+			if (it == g->actor_objects.end())
+				return false;
+
+			JSContext* ctx = g->ctx;
+			JSValue obj = JS_DupValue(ctx, it->second);
+			JSValue fn = JS_GetPropertyStr(ctx, obj, name);
+
+			if (!JS_IsFunction(ctx, fn))
+			{
+				JS_FreeValue(ctx, fn);
+				JS_FreeValue(ctx, obj);
+				return false;
+			}
+
+			const std::string where = a->GetTypeName() + "." + name;
+
+			++g->call_depth;
+			JSValue r = JS_Call(ctx, fn, obj, argc, argv);
+			--g->call_depth;
+
+			JS_FreeValue(ctx, fn);
+			JS_FreeValue(ctx, obj);
+
+			if (JS_IsException(r))
+			{
+				LogException(ctx, where);
+				r = JS_UNDEFINED;
+			}
+
+			if (result)
+				*result = r;
+			else
+				JS_FreeValue(ctx, r);
+
+			return true;
+		}
+
+		/** Appelle BeginPlay / Update / EndPlay de la classe JS de l'acteur. */
+		struct ScriptClassComponent : Component
+		{
+		protected:
+			void BeginPlay() override
+			{
+				CallClassMethod(GetOwner(), "BeginPlay", 0, nullptr);
+				RunPendingJobs();
+			}
+
+			void Tick(float dt) override
+			{
+				if (!g)
+					return;
+
+				JSValue arg = JS_NewFloat64(g->ctx, dt);
+				CallClassMethod(GetOwner(), "Update", 1, &arg);
+				RunPendingJobs();
+			}
+
+			void EndPlay() override
+			{
+				CallClassMethod(GetOwner(), "EndPlay", 0, nullptr);
+				RunPendingJobs();
+			}
+		};
+
+		// ---- Valeurs JS <-> PropVariantType ---------------------------------
+
+		/** type : "", "int", "float", "bool", "string", "vec2", "vec3", "vec4". */
+		std::optional<PropVariantType> JSToVariant(JSContext* ctx, JSValueConst v, const std::string& type)
+		{
+			if (type == "int")
+			{
+				int32_t i = 0;
+				if (JS_ToInt32(ctx, &i, v)) { JS_FreeValue(ctx, JS_GetException(ctx)); return std::nullopt; }
+				return PropVariantType(static_cast<int>(i));
+			}
+
+			if (type == "float" || (type.empty() && JS_IsNumber(v)))
+			{
+				double d = 0;
+				if (JS_ToFloat64(ctx, &d, v)) { JS_FreeValue(ctx, JS_GetException(ctx)); return std::nullopt; }
+				return PropVariantType(static_cast<float>(d));
+			}
+
+			if (type == "bool" || (type.empty() && JS_IsBool(v)))
+				return PropVariantType(JS_ToBool(ctx, v) > 0);
+
+			if (type == "string" || (type.empty() && JS_IsString(v)))
+				return PropVariantType(ToStdString(ctx, v));
+
+			if (!JS_IsObject(v))
+				return std::nullopt;
+
+			auto has = [&](const char* key)
+			{
+				JSValue f = JS_GetPropertyStr(ctx, v, key);
+				const bool ok = !JS_IsUndefined(f);
+				JS_FreeValue(ctx, f);
+				return ok;
+			};
+
+			float f[4] = {};
+
+			if (type == "vec4" || (type.empty() && has("w")))
+			{
+				if (ReadFloats(ctx, v, f, 4)) return PropVariantType(vec4(f[0], f[1], f[2], f[3]));
+				return std::nullopt;
+			}
+
+			if (type == "vec3" || (type.empty() && has("z")))
+			{
+				if (ReadFloats(ctx, v, f, 3)) return PropVariantType(vec3(f[0], f[1], f[2]));
+				return std::nullopt;
+			}
+
+			if (type == "vec2" || (type.empty() && has("y")))
+			{
+				if (ReadFloats(ctx, v, f, 2)) return PropVariantType(vec2(f[0], f[1]));
+				return std::nullopt;
+			}
+
+			if (type.empty() && (has("location") || has("position") || has("rotation") || has("scale")))
+			{
+				transform t;
+				if (ApplyTransformObject(ctx, v, t, false)) return PropVariantType(t);
+			}
+
+			return std::nullopt;
+		}
+
+		JSValue VariantToJS(JSContext* ctx, PropVariantType& value)
+		{
+			return std::visit([ctx](auto& x) { return PropertyToJS(ctx, PropVariantTypePtr(&x)); }, value);
+		}
+
+		// ---- Membres reflechis : obj.collider_width_, obj.Jump() ------------
+
+		JSValue ReflectedGet(JSContext* ctx, JSValueConst this_val, int, JSValueConst*, int, JSValue* data)
+		{
+			LYNX_THIS_ACTOR(a);
+			const property* p = FindProperty(a, ToStdString(ctx, data[0]));
+			return p ? PropertyToJS(ctx, p->property_member) : JS_UNDEFINED;
+		}
+
+		JSValue ReflectedSet(JSContext* ctx, JSValueConst this_val, int, JSValueConst* argv, int, JSValue* data)
+		{
+			LYNX_THIS_ACTOR(a);
+			const std::string name = ToStdString(ctx, data[0]);
+			const property* p = FindProperty(a, name);
+
+			if (p && !JSToProperty(ctx, argv[0], p->property_member))
+				return JS_ThrowTypeError(ctx, "wrong value type for property '%s'", name.c_str());
+
+			return JS_UNDEFINED;
+		}
+
+		JSValue ReflectedCall(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int, JSValue* data)
+		{
+			LYNX_THIS_ACTOR(a);
+			const std::string name = ToStdString(ctx, data[0]);
+
+			std::vector<PropVariantType> args;
+			args.reserve(static_cast<size_t>(argc));
+
+			for (int i = 0; i < argc; ++i)
+			{
+				auto v = JSToVariant(ctx, argv[i], "");
+
+				if (!v)
+					return JS_ThrowTypeError(ctx, "%s : unsupported argument %d", name.c_str(), i + 1);
+
+				args.push_back(std::move(*v));
+			}
+
+			std::optional<PropVariantType> result;
+
+			if (!a->CallFunctionByName(name, args, &result))
+				return JS_ThrowReferenceError(ctx, "no C++ function '%s'", name.c_str());
+
+			return result ? VariantToJS(ctx, *result) : JS_UNDEFINED;
+		}
+
+		void DefineReflectedMembers(JSContext* ctx, JSValueConst obj, Actor* a)
+		{
+			if (!a)
+				return;
+
+			auto define = [&](const std::string& name, bool is_function, int arity)
+			{
+				JSAtom atom = JS_NewAtom(ctx, name.c_str());
+
+				// Deja present (API Actor, methode de la classe JS...) : la
+				// version JS gagne, le C++ reste accessible par getProperty /
+				// callNative.
+				if (JS_HasProperty(ctx, obj, atom) > 0)
+				{
+					JS_FreeAtom(ctx, atom);
+					return;
+				}
+
+				JSValue data = JS_NewString(ctx, name.c_str());
+
+				if (is_function)
+				{
+					JSValue fn = JS_NewCFunctionData(ctx, ReflectedCall, arity, 0, 1, &data);
+					JS_DefinePropertyValue(ctx, obj, atom, fn, JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+				}
+				else
+				{
+					JSValue get = JS_NewCFunctionData(ctx, ReflectedGet, 0, 0, 1, &data);
+					JSValue set = JS_NewCFunctionData(ctx, ReflectedSet, 1, 0, 1, &data);
+					JS_DefinePropertyGetSet(ctx, obj, atom, get, set, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+				}
+
+				JS_FreeValue(ctx, data);
+				JS_FreeAtom(ctx, atom);
+			};
+
+			for (const auto& [name, prop] : a->GetProperties())
+				define(name, false, 0);
+
+			for (const auto& [name, fn] : a->GetFunctions())
+				define(name, true, fn.arity);
+		}
+
+		// actor.callNative("Jump", ...) : fonction HFUNCTION meme si masquee par le JS
+		JSValue ActorCallNative(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+		{
+			if (argc < 1)
+				return JS_ThrowTypeError(ctx, "callNative(name, ...args)");
+
+			JSValue data = JS_DupValue(ctx, argv[0]);
+			JSValue r = ReflectedCall(ctx, this_val, argc - 1, argv + 1, 0, &data);
+			JS_FreeValue(ctx, data);
+			return r;
+		}
+
+		// ---- static properties = { hp: 100, speed: {value: 3, type: "int"} } ----
+
+		void ApplyStaticProperties(JSContext* ctx, JSValueConst new_target, Actor* a)
+		{
+			// [parent.properties, ..., new_target.properties] (helper JS)
+			JSValueConst arg = new_target;
+			JSValue lists = JS_Call(ctx, g->fn_static_properties, JS_UNDEFINED, 1, &arg);
+
+			if (JS_IsException(lists))
+			{
+				LogException(ctx, "static properties");
+				return;
+			}
+
+			JSValue length_v = JS_GetPropertyStr(ctx, lists, "length");
+			int32_t count = 0;
+			JS_ToInt32(ctx, &count, length_v);
+			JS_FreeValue(ctx, length_v);
+
+			for (int32_t i = 0; i < count; ++i)
+			{
+				// entree : [nom, valeur]
+				JSValue entry = JS_GetPropertyUint32(ctx, lists, static_cast<uint32_t>(i));
+				JSValue name_v = JS_GetPropertyUint32(ctx, entry, 0);
+				JSValue value_v = JS_GetPropertyUint32(ctx, entry, 1);
+
+				const std::string name = ToStdString(ctx, name_v);
+
+				// {value, type} ou valeur directe
+				std::string type;
+				JSValue value = JS_DupValue(ctx, value_v);
+
+				if (JS_IsObject(value_v))
+				{
+					JSValue inner = JS_GetPropertyStr(ctx, value_v, "value");
+
+					if (!JS_IsUndefined(inner))
+					{
+						JSValue type_v = JS_GetPropertyStr(ctx, value_v, "type");
+						if (JS_IsString(type_v))
+							type = ToStdString(ctx, type_v);
+						JS_FreeValue(ctx, type_v);
+
+						JS_FreeValue(ctx, value);
+						value = inner;
+					}
+					else
+					{
+						JS_FreeValue(ctx, inner);
+					}
+				}
+
+				if (auto variant = JSToVariant(ctx, value, type))
+				{
+					if (const property* existing = FindProperty(a, name))
+					{
+						// redefini par une classe fille : nouvelle valeur par defaut
+						JSToProperty(ctx, value, existing->property_member);
+					}
+					else
+					{
+						a->AddDynamicProperty(name, *variant);
+					}
+				}
+				else
+				{
+					std::cout << kLogPrefix << a->GetTypeName() << " : unsupported value for static property '"
+					          << name << "'" << std::endl;
+				}
+
+				JS_FreeValue(ctx, value);
+				JS_FreeValue(ctx, value_v);
+				JS_FreeValue(ctx, name_v);
+				JS_FreeValue(ctx, entry);
+			}
+
+			JS_FreeValue(ctx, lists);
+		}
+
+		// ---- Constructeurs ---------------------------------------------------
+
+		Actor* CreateNativeActor(const std::string& native)
+		{
+			if (native == "Actor")
+				return new Actor();
+
+			Engine* engine = GetEngine();
+			if (!engine)
+				return nullptr;
+
+			auto ctor = engine->GetFactory().GetObjectConstr(native.c_str());
+			if (!ctor.has_value() || !ctor.value())
+				return nullptr;
+
+			Object* obj = ctor.value()();
+			Actor* actor = dynamic_cast<Actor*>(obj);
+
+			if (!actor)
+				delete obj;
+
+			return actor;
+		}
+
+		std::string ScriptClassNameOf(JSContext* ctx, JSValueConst ctor)
+		{
+			for (const auto& [name, cls] : g->classes)
+			{
+				if (SameObject(cls.ctor, ctor))
+					return name;
+			}
+
+			JSValue n = JS_GetPropertyStr(ctx, ctor, "name");
+			std::string name = ToStdString(ctx, n);
+			JS_FreeValue(ctx, n);
+			return name;
+		}
+
+		// new Actor() / new Pawn() / super() d'une classe JS. magic = classe C++.
+		JSValue ActorConstruct(JSContext* ctx, JSValueConst new_target, int, JSValueConst*, int magic)
+		{
+			if (!JS_IsObject(new_target))
+				return JS_ThrowTypeError(ctx, "an actor class must be called with 'new'");
+
+			const std::string native = g->native_names[magic];
+
+			// Construction demandee par la factory pour cette classe ?
+			const bool from_factory = g->factory_pending && SameObject(new_target, g->factory_target);
+			if (from_factory)
+				g->factory_pending = false;
+
+			Actor* a = CreateNativeActor(native);
+			if (!a)
+				return JS_ThrowInternalError(ctx, "could not create the C++ actor '%s'", native.c_str());
+
+			JSValue proto = JS_GetPropertyStr(ctx, new_target, "prototype");
+			JSValue obj = JS_NewObjectProtoClass(ctx, proto, g_actor_class);
+			JS_FreeValue(ctx, proto);
+
+			if (JS_IsException(obj))
+				return obj;
+
+			const uint32_t entity = a->GetEntity();
+			JS_SetOpaque(obj, EncodeEntity(entity));
+
+			if (auto it = g->actor_objects.find(entity); it != g->actor_objects.end())
+			{
+				JS_FreeValue(ctx, it->second);
+				g->actor_objects.erase(it);
+			}
+
+			g->actor_objects.emplace(entity, JS_DupValue(ctx, obj));
+
+			// Classe JS (pas new Pawn() directement)
+			auto native_it = g->native_ctors.find(native);
+			const bool scripted = native_it == g->native_ctors.end() || !SameObject(new_target, native_it->second);
+
+			if (scripted)
+			{
+				a->script_class_ = ScriptClassNameOf(ctx, new_target);
+				ApplyStaticProperties(ctx, new_target, a);
+				a->AddComponent<ScriptClassComponent>();
+			}
+
+			DefineReflectedMembers(ctx, obj, a);
+
+			if (from_factory)
+			{
+				// la factory (niveau, Level.spawn, editeur) l'ajoute elle-meme
+				g->factory_result = a;
+			}
+			else if (Level* level = CurrentLevel())
+			{
+				level->AddSpawnedActor(a);
+			}
+			else
+			{
+				std::cout << kLogPrefix << "new " << a->GetTypeName() << "() without level : actor not added" << std::endl;
+			}
+
+			return obj;
+		}
+
+		/** Factory : cree un acteur de la classe JS `name` (niveau, Level.spawn, editeur). */
+		Object* CreateScriptActor(const std::string& name)
+		{
+			EnsureInit();
+
+			if (!g->classes_loaded)
+				scripting::PrepareClasses();
+
+			auto it = g->classes.find(name);
+			if (it == g->classes.end())
+			{
+				std::cout << kLogPrefix << "script class not found: " << name << std::endl;
+				return nullptr;
+			}
+
+			JSContext* ctx = g->ctx;
+			JSValue ctor = JS_DupValue(ctx, it->second.ctor);
+
+			g->factory_pending = true;
+			g->factory_target = ctor;
+			g->factory_result = nullptr;
+
+			++g->call_depth;
+			JSValue obj = JS_CallConstructor(ctx, ctor, 0, nullptr);
+			--g->call_depth;
+
+			g->factory_pending = false;
+			g->factory_target = JS_UNDEFINED;
+
+			Actor* a = g->factory_result;
+			g->factory_result = nullptr;
+
+			if (JS_IsException(obj))
+				LogException(ctx, name + " constructor");
+
+			JS_FreeValue(ctx, obj);
+			JS_FreeValue(ctx, ctor);
+			RunPendingJobs();
+			return a;
+		}
+
+		/** Constructeur JS d'une classe C++ (magic = index dans native_names). */
+		JSValue NewNativeConstructor(JSContext* ctx, const std::string& name, JSValueConst proto)
+		{
+			const int magic = static_cast<int>(g->native_names.size());
+			g->native_names.push_back(name);
+
+			JSValue ctor = JS_NewCFunctionMagic(ctx, ActorConstruct, name.c_str(), 0,
+			                                    JS_CFUNC_constructor_or_func_magic, magic);
+			JS_SetConstructor(ctx, ctor, proto);
+
+			g->native_ctors[name] = JS_DupValue(ctx, ctor);
+			return ctor;
+		}
+
+		void RegisterActorConstructor(JSContext* ctx)
+		{
+			g->actor_proto = JS_GetClassProto(ctx, g_actor_class);
+
+			JSValue ctor = NewNativeConstructor(ctx, "Actor", g->actor_proto);
+			g->actor_ctor = JS_DupValue(ctx, ctor);
+
+			JSValue global = JS_GetGlobalObject(ctx);
+			JS_SetPropertyStr(ctx, global, "Actor", ctor);
+			JS_FreeValue(ctx, global);
+
+			DefFunc(ctx, g->actor_proto, "callNative", ActorCallNative, 1);
+
+			// Utilitaires ecrits en JS
+			const char* is_actor_class =
+				"(function (c) { return typeof c === 'function' && c.prototype instanceof Actor; })";
+
+			// static properties de toute la chaine : [[nom, valeur], ...], parents d'abord
+			const char* static_properties =
+				"(function (c) {"
+				"  const chain = [];"
+				"  for (let p = c; p && p !== Actor && p !== Function.prototype; p = Object.getPrototypeOf(p))"
+				"    if (Object.prototype.hasOwnProperty.call(p, 'properties') && p.properties)"
+				"      chain.unshift(p.properties);"
+				"  const out = [];"
+				"  for (const props of chain) for (const k of Object.keys(props)) out.push([k, props[k]]);"
+				"  return out;"
+				"})";
+
+			g->fn_is_actor_class = JS_Eval(ctx, is_actor_class, std::strlen(is_actor_class), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+			g->fn_static_properties = JS_Eval(ctx, static_properties, std::strlen(static_properties), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+		}
+
+		/** Constructeurs JS des classes C++ de la factory (Pawn, Mushroom...). */
+		void EnsureNativeClassGlobals()
+		{
+			Engine* engine = GetEngine();
+			if (!engine || !engine->GetFactory().GetInternalFactory())
+				return;
+
+			JSContext* ctx = g->ctx;
+			JSValue global = JS_GetGlobalObject(ctx);
+
+			for (const auto& [name, constructor] : *engine->GetFactory().GetInternalFactory())
+			{
+				if (g->classes.count(name) || g->native_ctors.count(name) || !IsIdentifier(name.c_str()))
+					continue;
+
+				JSValue proto = JS_NewObjectProto(ctx, g->actor_proto);
+				JSValue ctor = NewNativeConstructor(ctx, name, proto);
+				JS_FreeValue(ctx, proto);
+
+				// static : Pawn.__proto__ = Actor
+				JS_SetPrototype(ctx, ctor, g->actor_ctor);
+
+				JSAtom atom = JS_NewAtom(ctx, name.c_str());
+
+				if (JS_HasProperty(ctx, global, atom) > 0)
+				{
+					std::cout << kLogPrefix << "C++ class " << name
+					          << " : a global with this name already exists, not exposed" << std::endl;
+					JS_FreeValue(ctx, ctor);
+				}
+				else
+				{
+					JS_SetProperty(ctx, global, atom, ctor);
+				}
+
+				JS_FreeAtom(ctx, atom);
+			}
+
+			JS_FreeValue(ctx, global);
+		}
+
+		bool IsActorClass(JSContext* ctx, JSValueConst value)
+		{
+			JSValue r = JS_Call(ctx, g->fn_is_actor_class, JS_UNDEFINED, 1, &value);
+			const bool ok = JS_ToBool(ctx, r) > 0;
+			JS_FreeValue(ctx, r);
+			return ok;
+		}
+
+		void RegisterScriptClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file)
+		{
+			Engine* engine = GetEngine();
+
+			// Une classe C++ porte deja ce nom : la factory ne peut en avoir qu'une.
+			const bool cpp_exists =
+				g->native_ctors.count(name) ||
+				(engine && engine->GetFactory().GetObjectConstr(name.c_str()).has_value() && !g->classes.count(name));
+
+			if (cpp_exists)
+			{
+				std::cout << kLogPrefix << file << " : a C++ class is already called " << name
+				          << ", rename the JavaScript class" << std::endl;
+				return;
+			}
+
+			const bool first_time = !g->classes.count(name);
+			auto& cls = g->classes[name];
+
+			JS_FreeValue(ctx, cls.ctor);
+			cls.ctor = JS_DupValue(ctx, ctor);
+			cls.file = file;
+
+			// Global : les autres fichiers peuvent en heriter.
+			JSValue global = JS_GetGlobalObject(ctx);
+			JS_SetPropertyStr(ctx, global, name.c_str(), JS_DupValue(ctx, ctor));
+			JS_FreeValue(ctx, global);
+
+			if (first_time && engine)
+			{
+				engine->GetFactory().RegisterObject(name.c_str(), [name]() -> Object*
+				{
+					return CreateScriptActor(name);
+				});
+			}
+
+			// Rechargement : les acteurs existants prennent les nouvelles methodes.
+			JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+
+			for (auto& [entity, obj] : g->actor_objects)
+			{
+				Actor* a = ecs::GetActor(entity);
+
+				if (a && a->script_class_ == name)
+					JS_SetPrototype(ctx, obj, proto);
+			}
+
+			JS_FreeValue(ctx, proto);
+			std::cout << kLogPrefix << "class " << name << " (" << file << ")" << std::endl;
+		}
+
+		/** Noms declares par "class Nom extends ..." dans le fichier. */
+		std::vector<std::string> DeclaredClasses(const std::string& code)
+		{
+			std::vector<std::string> names;
+			size_t pos = 0;
+
+			while ((pos = code.find("class", pos)) != std::string::npos)
+			{
+				const bool start_ok = pos == 0 || !(std::isalnum(static_cast<unsigned char>(code[pos - 1])) || code[pos - 1] == '_' || code[pos - 1] == '$');
+				pos += 5;
+
+				if (!start_ok || pos >= code.size() || !std::isspace(static_cast<unsigned char>(code[pos])))
+					continue;
+
+				size_t i = pos;
+				while (i < code.size() && std::isspace(static_cast<unsigned char>(code[i]))) ++i;
+
+				const size_t name_start = i;
+				while (i < code.size() && (std::isalnum(static_cast<unsigned char>(code[i])) || code[i] == '_' || code[i] == '$')) ++i;
+
+				if (i == name_start)
+					continue;
+
+				std::string name = code.substr(name_start, i - name_start);
+
+				while (i < code.size() && std::isspace(static_cast<unsigned char>(code[i]))) ++i;
+
+				if (code.compare(i, 7, "extends") == 0 && IsIdentifier(name.c_str()))
+					names.push_back(std::move(name));
+			}
+
+			return names;
+		}
+
+		void LoadClassFiles()
+		{
+			JSContext* ctx = g->ctx;
+
+			// Rechargement : les anciennes classes ne sont plus visibles, sinon
+			// "class Boss extends Enemy" (Boss.js lu avant Enemy.js) heriterait
+			// de l'ancienne version d'Enemy.
+			{
+				JSValue global = JS_GetGlobalObject(ctx);
+
+				for (const auto& [name, cls] : g->classes)
+				{
+					JSAtom atom = JS_NewAtom(ctx, name.c_str());
+					JS_DeleteProperty(ctx, global, atom, 0);
+					JS_FreeAtom(ctx, atom);
+				}
+
+				JS_FreeValue(ctx, global);
+			}
+
+			struct Pending
+			{
+				std::string path;
+				std::string error;
+			};
+
+			std::vector<Pending> pending;
+
+			for (const std::string& path : fs::ListFiles("classes", true))
+			{
+				if (path.size() > 3 && path.compare(path.size() - 3, 3, ".js") == 0)
+					pending.push_back({path, {}});
+			}
+
+			// Plusieurs passes : un fichier qui herite d'une classe d'un autre
+			// fichier pas encore charge (ReferenceError) est reessaye.
+			bool progress = true;
+
+			while (!pending.empty() && progress)
+			{
+				progress = false;
+				std::vector<Pending> retry;
+
+				for (Pending& file : pending)
+				{
+					const auto data = fs::ReadBinary(file.path);
+					size_t skip = 0;
+
+					if (data.size() >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+						skip = 3;
+
+					const std::string code(reinterpret_cast<const char*>(data.data()) + skip, data.size() - skip);
+					const std::vector<std::string> names = DeclaredClasses(code);
+
+					std::string wrapped = "(function () {\n" + code + "\n;return {";
+
+					for (const std::string& n : names)
+						wrapped += n + ": (typeof " + n + " !== 'undefined' ? " + n + " : undefined),";
+
+					wrapped += "};\n})()";
+
+					JSValue result = JS_Eval(ctx, wrapped.c_str(), wrapped.size(), file.path.c_str(), JS_EVAL_TYPE_GLOBAL);
+
+					if (JS_IsException(result))
+					{
+						JSValue ex = JS_GetException(ctx);
+						JSValue ex_name = JS_GetPropertyStr(ctx, ex, "name");
+						const bool missing = ToStdString(ctx, ex_name) == "ReferenceError";
+						file.error = ToStdString(ctx, ex);
+						JS_FreeValue(ctx, ex_name);
+
+						if (missing)
+						{
+							retry.push_back(file);
+							JS_FreeValue(ctx, ex);
+							continue;
+						}
+
+						std::cout << kLogPrefix << file.path << ": " << file.error << std::endl;
+						JS_FreeValue(ctx, ex);
+						progress = true;
+						continue;
+					}
+
+					progress = true;
+
+					for (const std::string& n : names)
+					{
+						JSValue cls = JS_GetPropertyStr(ctx, result, n.c_str());
+
+						if (IsActorClass(ctx, cls))
+							RegisterScriptClass(ctx, n, cls, file.path);
+
+						JS_FreeValue(ctx, cls);
+					}
+
+					JS_FreeValue(ctx, result);
+				}
+
+				pending = std::move(retry);
+			}
+
+			for (const Pending& file : pending)
+				std::cout << kLogPrefix << file.path << ": " << file.error << std::endl;
+
+			RunPendingJobs();
+		}
+
+		void FreeClassValues()
+		{
+			JSContext* ctx = g->ctx;
+
+			for (auto& [name, cls] : g->classes)
+				JS_FreeValue(ctx, cls.ctor);
+
+			for (auto& [name, ctor] : g->native_ctors)
+				JS_FreeValue(ctx, ctor);
+
+			g->classes.clear();
+			g->native_ctors.clear();
+			g->native_names.clear();
+
+			JS_FreeValue(ctx, g->actor_ctor);
+			JS_FreeValue(ctx, g->actor_proto);
+			JS_FreeValue(ctx, g->fn_is_actor_class);
+			JS_FreeValue(ctx, g->fn_static_properties);
+
+			g->actor_ctor = g->actor_proto = JS_UNDEFINED;
+			g->fn_is_actor_class = g->fn_static_properties = JS_UNDEFINED;
+		}
+
 		void EnsureInit()
 		{
 			if (g)
@@ -1141,6 +1978,7 @@ namespace lynx
 
 			RegisterClasses(g->ctx);
 			RegisterGlobals(g->ctx);
+			RegisterActorConstructor(g->ctx);
 		}
 
 
@@ -1403,11 +2241,25 @@ namespace lynx
 		JSValue CallActorFunction(JSContext* ctx, Actor* a, const char* name, int argc, JSValueConst* argv, bool* found)
 		{
 			*found = false;
+			JSValue last = JS_UNDEFINED;
+
+			// Methode de la classe JS de l'acteur
+			if (a && !a->script_class_.empty())
+			{
+				JSValue r;
+
+				if (CallClassMethod(a, name, argc, argv, &r))
+				{
+					*found = true;
+					last = r;
+				}
+			}
+
+			// Fonctions des scripts attaches
 			Impl* impl = ImplOf(a);
 			if (!impl)
-				return JS_UNDEFINED;
+				return last;
 
-			JSValue last = JS_UNDEFINED;
 			impl->ForEachInstance([&](ScriptInstance& inst)
 			{
 				JSValue r;
@@ -1608,6 +2460,13 @@ namespace lynx
 				}
 			}
 
+			// Fonctions JS gardees par les composants (evenements d'animation...).
+			script_detail::ShutdownComponentBindings(g->ctx);
+
+			// Classes (constructeurs, prototypes)
+			FreeClassValues();
+			g->classes_loaded = false;
+
 			for (auto& [e, obj] : g->actor_objects)
 				JS_FreeValue(g->ctx, obj);
 			g->actor_objects.clear();
@@ -1625,6 +2484,34 @@ namespace lynx
 
 			delete g;
 			g = nullptr;
+		}
+
+		void PrepareClasses()
+		{
+			EnsureInit();
+
+			// Classes C++ d'abord : "extends Pawn" doit les trouver.
+			EnsureNativeClassGlobals();
+
+			if (!g->classes_loaded)
+			{
+				g->classes_loaded = true;
+				LoadClassFiles();
+			}
+		}
+
+		bool CallActorEvent(Actor* self, const char* function, Actor* other)
+		{
+			if (!g || !self || !function)
+				return false;
+
+			JSValue arg = ActorToJS(g->ctx, other);
+			bool found = false;
+			JSValue r = CallActorFunction(g->ctx, self, function, 1, &arg, &found);
+			JS_FreeValue(g->ctx, r);
+			JS_FreeValue(g->ctx, arg);
+			RunPendingJobs();
+			return found;
 		}
 
 		void OnEntityDestroyed(uint32_t entity)
@@ -1657,6 +2544,29 @@ namespace lynx
 
 		for (ScriptComponent* sc : AllScriptComponents())
 			sc->Reload();
+
+		// Classes : fichiers relus, les acteurs existants prennent les
+		// nouvelles methodes.
+		g->classes_loaded = false;
+		scripting::PrepareClasses();
+	}
+
+	bool CallScriptFunction(Actor* actor, const char* name, const std::vector<double>& args)
+	{
+		if (!g || !actor || !name)
+			return false;
+
+		std::vector<JSValue> js_args;
+		js_args.reserve(args.size());
+
+		for (double d : args)
+			js_args.push_back(JS_NewFloat64(g->ctx, d));
+
+		bool found = false;
+		JSValue r = CallActorFunction(g->ctx, actor, name, static_cast<int>(js_args.size()), js_args.data(), &found);
+		JS_FreeValue(g->ctx, r);
+		RunPendingJobs();
+		return found;
 	}
 
 	bool ExecuteScript(const char* code, const char* name)
@@ -1673,4 +2583,146 @@ namespace lynx
 		RunPendingJobs();
 		return ok;
 	}
+
+	bool EvaluateScript(const char* code, std::string& result_json, std::string& error, const char* name)
+	{
+		result_json = "null";
+		error.clear();
+
+		if (!code)
+		{
+			error = "no code";
+			return false;
+		}
+
+		EnsureInit();
+
+		JSContext* ctx = g->ctx;
+		JSValue r = JS_Eval(ctx, code, std::strlen(code), name ? name : "<eval>", JS_EVAL_TYPE_GLOBAL);
+
+		if (JS_IsException(r))
+		{
+			JSValue ex = JS_GetException(ctx);
+			error = ToStdString(ctx, ex);
+
+			if (JS_IsObject(ex))
+			{
+				JSValue stack = JS_GetPropertyStr(ctx, ex, "stack");
+
+				if (!JS_IsUndefined(stack) && !JS_IsException(stack))
+				{
+					const std::string text = ToStdString(ctx, stack);
+
+					if (!text.empty())
+						error += "\n" + text;
+				}
+
+				JS_FreeValue(ctx, stack);
+			}
+
+			JS_FreeValue(ctx, ex);
+			RunPendingJobs();
+			return false;
+		}
+
+		if (!JS_IsUndefined(r))
+		{
+			// Not serializable as JSON (cycle, function...) : its text, quoted.
+			const auto as_text = [&]()
+			{
+				const std::string text = ToStdString(ctx, r);
+				std::string quoted = "\"";
+
+				for (char c : text)
+				{
+					if (c == '"' || c == '\\')
+						quoted += '\\';
+
+					if (c == '\n')
+						quoted += "\\n";
+					else if (static_cast<unsigned char>(c) >= 0x20)
+						quoted += c;
+				}
+
+				return quoted + "\"";
+			};
+
+			JSValue json = JS_JSONStringify(ctx, r, JS_UNDEFINED, JS_UNDEFINED);
+
+			if (JS_IsException(json))
+			{
+				JSValue ex = JS_GetException(ctx);
+				JS_FreeValue(ctx, ex);
+				result_json = as_text();
+			}
+			else
+			{
+				result_json = JS_IsUndefined(json) ? as_text() : ToStdString(ctx, json);
+				JS_FreeValue(ctx, json);
+			}
+		}
+
+		JS_FreeValue(ctx, r);
+		RunPendingJobs();
+		return true;
+	}
 }
+
+
+// ============================================================================
+// Utilitaires partages avec ComponentBindings.cpp (Private/ScriptInternal.h)
+// ============================================================================
+
+namespace lynx::script_detail
+{
+	JSContext* Context() { return g ? g->ctx : nullptr; }
+
+	JSValue ActorObject(JSContext* ctx, Actor* actor) { return ActorToJS(ctx, actor); }
+
+	Actor* ActorFromJS(JSValueConst value) { return JSToActor(value); }
+
+	std::string ToStdString(JSContext* ctx, JSValueConst value) { return lynx::ToStdString(ctx, value); }
+
+	bool ReadFloats(JSContext* ctx, JSValueConst value, float* out, int n)
+	{
+		return lynx::ReadFloats(ctx, value, out, n);
+	}
+
+	JSValue NewPlainVec(JSContext* ctx, const float* values, int n)
+	{
+		return lynx::NewPlainVec(ctx, values, n);
+	}
+
+	void LogException(JSContext* ctx, const std::string& where) { lynx::LogException(ctx, where); }
+
+	void RunPendingJobs()
+	{
+		if (g)
+			lynx::RunPendingJobs();
+	}
+
+	void EnterCall()
+	{
+		if (g)
+			++g->call_depth;
+	}
+
+	void LeaveCall()
+	{
+		if (g)
+			--g->call_depth;
+	}
+
+	void DefGetSet(JSContext* ctx, JSValueConst obj, const char* name,
+	               JSCFunctionMagic* getter, JSCFunctionMagic* setter, int magic)
+	{
+		lynx::DefGetSet(ctx, obj, name, getter, setter, magic);
+	}
+
+	void DefFuncMagic(JSContext* ctx, JSValueConst obj, const char* name,
+	                  JSCFunctionMagic* fn, int length, int magic)
+	{
+		lynx::DefFuncMagic(ctx, obj, name, fn, length, magic);
+	}
+}
+

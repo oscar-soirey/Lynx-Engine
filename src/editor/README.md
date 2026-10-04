@@ -27,6 +27,55 @@ du projet. Seule la liste des projets récents (`editor_recent_projects.txt`) es
 Barre d'outils > bouton du projet > *Open another project...* : ferme l'éditeur
 (avec la confirmation de sauvegarde habituelle) et relance le navigateur.
 
+## Compiler le jeu pendant que l'éditeur tourne
+
+L'éditeur charge une **copie** de la DLL du jeu (dans `%TEMP%\LynxEditor\`),
+jamais `build/<jeu>.dll` elle-même : le fichier n'est pas verrouillé et le jeu
+peut être recompilé à tout moment.
+
+- Bouton **Compile** de la barre d'outils : lance `Build.bat` du projet (ou
+  `cmake --build build` s'il n'y en a pas) en arrière-plan. La sortie s'affiche
+  dans la fenêtre *Build* (erreurs en rouge, bouton *Cancel*). Si la compilation
+  réussit, le jeu est rechargé.
+- Compilation en dehors de l'éditeur (`Build.bat`, CLion...) : l'éditeur voit
+  que `build/<jeu>.dll` a changé et recharge le jeu.
+- Pendant *Play*, le rechargement attend *Stop*.
+- Options dans *Settings* : « Reload the game after Compile » et « Reload the
+  game when its DLL is rebuilt ».
+- Si la nouvelle DLL ne se charge pas, l'éditeur revient à la précédente.
+
+`cmake` et MinGW doivent être dans le `PATH` de l'éditeur pour que *Compile*
+fonctionne (ce qui est le cas si `Build.bat` marche dans un terminal).
+
+## Compilation automatique à l'ouverture
+
+Avant de charger la DLL du jeu, l'éditeur vérifie qu'elle est à jour. Il compile
+le jeu (`Build.bat`, sinon CMake) dans une petite fenêtre qui affiche la sortie
+du build :
+
+- **DLL absente** (jeu jamais compilé) : compilation obligatoire.
+- **DLL plus ancienne que `lynx.dll`** (moteur recompilé depuis) : compilation
+  obligatoire. Cette DLL n'est **jamais** chargée telle quelle, elle ferait planter
+  l'éditeur.
+- **Sources plus récentes que la DLL** (`src/`, `include/`, `CMakeLists.txt`...) :
+  compilation. Si elle échoue, « Open with the previous build » ouvre quand même
+  le projet avec l'ancienne DLL.
+
+Si le build échoue : « Retry » après correction, « Other project... » ou « Quit ».
+Si l'éditeur plante malgré tout, une boîte de dialogue indique le module en
+cause (DLL du jeu ou moteur) au lieu de fermer sans rien dire.
+
+## Commandes (Python / IA)
+
+Fenêtre *Windows > Commands (Python / AI)* : scripts Python du projet
+(`<projet>/commands/*.py`), console de commandes, référence de toutes les
+commandes, et configuration MCP pour brancher un modèle d'IA. L'éditeur écoute
+sur `127.0.0.1` (port 7420 ou suivant) ; la connexion est décrite dans
+`<projet>/.lynx/editor.json`. Détails : `python/README.md` (à la racine du moteur).
+
+Code : `editor/commands/` (registre, serveur, runner Python, fenêtre) et
+`editor/EditorCommands.inl` (les commandes elles-mêmes).
+
 ## Input Settings
 
 Fenêtre *Input Settings* (bouton des fenêtres de la barre d'outils) : édite
@@ -104,7 +153,7 @@ il n'est ni dans `lynx.dll` ni visible par le jeu.
 `src/editor/` ne doit **pas** être compilé dans `lynx.dll` : c'est un exécutable
 à part. Il a besoin de :
 
-- `EditorMain.cpp`, `ProjectBrowser.cpp`, `InputSettingsEditor.cpp`, `../host/GameProject.cpp`
+- `EditorMain.cpp`, `ProjectBrowser.cpp`, `InputSettingsEditor.cpp`, `GameBuild.cpp`, `../host/GameProject.cpp`
 - ImGui (branche docking) + backends GLFW / OpenGL3, ImGuiColorTextEdit (`TextEditor.cpp`)
 - les mêmes includes et bibliothèques que l'ancienne cible du jeu avec éditeur
   (lynx, hrl, glfw, opengl32), `third-party/stb`

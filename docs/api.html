@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx — JavaScript API</title><link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"></head>
+<body><header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a class="active" href="api.html">API</a><a href="thirdparty.html">Third-party</a></nav></header>
+<main class="docs"><section class="doc-hero"><p class="eyebrow">API REFERENCE</p><h1>JavaScript Reference</h1><p>A compact reference of the API actually registered in the engine's QuickJS runtime.</p></section>
+<section class="doc-content single"><article><h2>Actor</h2><table><tr><th>Member</th><th>Read</th><th>Write</th><th>Description</th></tr><tr><td><code>id</code></td><td>✓</td><td>✓</td><td>Actor identifier.</td></tr><tr><td><code>className</code></td><td>✓</td><td>—</td><td>C++ class name.</td></tr><tr><td><code>valid</code></td><td>✓</td><td>—</td><td>Wrapper validity.</td></tr><tr><td><code>entity</code></td><td>✓</td><td>—</td><td>ECS entity ID.</td></tr><tr><td><code>transform</code></td><td>✓</td><td>✓</td><td>Actor transform.</td></tr><tr><td><code>position</code></td><td>✓</td><td>✓</td><td>Position Vec3.</td></tr><tr><td><code>velocity</code></td><td>✓</td><td>✓</td><td>Linear velocity.</td></tr><tr><td><code>angularVelocity</code></td><td>✓</td><td>✓</td><td>Angular velocity.</td></tr><tr><td><code>damping</code></td><td>✓</td><td>✓</td><td>VelocityComponent damping.</td></tr><tr><td><code>lifetime</code></td><td>✓</td><td>✓</td><td>Remaining lifetime; null/undefined removes the component.</td></tr><tr><td><code>tags</code></td><td>✓</td><td>—</td><td>Tag list.</td></tr><tr><td><code>scripts</code></td><td>✓</td><td>—</td><td>Script list.</td></tr></table></article>
+<article><h2>Actor Methods</h2><div class="reference"><div><code>getProperty(name)</code><span>Read a reflected property.</span></div><div><code>setProperty(name, value)</code><span>Modify a reflected property.</span></div><div><code>hasProperty(name)</code><span>Check whether a property exists.</span></div><div><code>destroy()</code><span>Request Actor destruction.</span></div><div><code>addTag(tag)</code><span>Add a tag.</span></div><div><code>removeTag(tag)</code><span>Remove a tag.</span></div><div><code>hasTag(tag)</code><span>Check a tag.</span></div><div><code>addScript(path)</code><span>Attach a script.</span></div><div><code>removeScript(path)</code><span>Remove a script.</span></div><div><code>hasScript(path)</code><span>Check for an attached script.</span></div><div><code>call(name, ...args)</code><span>Call a function in the Actor's scripts.</span></div><div><code>toString()</code><span>Return a text representation of the Actor.</span></div></div></article>
+<article><h2>Transform</h2><div class="reference"><div><code>transform.position</code><span>Vec3 reference to position.</span></div><div><code>transform.rotation</code><span>Vec3 reference to rotation.</span></div><div><code>transform.scale</code><span>Vec3 reference to scale.</span></div><div><code>transform.clone()</code><span>Detached transform copy.</span></div></div></article>
+<article><h2>Vec3</h2><div class="reference"><div><code>x / y / z</code><span>Readable and writable components.</span></div><div><code>set(x, y, z)</code><span>Set all three components.</span></div><div><code>set({x,y,z})</code><span>Set components from an object.</span></div><div><code>clone()</code><span>Return a detached JS object.</span></div><div><code>toString()</code><span>Return <code>vec3(x, y, z)</code>.</span></div></div></article>
+<article><h2>Globals</h2><div class="reference"><div><code>print(...args)</code><span>Simple log.</span></div><div><code>console.log(...args)</code><span>Normal log.</span></div><div><code>console.info(...args)</code><span>Informational log.</span></div><div><code>console.warn(...args)</code><span>Warning log.</span></div><div><code>console.error(...args)</code><span>Error log.</span></div><div><code>vec3(a,b,c)</code><span>Construct a vector value. With one number, x/y/z use the same value.</span></div></div></article>
+<article><h2>Level</h2><div class="signature-list"><code>Level.spawn(className, transform?)</code><code>Level.find(id)</code><code>Level.findWithTag(tag)</code><code>Level.all()</code><code>Level.count(className)</code><code>Level.destroy(actor)</code></div></article>
+<article><h2>Input</h2><div class="signature-list"><code>Input.pressed(name)</code><code>Input.held(name)</code><code>Input.released(name)</code><code>Input.axis(name)</code></div></article>
+<article><h2>Engine</h2><div class="signature-list"><code>Engine.getTimeDilation()</code><code>Engine.setTimeDilation(value)</code><code>Engine.setTimeDilation(value, duration)</code><code>Engine.isPlaying()</code></div></article>
+<article><h2>Complete example</h2><pre><span class="comment">// scripts/Enemy.js</span>
+<span class="kw">function</span> BeginPlay() {
+  parent.addTag(<span class="str">"enemy"</span>);
+  parent.lifetime = 20;
+}
+
+<span class="kw">function</span> Update(dt) {
+  <span class="kw">const</span> player = Level.find(<span class="str">"Player"</span>);
+  <span class="kw">if</span> (!player || !player.valid)
+    <span class="kw">return</span>;
+
+  <span class="kw">const</span> direction = player.position.x &gt; parent.position.x ? 1 : -1;
+  parent.velocity.x = direction * 2;
+
+  <span class="kw">if</span> (Input.pressed(<span class="str">"attack"</span>))
+    player.call(<span class="str">"TakeDamage"</span>, 10);
+}
+
+<span class="kw">function</span> EndPlay() {
+  console.log(<span class="str">"Enemy removed"</span>);
+}</pre></article>
+</section></main><footer><span>LYNX ENGINE</span><span>JavaScript API reference</span></footer><script src="site.js" defer></script></body></html>

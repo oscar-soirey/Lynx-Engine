@@ -10,6 +10,9 @@
  * Voir scripting/README.md pour l'API disponible cote JS.
  */
 
+#include <string>
+#include <vector>
+
 #include "../core/Common.h"
 
 namespace lynx
@@ -27,4 +30,21 @@ namespace lynx
 	 * @return false si le code a leve une exception.
 	 */
 	LYNX_API bool ExecuteScript(const char* code, const char* name = "<console>");
+
+	/**
+	 * Comme ExecuteScript, mais rend la valeur de la derniere expression en
+	 * JSON (`result_json`, "null" si undefined) et le message d'erreur
+	 * (`error`, avec la pile) au lieu de les afficher. Commandes de l'editeur.
+	 */
+	LYNX_API bool EvaluateScript(const char* code, std::string& result_json, std::string& error,
+	                             const char* name = "<eval>");
+
+	class Actor;
+
+	/**
+	 * Appelle une fonction JS de l'acteur : methode de sa classe JavaScript
+	 * (class Player extends Actor) et fonctions de ses scripts attaches.
+	 * @return true si au moins l'un des deux la definissait.
+	 */
+	LYNX_API bool CallScriptFunction(Actor* actor, const char* name, const std::vector<double>& args = {});
 }

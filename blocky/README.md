@@ -26,3 +26,12 @@ Après une modification du moteur, recompiler aussi le jeu.
 
 - Éditeur : `LynxEditor.exe`, puis ouvrir ce dossier (ou `LynxEditor.exe "C:\...\blocky"`).
 - Jeu seul : `LynxRuntime.exe "C:\...\blocky"`.
+
+## Commandes Python / IA
+
+Le dossier `commands/` contient des scripts Python lancés depuis l'éditeur
+(*Windows > Commands (Python / AI)*, onglet *Scripts*) : `list_actors.py`,
+`mushroom_row.py`, `build_platform.py`, `screenshot.py`, `new_js_class.py`.
+Ils utilisent le module `lynx_editor` fourni avec l'éditeur (voir
+`python/README.md` dans le moteur). L'éditeur écrit ses fichiers de session dans
+`.lynx/` (connexion, corbeille, captures) : à ne pas versionner.

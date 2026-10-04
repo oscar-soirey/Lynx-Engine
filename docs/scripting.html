@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx — JavaScript Scripting</title><link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"></head>
+<body><header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a class="active" href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></nav></header>
+<main class="docs"><section class="doc-hero"><p class="eyebrow">JAVASCRIPT / QUICKJS</p><h1>Complete Scripting Guide</h1><p>Lynx scripting follows a behavior-based model: a JavaScript file is not an Actor class. It defines functions executed with a <code>parent</code> object referencing the Actor the script is attached to.</p></section><div class="note"><b>No C++ required.</b> You can build a whole game with JavaScript and the editor. C++ is only needed if you choose to extend the engine.</div>
+<section class="doc-grid"><aside class="toc"><h3>CONTENTS</h3><a href="#model">Model</a><a href="#lifecycle">Lifecycle</a><a href="#instance">Instances</a><a href="#actor">Actor</a><a href="#transform">Transform &amp; Vec3</a><a href="#level">Level</a><a href="#input">Input</a><a href="#engine">Engine</a><a href="#properties">Properties</a><a href="#errors">Errors &amp; hot reload</a><a href="#patterns">Patterns</a></aside><div class="doc-content">
+<article id="model"><h2>1. The script model</h2><p>When a file is loaded, Lynx wraps it in an internal function receiving <code>parent</code>. The script is evaluated by QuickJS, and the engine retrieves lifecycle functions by name.</p><pre><span class="comment">// scripts/Player.js</span>
+<span class="kw">function</span> BeginPlay() {
+  console.log(<span class="str">"Player started"</span>, parent.id);
+}
+
+<span class="kw">function</span> Update(dt) {
+  parent.position.x += 3 * dt;
+}
+
+<span class="kw">function</span> EndPlay() {
+  console.log(<span class="str">"Player stopped"</span>);
+}</pre><div class="note"><b>Important:</b> a script is not a class instantiated with <code>new</code>. The engine creates the behavior instance for each attachment.</div></article>
+<article id="lifecycle"><h2>2. Lifecycle</h2><table><tr><th>Function</th><th>Called</th><th>Use</th></tr><tr><td><code>BeginPlay()</code></td><td>Game start</td><td>Gameplay initialization.</td></tr><tr><td><code>Update(dt)</code></td><td>Every tick</td><td>Movement, logic, input.</td></tr><tr><td><code>EndPlay()</code></td><td>Stop / removal / destruction</td><td>Cleanup and end-of-play logic.</td></tr></table><p>If a script is added during gameplay, its <code>BeginPlay()</code> runs before its next <code>Update()</code>. The engine also protects iterations when components are added or removed.</p></article>
+<article id="instance"><h2>3. Multiple scripts and multiple Actors</h2><p>An Actor can have multiple JS files. The C++ property <code>Actor::scripts</code> stores their paths separated by <code>;</code>. The same file can be attached to multiple Actors.</p><pre>parent.addScript(<span class="str">"scripts/Health.js"</span>);
+parent.addScript(<span class="str">"scripts/EnemyAI.js"</span>);
+
+console.log(parent.hasScript(<span class="str">"scripts/Health.js"</span>));
+parent.removeScript(<span class="str">"scripts/EnemyAI.js"</span>);</pre><p>The source of a script is compiled once per path and then reused. Each attachment still keeps its own variable environment and state.</p></article>
+<article id="actor"><h2>4. Actor</h2><p><code>parent</code> is a JavaScript object representing the Actor. The following properties are available:</p><div class="api-grid"><div><code>parent.id</code><span>Actor identifier, read/write</span></div><div><code>parent.className</code><span>C++ class name, read-only</span></div><div><code>parent.valid</code><span>true while the Actor still exists</span></div><div><code>parent.entity</code><span>internal ECS entity identifier</span></div><div><code>parent.transform</code><span>Transform reference</span></div><div><code>parent.position</code><span>position Vec3 reference</span></div><div><code>parent.velocity</code><span>linear velocity Vec3 reference</span></div><div><code>parent.angularVelocity</code><span>angular velocity Vec3 reference</span></div><div><code>parent.damping</code><span>VelocityComponent damping</span></div><div><code>parent.lifetime</code><span>lifetime; undefined when absent</span></div><div><code>parent.tags</code><span>tag array</span></div><div><code>parent.scripts</code><span>attached script array</span></div></div></article>
+<article id="transform"><h2>5. Transform and Vec3</h2><p><code>position</code>, <code>velocity</code>, and <code>angularVelocity</code> reference Actor data. Changing <code>x</code>, <code>y</code>, or <code>z</code> directly changes the Actor.</p><pre>parent.position.x += 4 * dt;
+parent.position.y = 10;
+
+parent.velocity = vec3(2, 0, 0);
+parent.angularVelocity.set(0, 0, 1);
+
+parent.transform.position.x = 5;
+parent.transform.rotation = vec3(0, 0, 0);
+parent.transform.scale = vec3(2, 2, 2);
+
+<span class="comment">// Detached copy:</span>
+<span class="kw">const</span> p = parent.position.clone();</pre><p><code>vec3()</code> accepts up to three numbers. With one number, all three components use that value. An object <code>{x, y, z}</code> can also be used.</p><pre><span class="kw">const</span> a = vec3(1, 2, 3);
+<span class="kw">const</span> b = vec3(5);
+parent.position = { x: 10, y: 4, z: 0 };</pre></article>
+<article id="level"><h2>6. Level</h2><p>The global <code>Level</code> object operates on the current level.</p><div class="reference"><div><code>Level.spawn(className, transform?)</code><span>Creates an Actor. The second argument accepts a transform object or a Vec3 position. Returns the Actor or <code>null</code>.</span></div><div><code>Level.find(id)</code><span>Returns the Actor with that identifier or <code>null</code>.</span></div><div><code>Level.findWithTag(tag)</code><span>Returns an array of Actors carrying the tag.</span></div><div><code>Level.all()</code><span>Returns every Actor in the current level.</span></div><div><code>Level.count(className)</code><span>Counts Actors of a class.</span></div><div><code>Level.destroy(actor)</code><span>Requests Actor destruction.</span></div></div><pre><span class="kw">const</span> enemy = Level.spawn(<span class="str">"Enemy"</span>, {
+  position: {x: 12, y: 2, z: 0},
+  rotation: {x: 0, y: 0, z: 0},
+  scale: {x: 1, y: 1, z: 1}
+});
+
+<span class="kw">const</span> player = Level.find(<span class="str">"Player"</span>);
+<span class="kw">const</span> enemies = Level.findWithTag(<span class="str">"enemy"</span>);</pre></article>
+<article id="input"><h2>7. Input</h2><p>The input API works with action and axis names configured by the project. An action is resolved when called, so configuration changes can take effect immediately.</p><div class="reference"><div><code>Input.pressed(name)</code><span>true on the frame the action was pressed</span></div><div><code>Input.held(name)</code><span>true while the action is held</span></div><div><code>Input.released(name)</code><span>true on the frame the action was released</span></div><div><code>Input.axis(name)</code><span>returns a floating-point 1D axis value</span></div></div><pre><span class="kw">function</span> Update(dt) {
+  <span class="kw">const</span> x = Input.axis(<span class="str">"move_x"</span>);
+  parent.position.x += x * 8 * dt;
+
+  <span class="kw">if</span> (Input.pressed(<span class="str">"jump"</span>))
+    parent.velocity.y = 12;
+}</pre></article>
+<article id="engine"><h2>8. Engine</h2><div class="reference"><div><code>Engine.getTimeDilation()</code><span>Returns the effective global time dilation.</span></div><div><code>Engine.setTimeDilation(value)</code><span>Sets the background time dilation.</span></div><div><code>Engine.setTimeDilation(value, duration)</code><span>Applies temporary dilation for a duration, useful for hit-stop.</span></div><div><code>Engine.isPlaying()</code><span>Reports whether the game is currently in play mode.</span></div></div><pre><span class="kw">if</span> (Engine.isPlaying()) {
+  Engine.setTimeDilation(0.15, 0.08);
+}</pre></article>
+<article id="properties"><h2>9. Reflected properties</h2><p>Actors expose C++ properties registered through the reflection system. From JavaScript:</p><pre><span class="kw">if</span> (parent.hasProperty(<span class="str">"Health"</span>)) {
+  <span class="kw">const</span> hp = parent.getProperty(<span class="str">"Health"</span>);
+  parent.setProperty(<span class="str">"Health"</span>, hp - 10);
+}</pre><p><code>getProperty(name)</code> returns the property value when it exists, otherwise <code>undefined</code>. <code>setProperty()</code> throws a type error when the value does not match the expected type. This lets scripts control reflected C++ properties without knowing their internal member layout.</p></article>
+<article id="errors"><h2>10. Errors, destruction, and hot reload</h2><p>A JavaScript error during a function call is caught and logged by the engine with the script path and, when relevant, the function name. It should not bring down the engine process.</p><p>After an Actor is destroyed, JS wrappers can become invalid. Use <code>parent.valid</code> when a reference must survive operations that may destroy the Actor.</p><p><code>ScriptComponent::Reload()</code> reloads files from disk. The engine releases old instance functions and recreates the scripts. Previously compiled files are also managed through a path-based cache.</p><pre><span class="kw">function</span> Update(dt) {
+  <span class="kw">if</span> (!parent.valid)
+    <span class="kw">return</span>;
+}</pre></article>
+<article id="patterns"><h2>11. Recommended patterns</h2><h3>Simple movement</h3><pre><span class="kw">function</span> Update(dt) {
+  parent.position.x += Input.axis(<span class="str">"move_x"</span>) * 5 * dt;
+}</pre><h3>Timed projectile</h3><pre><span class="kw">function</span> BeginPlay() {
+  parent.velocity = vec3(12, 0, 0);
+  parent.lifetime = 2;
+}</pre><h3>Find an enemy</h3><pre><span class="kw">function</span> Update(dt) {
+  <span class="kw">const</span> enemies = Level.findWithTag(<span class="str">"enemy"</span>);
+  <span class="kw">if</span> (enemies.length &gt; 0)
+    parent.call(<span class="str">"TakeDamage"</span>, 1);
+}</pre><h3>Communication between scripts</h3><p><code>actor.call(name, ...args)</code> calls the requested function in the scripts attached to that Actor. If multiple scripts define the same function, the engine calls them in instance order and the last return value becomes the final result.</p></article>
+<article><h2>12. What JavaScript does not do</h2><ul><li>It does not replace the C++ engine or native gameplay classes.</li><li>It does not create an Actor class hierarchy through JavaScript inheritance.</li><li>It does not automatically expose every C++ component: only bridges explicitly registered in the JS API are available.</li><li>Calls use the current level and QuickJS runtime; a script remains behavior attached to an Actor.</li></ul></article>
+</div></section></main><footer><span>LYNX ENGINE</span><span>JavaScript / QuickJS</span></footer><script src="site.js" defer></script></body></html>

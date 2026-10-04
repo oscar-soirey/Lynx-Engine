@@ -159,12 +159,22 @@ namespace lynx
 		destroy_queue_.push_back(_act);
 	}
 
+	void Level::AddSpawnedActor(Actor* actor)
+	{
+		if (!actor)
+			return;
+
+		actor->engine_internal_ = lynx::GetEngine();
+		actor->Init();
+		AddActor(actor);
+	}
+
 	int Level::CountActorsOfClass(const char* _className) const
 	{
 		return std::count_if(actors_.begin(), actors_.end(), [_className](Actor* a)
 		{
 			//changer la Player brut par une fonction ClassName
-			return std::strcmp(ETypeName(*a).c_str(), _className) == 0;
+			return a && a->GetTypeName() == _className;
 		});
 	}
 
@@ -190,7 +200,7 @@ namespace lynx
 
 			// Le nom de la classe devient le nom de l'élément XML.
 			// C'est exactement ce que LoadFromFile() attend.
-			std::string type_name = ETypeName(*actor);
+			std::string type_name = actor->GetTypeName();
 
 			XMLElement* actor_element = doc.NewElement(type_name.c_str());
 

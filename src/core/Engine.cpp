@@ -174,9 +174,17 @@ namespace lynx
 		}
 	}
 
+	void Engine::SetWindowHandle(LynxWindow *win)
+	{
+		win_ = win;
+	}
+
 
 	Level* Engine::CreateLevel(const char *file_name)
 	{
+		// Classes JavaScript (assets/classes/) : dans la factory avant le chargement.
+		scripting::PrepareClasses();
+
 		current_level_ = new Level();
 		current_level_->LoadFromFile(file_name, this);
 		return current_level_;
@@ -236,13 +244,8 @@ namespace lynx
 	}
 
 
-
-
-	std::string GetEngineVersion()
+	void AsyncFunc(float time, const std::function<void()>& callback)
 	{
-		return std::string(std::to_string(LYNX_VERSION_YEAR)
-			+ std::to_string(LYNX_VERSION_MAJOR)
-			+ std::to_string(LYNX_VERSION_MINOR)
-			);
+		//engine_->async_registered_.emplace(time, callback);
 	}
 }
