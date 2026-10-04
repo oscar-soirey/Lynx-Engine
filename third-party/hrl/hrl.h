@@ -111,6 +111,30 @@ typedef struct HRL_VoxelCollision {
 	uint32_t inside_type;
 } HRL_VoxelCollision;
 
+/**
+ * @brief Surface rendering mode of a 2D voxel world (see HRL_SetVoxelRenderMode).
+ *
+ * Only the displayed surface changes: voxel data, collisions, picking and
+ * saved worlds are identical in every mode. The world bounds act as a frame:
+ * voxels touching the border of the world keep a straight edge there.
+ */
+typedef enum HRL_EVoxelRenderMode {
+	/** Default. Each voxel is a filled square (historic behavior). */
+	HRL_VOXEL_FLAT = 0,
+	/**
+	 * Marching squares contour: flat edges stay on the voxel boundaries,
+	 * staircases become 45 degree slopes and isolated corners are cut.
+	 */
+	HRL_VOXEL_SMOOTH,
+	/**
+	 * Distinct blocks: every voxel corner touching an exposed side (a side
+	 * whose neighbor is empty) is cut at 45 degrees over 25% of the voxel
+	 * width. Each exposed side is flat over its middle 50% and slopes over
+	 * its outer 25% on both ends. Fully enclosed voxels stay square.
+	 */
+	HRL_VOXEL_BLOCKY
+} HRL_EVoxelRenderMode;
+
 #define HRL_VOXEL_COLLISION_NONE    0u
 #define HRL_VOXEL_COLLISION_LEFT    (1u << 0)
 #define HRL_VOXEL_COLLISION_RIGHT   (1u << 1)
@@ -1226,6 +1250,26 @@ extern "C" {
 	 * light source for the voxel world.
 	 */
 	HRL_API void HRL_SetVoxelTypeEmissiveColor(HRL_id _sceneid, uint32_t _type, float _r, float _g, float _b);
+
+	/**
+	 * @brief Selects how the surface of the scene's voxel world is drawn.
+	 *
+	 * HRL_VOXEL_FLAT (default), HRL_VOXEL_SMOOTH or HRL_VOXEL_BLOCKY. The mode
+	 * only changes the generated display geometry; collisions and picking keep
+	 * using the voxel grid. Changing the mode rebuilds the visible chunks.
+	 * Voxel worlds are drawn by the OpenGL backend only.
+	 *
+	 * @param _sceneid Scene owning the voxel world (created if needed).
+	 * @param _mode    One of the HRL_EVoxelRenderMode values.
+	 */
+	HRL_API void HRL_SetVoxelRenderMode(HRL_id _sceneid, HRL_EVoxelRenderMode _mode);
+
+	/**
+	 * @brief Returns the voxel surface rendering mode of a scene.
+	 * @return The current mode, or HRL_VOXEL_FLAT for an invalid scene or a
+	 *         scene without voxel world.
+	 */
+	HRL_API HRL_EVoxelRenderMode HRL_GetVoxelRenderMode(HRL_id _sceneid);
 
 	/**
 	 * @brief Loads or replaces voxel data for a scene.

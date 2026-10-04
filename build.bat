@@ -1,4 +1,5 @@
 @echo off
 cd build
-mingw32-make
+cmake -S .. -B .
+cmake --build . -j12
 ImGuiEditor.exe

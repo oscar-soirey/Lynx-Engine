@@ -503,6 +503,9 @@ struct SceneViewportState
     float y = 0.f;
     float w = 0.f;          // image size, window pixels
     float h = 0.f;
+    int renderW = 0;         // HRL scene framebuffer size, physical pixels
+    int renderH = 0;
+    bool hasRenderSize = false;
 };
 
 static SceneViewportState sceneViewport;
@@ -532,13 +535,8 @@ static void MouseToScene(
         return;
     }
 
-    int win_w = 0;
-    int win_h = 0;
-
-    glfwGetWindowSize(glfwGetCurrentContext(), &win_w, &win_h);
-
-    scene_x = (window_x - sceneViewport.x) * win_w / sceneViewport.w;
-    scene_y = (window_y - sceneViewport.y) * win_h / sceneViewport.h;
+    scene_x = (window_x - sceneViewport.x) * sceneViewport.renderW / sceneViewport.w;
+    scene_y = (window_y - sceneViewport.y) * sceneViewport.renderH / sceneViewport.h;
 }
 
 
@@ -2855,6 +2853,148 @@ static std::string editor_save_data;
 
 static float cameraSpeed = 50.f;
 
+// -----------------------------------------------------------------------------
+// Application settings
+// -----------------------------------------------------------------------------
+// Stored next to the executable so the editor/game keeps the same preferences
+// between launches. The file is deliberately simple and human-readable.
+static const char* const kSettingsFile = "settings.cfg";
+
+struct AppSettings
+{
+    bool vsync = false;
+    float masterVolume = 0.5f;
+    float cameraSpeed = 50.f;
+    HRL_EVoxelRenderMode voxelRenderMode = HRL_VOXEL_BLOCKY;
+};
+
+static AppSettings appSettings;
+
+static void SaveSettings()
+{
+    std::ofstream file(kSettingsFile, std::ios::trunc);
+
+    if (!file)
+    {
+        std::cerr
+            << "[SETTINGS] Could not write "
+            << kSettingsFile
+            << "\n";
+        return;
+    }
+
+    file << "version 1\n";
+    file << "vsync " << (appSettings.vsync ? 1 : 0) << "\n";
+    file << std::setprecision(9);
+    file << "master_volume " << appSettings.masterVolume << "\n";
+    file << "camera_speed " << appSettings.cameraSpeed << "\n";
+    file << "voxel_render_mode "
+         << static_cast<int>(appSettings.voxelRenderMode)
+         << "\n";
+}
+
+static void LoadSettings()
+{
+    std::ifstream file(kSettingsFile);
+
+    if (!file)
+        return;
+
+    std::string key;
+
+    while (file >> key)
+    {
+        if (key == "version")
+        {
+            int version = 0;
+            file >> version;
+        }
+        else if (key == "vsync")
+        {
+            int value = 0;
+            if (file >> value)
+                appSettings.vsync = value != 0;
+        }
+        else if (key == "master_volume")
+        {
+            float value = appSettings.masterVolume;
+            if (file >> value && std::isfinite(value))
+                appSettings.masterVolume = std::clamp(value, 0.f, 2.f);
+        }
+        else if (key == "camera_speed")
+        {
+            float value = appSettings.cameraSpeed;
+            if (file >> value && std::isfinite(value))
+                appSettings.cameraSpeed = std::clamp(value, 1.f, 400.f);
+        }
+        else if (key == "voxel_render_mode")
+        {
+            int value = static_cast<int>(appSettings.voxelRenderMode);
+            if (file >> value)
+            {
+                value = std::clamp(
+                    value,
+                    static_cast<int>(HRL_VOXEL_FLAT),
+                    static_cast<int>(HRL_VOXEL_BLOCKY)
+                );
+
+                appSettings.voxelRenderMode =
+                    static_cast<HRL_EVoxelRenderMode>(value);
+            }
+        }
+        else
+        {
+            // Ignore unknown settings so newer versions remain backwards
+            // compatible with older settings files.
+            std::string ignored;
+            file >> ignored;
+        }
+    }
+}
+
+static void ApplyRuntimeSettings(GLFWwindow* window)
+{
+    if (window)
+    {
+        glfwSwapInterval(
+            appSettings.vsync ? 1 : 0
+        );
+    }
+
+    cameraSpeed = appSettings.cameraSpeed;
+
+    lynx::SetMasterVolume(
+        appSettings.masterVolume
+    );
+
+    if (HRL_IsValidScene(scene))
+    {
+        HRL_SetVoxelRenderMode(
+            scene,
+            appSettings.voxelRenderMode
+        );
+    }
+}
+
+static const char* VoxelRenderModeName(HRL_EVoxelRenderMode mode)
+{
+    switch (mode)
+    {
+        case HRL_VOXEL_FLAT:
+            return "Flat";
+
+        case HRL_VOXEL_SMOOTH:
+            return "Smooth";
+
+        case HRL_VOXEL_BLOCKY:
+            return "Blocky";
+
+        default:
+            return "Unknown";
+    }
+}
+
+
 // Editor camera height limits and speed scaling.
 // The "Camera Speed" slider is the speed at kCameraSpeedRefZ ; the real speed
 // is proportional to the camera height (far = faster, close = slower).
@@ -3643,6 +3783,118 @@ static void DrawToolbar()
 
         ImGui::SameLine();
 
+
+        // -----------------------------------------------------------------
+        // Settings
+        // -----------------------------------------------------------------
+        ImGui::SameLine();
+
+        if (ImGui::Button("Settings"))
+            ImGui::OpenPopup("SettingsPopup");
+
+        if (ImGui::BeginPopup("SettingsPopup"))
+        {
+            ImGui::TextDisabled("Application settings");
+            ImGui::Separator();
+
+            if (ImGui::Checkbox(
+                    "VSync",
+                    &appSettings.vsync
+                ))
+            {
+                ApplyRuntimeSettings(nullptr);
+                glfwSwapInterval(
+                    appSettings.vsync ? 1 : 0
+                );
+                SaveSettings();
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Audio");
+
+            if (ImGui::SliderFloat(
+                    "Master volume",
+                    &appSettings.masterVolume,
+                    0.f,
+                    2.f,
+                    "%.2f"
+                ))
+            {
+                lynx::SetMasterVolume(
+                    appSettings.masterVolume
+                );
+                SaveSettings();
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Editor");
+
+            if (ImGui::SliderFloat(
+                    "Camera speed",
+                    &appSettings.cameraSpeed,
+                    1.f,
+                    400.f,
+                    "%.0f"
+                ))
+            {
+                cameraSpeed = appSettings.cameraSpeed;
+                SaveSettings();
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Voxels");
+
+            int voxelMode =
+                static_cast<int>(appSettings.voxelRenderMode);
+
+            const char* voxelModes[] =
+            {
+                "Flat",
+                "Smooth",
+                "Blocky"
+            };
+
+            if (ImGui::Combo(
+                    "Render mode",
+                    &voxelMode,
+                    voxelModes,
+                    IM_ARRAYSIZE(voxelModes)
+                ))
+            {
+                appSettings.voxelRenderMode =
+                    static_cast<HRL_EVoxelRenderMode>(voxelMode);
+
+                HRL_SetVoxelRenderMode(
+                    scene,
+                    appSettings.voxelRenderMode
+                );
+
+                SaveSettings();
+            }
+
+            ImGui::Separator();
+
+            if (ImGui::Button("Reset to defaults"))
+            {
+                appSettings = AppSettings{};
+                cameraSpeed = appSettings.cameraSpeed;
+
+                ApplyRuntimeSettings(
+                    ImGui::GetCurrentContext()
+                        ? glfwGetCurrentContext()
+                        : nullptr
+                );
+
+                SaveSettings();
+            }
+
+            ImGui::EndPopup();
+        }
+
+        tooltip("Application settings");
+
+        ImGui::SameLine();
+
         // Use a regular button + popup instead of BeginMenu().
         // BeginMenu() can open its submenu when merely hovering a toolbar item,
         // which makes the rest of the toolbar difficult to use.
@@ -3672,24 +3924,23 @@ static void DrawToolbar()
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
-        float master_volume =
-            lynx::GetMasterVolume();
-
         ImGui::SetNextItemWidth(
             ImGui::GetFontSize() * 8.f
         );
 
         if (ImGui::SliderFloat(
                 "##MasterVolume",
-                &master_volume,
+                &appSettings.masterVolume,
                 0.f,
                 2.f,
                 "Volume %.2f"
             ))
         {
             lynx::SetMasterVolume(
-                master_volume
+                appSettings.masterVolume
             );
+
+            SaveSettings();
         }
 
         tooltip("Master volume");
@@ -3702,13 +3953,17 @@ static void DrawToolbar()
             ImGui::GetFontSize() * 8.f
         );
 
-        ImGui::SliderFloat(
-            "##CameraSpeed",
-            &cameraSpeed,
-            1.f,
-            400.f,
-            "Camera %.0f"
-        );
+        if (ImGui::SliderFloat(
+                "##CameraSpeed",
+                &cameraSpeed,
+                1.f,
+                400.f,
+                "Camera %.0f"
+            ))
+        {
+            appSettings.cameraSpeed = cameraSpeed;
+            SaveSettings();
+        }
 
         tooltip("Camera speed");
 
@@ -3927,10 +4182,12 @@ namespace editor
         InitImGui(win);
         LoadEditorWindowVisibility();
 
-        // The editor starts 0.5.
+        // Apply persisted audio/camera preferences.
         lynx::SetMasterVolume(
-            0.5f
+            appSettings.masterVolume
         );
+
+        cameraSpeed = appSettings.cameraSpeed;
 
 
         // ------------------------------------------------------------
@@ -4955,8 +5212,6 @@ namespace editor
     // "Viewport" window : the scene texture, stretched over the whole window.
     static void DrawViewportWindow()
     {
-        return;
-
         sceneViewport.visible = false;
         sceneViewport.hovered = false;
 
@@ -5027,6 +5282,27 @@ namespace editor
                 sceneViewport.y = pos.y;
                 sceneViewport.w = size.x;
                 sceneViewport.h = size.y;
+
+                // ImGui sizes are logical pixels; HRL renders into a physical
+                // framebuffer. Resize the scene to exactly match the image.
+                int windowW = 0, windowH = 0;
+                int framebufferW = 0, framebufferH = 0;
+                glfwGetWindowSize(glfwGetCurrentContext(), &windowW, &windowH);
+                glfwGetFramebufferSize(glfwGetCurrentContext(), &framebufferW, &framebufferH);
+                const float scaleX = windowW > 0 ? static_cast<float>(framebufferW) / windowW : 1.f;
+                const float scaleY = windowH > 0 ? static_cast<float>(framebufferH) / windowH : 1.f;
+                const int renderW = std::max(1, static_cast<int>(std::lround(size.x * scaleX)));
+                const int renderH = std::max(1, static_cast<int>(std::lround(size.y * scaleY)));
+                sceneViewport.x -= main_viewport->Pos.x;
+                sceneViewport.y -= main_viewport->Pos.y;
+                if (!sceneViewport.hasRenderSize ||
+                    renderW != sceneViewport.renderW || renderH != sceneViewport.renderH)
+                {
+                    sceneViewport.renderW = renderW;
+                    sceneViewport.renderH = renderH;
+                    sceneViewport.hasRenderSize = true;
+                    HRL_WindowResizeCallback(renderW, renderH);
+                }
             }
         }
 
@@ -5045,7 +5321,7 @@ namespace editor
         if (!isPlaying)
             HandleActorPlacementDrag(level);
 
-        if (!isPlaying && editorWindows.viewport)
+        if (editorWindows.viewport)
             DrawViewportWindow();
 
         DrawToolbar();
@@ -6656,6 +6932,13 @@ static void FramebufferSizeCallback(
     int width,
     int height)
 {
+#ifdef LYNX_EDITOR
+    // In the editor the rendered scene belongs to the ImGui viewport. Its
+    // dimensions are sent to HRL from DrawViewportWindow(); resizing the host
+    // window must not change the scene's render dimensions.
+    if (editorWindows.viewport)
+        return;
+#endif
     HRL_WindowResizeCallback(
         width,
         height
@@ -6791,6 +7074,8 @@ float gameplayCamY = 0.f;
 
 int main()
 {
+    LoadSettings();
+
     lynx::Engine* engine =
         lynx::CreateEngine("", false);
 
@@ -6846,6 +7131,10 @@ int main()
     glfwMaximizeWindow(win);
 
     glfwMakeContextCurrent(win);
+		
+    glfwSwapInterval(
+        appSettings.vsync ? 1 : 0
+    );
 
     const auto iconFile = lynx::fs::ReadBinary("icon.png");
     if (!iconFile.empty() && iconFile.size() <= static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -6925,7 +7214,7 @@ int main()
 
 
     scene =
-        HRL_CreateScene(true);
+        HRL_CreateScene(false);
 
     lynx::SetSceneID(scene);
 
@@ -7174,6 +7463,13 @@ int main()
             );
         }
     }
+
+    // Apply the persisted voxel surface mode after the voxel world and its
+    // type definitions are ready.
+    HRL_SetVoxelRenderMode(
+        scene,
+        appSettings.voxelRenderMode
+    );
 
 
     HRL_id post_mat =

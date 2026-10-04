@@ -379,7 +379,7 @@ private:
         HRL_INVALID_ID
     };
 
-    HRL_uint burst_count_ = 8;
+    HRL_uint burst_count_ = 1;
 
     bool initialized_ = false;
 };
