@@ -14,10 +14,12 @@
 namespace lynx
 {
 	class Engine;
+	class PlayerController;
 
 	class LYNX_API Actor : public Object {
 		friend class Level;
 		friend class Engine;
+		friend class PlayerController;
 	public:
 		transform transform{};
 
@@ -27,6 +29,14 @@ namespace lynx
 		 * ajoute/retire les scripts correspondants (voir ScriptComponent).
 		 */
 		std::string scripts;
+
+		/**
+		 * Auto possess (comme AutoPossessPlayer d'Unreal) : index du joueur
+		 * (0 = joueur par defaut) qui possede cet acteur au lancement du jeu,
+		 * ou des son spawn pendant le jeu. -1 = desactive.
+		 * Propriete reflechie (panneau Details, sauvegardee avec le niveau).
+		 */
+		int auto_possess_player = -1;
 
 
 		Actor();
@@ -42,8 +52,18 @@ namespace lynx
 
 		HEventDispatcher<> ED_transform_modified;
 
-		virtual void OnPossessed(int pc);
-		virtual void OnUnpossessed(int pc);
+		// ====================================================================
+		// Possession (voir PlayerController.h)
+		// ====================================================================
+
+		/** Appele quand un joueur prend le controle de cet acteur. */
+		virtual void OnPossessed(PlayerController* pc);
+		/** Appele quand le joueur le relache (Unpossess, autre acteur, fin du jeu...). */
+		virtual void OnUnpossessed(PlayerController* pc);
+
+		/** Joueur qui possede cet acteur (nullptr = aucun). */
+		PlayerController* GetController() const { return controller_; }
+		bool IsPossessed() const { return controller_ != nullptr; }
 
 
 		// ====================================================================
@@ -108,6 +128,9 @@ namespace lynx
 
 		void OnScriptsPropertyChanged();
 
+		// Appele chaque frame de jeu par le PlayerController qui possede
+		// l'acteur (avant Tick), si input_enabled_. Un acteur non possede ne
+		// le recoit pas : voir auto_possess_player / PlayerController::Possess.
 		virtual void ProcessInput(){}
 
 		//backend information, do not modify
@@ -115,5 +138,11 @@ namespace lynx
 
 		//entt::entity, stocke en entier pour ne pas exposer EnTT
 		uint32_t entity_ = 0xFFFFFFFFu;
+
+		// Possession : ecrit par PlayerController uniquement.
+		PlayerController* controller_ = nullptr;
+
+		// auto_possess_player deja traite pour cette partie (Engine).
+		bool auto_possess_done_ = false;
 	};
 }

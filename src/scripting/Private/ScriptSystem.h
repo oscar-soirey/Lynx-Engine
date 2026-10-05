@@ -8,10 +8,13 @@
  */
 
 #include <cstdint>
+#include <string>
 
 namespace lynx
 {
 	class Actor;
+	class PlayerController;
+	class UserWidget;
 }
 
 namespace lynx::scripting
@@ -41,4 +44,31 @@ namespace lynx::scripting
 	 * @return true si au moins un script definissait la fonction.
 	 */
 	bool CallActorEvent(Actor* self, const char* function, Actor* other);
+
+
+	// ---- Joueurs et widgets (GameplayBindings.cpp) -------------------------
+
+	/**
+	 * Appelle `function(player)` (OnPossessed, OnUnpossessed, ProcessInput)
+	 * dans la classe JS et les scripts de `self`.
+	 */
+	bool CallPlayerEvent(Actor* self, const char* function, PlayerController* player);
+
+	/** Le joueur va etre detruit : son objet JS ne le designe plus. */
+	void OnPlayerDestroyed(PlayerController* player);
+
+	/** Le widget (id : Widget::GetUniqueId) est detruit : son objet JS est oublie. */
+	void OnWidgetDestroyed(uint64_t widget_id);
+
+	/** `name` est une classe JS "class X extends UserWidget". */
+	bool IsWidgetClass(const std::string& name);
+
+	enum class WidgetEvent { Construct, Tick, Destruct };
+
+	/**
+	 * Construct() / Tick(dt) / Destruct() de la classe JS du UserWidget (sa
+	 * classe vient du fichier .widget ou de UI.create). Construct lie l'objet
+	 * a sa classe JS si besoin.
+	 */
+	void OnUserWidgetEvent(UserWidget& widget, WidgetEvent event, float dt);
 }

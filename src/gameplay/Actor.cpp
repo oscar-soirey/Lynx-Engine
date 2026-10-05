@@ -2,6 +2,7 @@
 
 #include "../core/Engine.h"
 #include "../core/Level.h"
+#include "PlayerController.h"
 #include "Private/ECS.h"
 #include "../scripting/Private/ScriptSystem.h"
 
@@ -392,10 +393,17 @@ namespace lynx
 
 		HPROPERTY(transform, Exposed, OnTransformChanged());
 		HPROPERTY(scripts, Exposed, OnScriptsPropertyChanged());
+		HPROPERTY(auto_possess_player, Exposed);
 	}
 
 	Actor::~Actor()
 	{
+		// Normalement deja relache par le niveau (avec OnUnpossessed). Sinon
+		// (acteur supprime a la main) le joueur oublie simplement l'acteur.
+		if (controller_)
+			controller_->ForgetActor();
+		controller_ = nullptr;
+
 		// Detruit l'entite et tous ses composants (dont les scripts).
 		scripting::OnEntityDestroyed(entity_);
 		ecs::DestroyEntity(entity_);
@@ -409,17 +417,26 @@ namespace lynx
 	Actor::Actor(Actor&& other)
 		: transform(other.transform),
 		  scripts(std::move(other.scripts)),
+		  auto_possess_player(other.auto_possess_player),
 		  ED_transform_modified(std::move(other.ED_transform_modified)),
 		  input_enabled_(other.input_enabled_),
 		  engine_internal_(other.engine_internal_),
-		  entity_(other.entity_)
+		  entity_(other.entity_),
+		  controller_(other.controller_),
+		  auto_possess_done_(other.auto_possess_done_)
 	{
 		object_id_ = other.object_id_;
 		other.entity_ = ecs::kNullEntity;
 		ecs::RebindEntity(entity_, this);
 
+		// Le joueur suit l'acteur deplace.
+		other.controller_ = nullptr;
+		if (controller_)
+			controller_->possessed_actor_ = this;
+
 		HPROPERTY(transform, Exposed, OnTransformChanged());
 		HPROPERTY(scripts, Exposed, OnScriptsPropertyChanged());
+		HPROPERTY(auto_possess_player, Exposed);
 	}
 
 	Actor& Actor::operator=(Actor&& other)
@@ -431,9 +448,19 @@ namespace lynx
 		object_id_ = other.object_id_;
 		transform = other.transform;
 		scripts = std::move(other.scripts);
+		auto_possess_player = other.auto_possess_player;
 		ED_transform_modified = std::move(other.ED_transform_modified);
 		input_enabled_ = other.input_enabled_;
 		engine_internal_ = other.engine_internal_;
+		auto_possess_done_ = other.auto_possess_done_;
+
+		// Possession : `this` prend celle de `other` (l'ancienne est relachee).
+		if (controller_ && controller_ != other.controller_)
+			controller_->Unpossess();
+		controller_ = other.controller_;
+		other.controller_ = nullptr;
+		if (controller_)
+			controller_->possessed_actor_ = this;
 
 		// echange : les composants de `this` seront detruits avec `other`
 		std::swap(entity_, other.entity_);
@@ -442,14 +469,12 @@ namespace lynx
 		return *this;
 	}
 
-	void Actor::OnPossessed(int pc)
+	void Actor::OnPossessed(PlayerController*)
 	{
-
 	}
 
-	void Actor::OnUnpossessed(int pc)
+	void Actor::OnUnpossessed(PlayerController*)
 	{
-
 	}
 
 

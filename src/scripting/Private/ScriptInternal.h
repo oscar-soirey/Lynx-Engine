@@ -13,6 +13,7 @@
 namespace lynx
 {
 	class Actor;
+	class PlayerController;
 }
 
 namespace lynx::script_detail
@@ -56,4 +57,32 @@ namespace lynx::script_detail
 
 	/** Libere tout ce que les composants gardent du JS (avant la fin du runtime). */
 	void ShutdownComponentBindings(JSContext* ctx);
+
+	/**
+	 * Appelle `name(...)` : methode de la classe JS de l'acteur et fonctions de
+	 * ses scripts. Retourne la derniere valeur (a liberer).
+	 */
+	JSValue CallActorFunction(JSContext* ctx, Actor* actor, const char* name, int argc, JSValueConst* argv, bool* found);
+
+	// ---- GameplayBindings.cpp (joueurs, widgets) --------------------------
+
+	/** Actor.controller, Actor.autoPossessPlayer... */
+	void RegisterGameplayBindings(JSContext* ctx, JSValueConst actor_proto);
+
+	/** Engine.createPlayer..., UI, UserWidget. Apres la creation de Engine. */
+	void RegisterGameplayGlobals(JSContext* ctx);
+
+	/** Libere les objets JS des joueurs / widgets et leurs callbacks. */
+	void ShutdownGameplayBindings(JSContext* ctx);
+
+	/** Objet JS du joueur (reference a liberer), JS_NULL si nullptr. */
+	JSValue PlayerObject(JSContext* ctx, PlayerController* player);
+
+	/** Joueur d'un objet JS PlayerController (nullptr sinon / detruit). */
+	PlayerController* PlayerFromJS(JSValueConst value);
+
+	/** Classes de widgets JS (class X extends UserWidget) : chargement des fichiers. */
+	void ForgetWidgetClasses(JSContext* ctx);
+	bool IsWidgetClassConstructor(JSContext* ctx, JSValueConst value);
+	void RegisterWidgetClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file);
 }

@@ -66,6 +66,7 @@
 #include "GameBuild.h"
 #include "ProjectBrowser.h"
 #include "StartupBuild.h"
+#include "SplashScreen.h"
 #include "commands/CommandRegistry.h"
 #include "commands/CommandServer.h"
 #include "commands/CommandUtils.h"
@@ -77,6 +78,7 @@
 #include "PropertyWidgets.h"
 #include "ProfilerWindow.h"
 #include "ScriptEditors.h"
+#include "WidgetEditor.h"
 #include "NodeGraphTest.h"
 #include "EditorFonts.h"
 #include "ShipGame.h"
@@ -640,10 +642,11 @@ static void SetPlaying(
     HRL_id camera,
     bool playing)
 {
-    HRL_SetViewportCamera(
-        viewport,
-        camera
-    );
+    // The scene is seen through the viewport of the default player.
+    if (lynx::PlayerController* player = engine->GetDefaultPlayer())
+        player->SetViewCamera(camera);
+    else
+        HRL_SetViewportCamera(viewport, camera);
 
     if (playing == isPlaying)
     {
@@ -1472,6 +1475,51 @@ static HRL_id GetActorTypePreviewTexture(
 }
 
 // "color", "light_color", "tintColor"... : drawn as a color picker in Details.
+// Actor::auto_possess_player : "Disabled" (-1), "Player 0".."Player 7",
+// like AutoPossessPlayer in Unreal.
+static bool DrawAutoPossessCombo(int& value)
+{
+    constexpr int kMaxPlayers = 8;
+
+    char preview[32];
+    if (value < 0)
+        std::snprintf(preview, sizeof(preview), "Disabled");
+    else
+        std::snprintf(preview, sizeof(preview), "Player %d", value);
+
+    bool changed = false;
+
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo("##value", preview))
+    {
+        if (ImGui::Selectable("Disabled", value < 0))
+        {
+            changed = value != -1;
+            value = -1;
+        }
+
+        for (int i = 0; i < std::max(kMaxPlayers, value + 1); ++i)
+        {
+            char label[32];
+            std::snprintf(label, sizeof(label), "Player %d", i);
+
+            if (ImGui::Selectable(label, value == i))
+            {
+                changed = value != i;
+                value = i;
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Player that possesses this actor when the game starts\n"
+                          "(player 0 = default player, others : Engine::CreatePlayer).");
+
+    return changed;
+}
+
 static bool IsColorPropertyName(const std::string& name)
 {
     std::string lower = name;
@@ -2649,10 +2697,13 @@ static void DrawContentBrowser(lynx::Level* level)
         // keeps the existing behaviour, files stay usable as drag sources.
         if (!is_directory &&
             hovered &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-            lynx::editor::script_editors::CanOpen(entry.path()))
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
-            lynx::editor::script_editors::Open(entry.path());
+            // .widget : Widget Editor (UMG-like designer).
+            if (lynx::editor::widget_editor::CanOpen(entry.path()))
+                lynx::editor::widget_editor::Open(entry.path());
+            else if (lynx::editor::script_editors::CanOpen(entry.path()))
+                lynx::editor::script_editors::Open(entry.path());
         }
 
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -4807,6 +4858,12 @@ namespace editor
         InitImGui(win);
         LoadEditorWindowVisibility();
 
+        // Widget Editor : textures / fonts / nested widgets with the asset picker.
+        lynx::editor::widget_editor::SetAssetFieldDrawer([](std::string& value)
+        {
+            return DrawAssetPathField(value);
+        });
+
         // Apply persisted audio/camera preferences.
         lynx::SetMasterVolume(
             appSettings.masterVolume
@@ -5307,7 +5364,8 @@ namespace editor
 
 
         const bool javascript_editor_handles_shortcuts =
-            lynx::editor::script_editors::HasKeyboardFocus();
+            lynx::editor::script_editors::HasKeyboardFocus() ||
+            lynx::editor::widget_editor::HasFocus();
 
 
         if (ctrl_s &&
@@ -5947,7 +6005,8 @@ namespace editor
                     sceneViewport.renderW = renderW;
                     sceneViewport.renderH = renderH;
                     sceneViewport.hasRenderSize = true;
-                    HRL_WindowResizeCallback(renderW, renderH);
+                    // Renderer + widgets of the game (DPI scale).
+                    editor_engine->SetRenderSize(renderW, renderH);
                 }
             }
         }
@@ -5998,6 +6057,7 @@ namespace editor
 
         if (!isPlaying &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
+            !lynx::editor::widget_editor::HasFocus() &&
             io.KeyCtrl &&
             ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
             !io.WantTextInput &&
@@ -6016,6 +6076,7 @@ namespace editor
             !io.WantTextInput &&
             !content_browser_focused &&
             !lynx::editor::node_graph_test::HasFocus() &&
+            !lynx::editor::widget_editor::HasFocus() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
@@ -6441,6 +6502,9 @@ namespace editor
 
             lynx::editor::script_editors::DrawAll(central_dock_id);
 
+            // Widget editors (one window per open .widget).
+            lynx::editor::widget_editor::DrawAll(central_dock_id);
+
 
             // --------------------------------------------------------
             if (editorWindows.details)
@@ -6614,7 +6678,9 @@ namespace editor
                                     if (auto ptr =
                                             std::get_if<int*>(&prop.property_member))
                                     {
-                                        if (*ptr)
+                                        if (*ptr && name == "auto_possess_player")
+                                            changed = DrawAutoPossessCombo(**ptr);
+                                        else if (*ptr)
                                             changed = ImGui::DragInt(
                                                 "##value",
                                                 *ptr,
@@ -7662,7 +7728,8 @@ namespace editor
             }
 
             const bool scripts_dirty =
-                lynx::editor::script_editors::HasUnsavedChanges();
+                lynx::editor::script_editors::HasUnsavedChanges() ||
+                lynx::editor::widget_editor::HasUnsavedChanges();
 
             if (editor_dirty || scripts_dirty)
             {
@@ -7672,7 +7739,7 @@ namespace editor
                     );
                 if (scripts_dirty)
                     ImGui::TextUnformatted(
-                        "Some scripts have unsaved changes (marked * in their tab)."
+                        "Some scripts or widgets have unsaved changes (marked * in their tab)."
                     );
                 ImGui::TextUnformatted(
                     "Do you want to save before quitting?"
@@ -7684,6 +7751,7 @@ namespace editor
                     if (editor_dirty)
                         SaveEditor();
                     lynx::editor::script_editors::SaveAll();
+                    lynx::editor::widget_editor::SaveAll();
                     glfwSetWindowShouldClose(win, GLFW_TRUE);
                     ImGui::CloseCurrentPopup();
                 }
@@ -7792,10 +7860,8 @@ static void FramebufferSizeCallback(
     // window must not change the scene's render dimensions.
     if (editorWindows.viewport)
         return;
-    HRL_WindowResizeCallback(
-        width,
-        height
-    );
+    if (lynx::Engine* engine = lynx::Engine::Get())
+        engine->SetRenderSize(width, height);
 }
 
 
@@ -8011,7 +8077,20 @@ static bool PrepareGameModule(lynx::host::GameProject& project, std::string& mes
 
         lynx::editor::game_build::Init(project.root, project.module_path);
 
-        switch (lynx::editor::RunStartupBuild(project, reason, !blocking))
+        // The build window takes over : no splash above it meanwhile.
+        lynx::editor::splash::Hide();
+
+        const lynx::editor::StartupBuildResult build_result =
+            lynx::editor::RunStartupBuild(project, reason, !blocking);
+
+        if (build_result == lynx::editor::StartupBuildResult::OpenAnyway ||
+            build_result == lynx::editor::StartupBuildResult::Built)
+        {
+            lynx::editor::splash::Show();
+            lynx::editor::splash::SetStep("Game compiled", 0.18f);
+        }
+
+        switch (build_result)
         {
         case lynx::editor::StartupBuildResult::OpenAnyway:
             return true;
@@ -8165,16 +8244,33 @@ int main(int argc, char** argv)
     if (!ChooseProject(argc, argv, currentProject))
         return 0;
 
+    // From here to the first editor frame : splash screen (see SplashScreen.h).
+    // The editor window stays hidden until everything is loaded.
+    lynx::editor::splash::Open(currentProject);
+
+    // Back to the project browser (the splash hides meanwhile). false : the
+    // user closed it, the editor quits.
+    auto browse_again = [&](const std::string& message) -> bool
+    {
+        lynx::editor::splash::Hide();
+
+        if (!lynx::editor::RunProjectBrowser(currentProject, message, currentProject.root))
+        {
+            lynx::editor::splash::Close();
+            return false;
+        }
+
+        lynx::editor::splash::Open(currentProject);
+        return true;
+    };
+
     while (!EnterProjectDirectory(currentProject))
     {
-        if (!lynx::editor::RunProjectBrowser(
-                currentProject,
-                "Could not open this project folder.",
-                currentProject.root))
-        {
+        if (!browse_again("Could not open this project folder."))
             return 0;
-        }
     }
+
+    lynx::editor::splash::SetStep("Starting the engine", 0.05f);
 
     // The engine reads "assets/" from the working directory : create it only
     // once we are in the project.
@@ -8255,8 +8351,15 @@ int main(int argc, char** argv)
 
         for (;;)
         {
+            lynx::editor::splash::SetStep("Checking the game build", 0.10f);
+
             if (PrepareGameModule(currentProject, message))
             {
+                lynx::editor::splash::SetStep(
+                    "Loading the game module (" +
+                        currentProject.module_path.filename().string() + ")",
+                    0.20f);
+
                 if (load_game_module())
                     break;
 
@@ -8268,15 +8371,21 @@ int main(int argc, char** argv)
             }
 
             if (message.empty())
+            {
+                lynx::editor::splash::Close();
                 return 0;   // Quit
+            }
 
             std::cerr << "[PROJECT] " << message << "\n";
 
-            if (!lynx::editor::RunProjectBrowser(currentProject, message, currentProject.root))
+            if (!browse_again(message))
                 return 0;
 
             if (!EnterProjectDirectory(currentProject))
+            {
+                lynx::editor::splash::Close();
                 return 1;
+            }
         }
     }
 
@@ -8290,13 +8399,24 @@ int main(int argc, char** argv)
     );
 
     // Project files (working directory = project root).
+    lynx::editor::splash::SetStep("Reading the project settings", 0.28f);
+
     LoadSettings();
     MigrateToVoxelUnits();
 
     LoadInputConfig();
 
 
+    lynx::editor::splash::SetStep("Creating the editor window", 0.32f);
+
     glfwInit();
+
+    // Hidden until the project is loaded : the splash is shown meanwhile, the
+    // window appears (maximized) once its content is ready.
+    glfwWindowHint(
+        GLFW_VISIBLE,
+        GLFW_FALSE
+    );
 
     glfwWindowHint(
         GLFW_CONTEXT_VERSION_MAJOR,
@@ -8315,7 +8435,7 @@ int main(int argc, char** argv)
 
 
     const std::string window_title =
-        "Lynx Editor - " + currentProject.name;
+        "Lynx - " + currentProject.name;
 
     GLFWwindow* win =
         glfwCreateWindow(
@@ -8329,10 +8449,12 @@ int main(int argc, char** argv)
     if (!win)
     {
         std::cerr << "[WINDOW] Could not create the editor window\n";
+        lynx::editor::splash::Close();
         return 1;
     }
 
-    glfwMaximizeWindow(win);
+    // Maximized when it is shown, at the end of the loading (a hidden window
+    // would be shown by glfwMaximizeWindow on Windows).
 
     glfwMakeContextCurrent(win);
 
@@ -8393,6 +8515,8 @@ int main(int argc, char** argv)
 
 
 
+    lynx::editor::splash::SetStep("Starting the renderer", 0.38f);
+
     HRL_Init(HRL_OPENGL_33);
 
     int winX, winY;
@@ -8403,6 +8527,9 @@ int main(int argc, char** argv)
         winY,
         (void*)glfwGetProcAddress
     );
+
+    // Size known by the widgets too (the Viewport window sets its own).
+    engine->SetRenderSize(winX, winY);
 
     HRL_RegisterErrorCallback(
         ErrorCallback
@@ -8423,24 +8550,13 @@ int main(int argc, char** argv)
         engine->CreateScene();
 
 
+    // The default player (player 0) got its viewport and its camera with the
+    // scene : its camera is the gameplay camera (Play, game hooks).
+    lynx::PlayerController* defaultPlayer =
+        engine->GetDefaultPlayer();
+
     HRL_id gameplay_cam =
-        HRL_CreateCamera(
-            scene,
-            HRL_PERSPECTIVE
-        );
-
-
-    HRL_SetCameraPerspectiveFov(
-        gameplay_cam,
-        20.f
-    );
-
-    HRL_SetCameraRotation(
-        gameplay_cam,
-        0.f,
-        -90.f,
-        0.f
-    );
+        defaultPlayer->GetDefaultCamera();
 
 
     // ------------------------------------------------------------
@@ -8448,6 +8564,8 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
     // assets/save_file.txt holds the path (relative to assets/) of the voxel
     // world. A new project without it gets "world.vox".
+
+    lynx::editor::splash::SetStep("Loading the voxel world", 0.48f);
 
     auto save_file =
         lynx::fs::ReadBinary(
@@ -8573,6 +8691,8 @@ int main(int argc, char** argv)
 
     // Voxel types (assets/voxels.json) : before the level, the actors may
     // need them when they are created.
+    lynx::editor::splash::SetStep("Loading the voxel types", 0.64f);
+
     if (!lynx::voxels::LoadFile("voxels.json"))
         ShowEditorWarning("Voxel types not loaded:\n" + lynx::voxels::GetLoadError());
 
@@ -8582,6 +8702,8 @@ int main(int argc, char** argv)
     if (gameHooks.setup_scene)
         gameHooks.setup_scene(scene);
 
+
+    lynx::editor::splash::SetStep("Loading the level", 0.72f);
 
     auto* level = engine->CreateLevel(
         "world.xml"
@@ -8626,6 +8748,8 @@ int main(int argc, char** argv)
 
 
     // One unit everywhere : 1 world unit = 1 voxel.
+    lynx::editor::splash::SetStep("Preparing the viewport", 0.80f);
+
     HRL_SetVoxelPhysicalSize(scene, 1.f);
 
     // New project (project browser > New project) : first level of its template,
@@ -8647,17 +8771,15 @@ int main(int argc, char** argv)
         );
 
 
+    // No viewport of its own : the editor shows the one of the default player
+    // (each PlayerController owns its viewport).
     HRL_id viewport =
-        HRL_CreateViewport(
-            scene,
-            start_camera,
-            0.f,
-            0.f,
-            1.f,
-            1.f
-        );
-    lynx::SetViewportID(viewport);
+        defaultPlayer->GetViewportBackend();
 
+    defaultPlayer->SetViewCamera(start_camera);
+
+
+    lynx::editor::splash::SetStep("Starting the editor", 0.86f);
 
     editor::Init(
         win,
@@ -8677,6 +8799,8 @@ int main(int argc, char** argv)
     // Commands (Python scripts, AI through MCP) : registry, local server,
     // script runner. The python/ folder (lynx_editor module, MCP server) is
     // copied next to the editor by CMake.
+    lynx::editor::splash::SetStep("Starting the command server", 0.93f);
+
     RegisterEditorCommands();
 
     lynx::editor::script_runner::Init(
@@ -8701,19 +8825,24 @@ int main(int argc, char** argv)
         );
 
 
-    HRL_id post =
-        HRL_CreatePostProcess(
-            viewport,
-            post_mat,
-            1
-        );
-
-
     HRL_MaterialSetFloat(
         post_mat,
         "vignetteStrength",
         0.4f
     );
+
+    // Same post process on the viewport of every player, also the ones the
+    // game creates while playing (Engine::CreatePlayer).
+    auto add_post_process = [post_mat](lynx::PlayerController* player)
+    {
+        if (player && player->GetViewportBackend() != HRL_INVALID_ID)
+            HRL_CreatePostProcess(player->GetViewportBackend(), post_mat, 1);
+    };
+
+    for (lynx::PlayerController* player : engine->GetPlayers())
+        add_post_process(player);
+
+    engine->ED_player_created.Subscribe(add_post_process);
 
 
     // ------------------------------------------------------------
@@ -8738,6 +8867,22 @@ int main(int argc, char** argv)
     // The game places its gameplay camera (ex : on the player).
     if (gameHooks.on_level_loaded)
         gameHooks.on_level_loaded(gameplay_cam);
+
+
+    // ------------------------------------------------------------
+    // Loaded : the editor window appears behind the splash, which fades out
+    // after the first editor frames (splash::Tick in the main loop).
+    // ------------------------------------------------------------
+
+    lynx::editor::splash::Complete();
+
+    glfwMaximizeWindow(win);
+    glfwShowWindow(win);
+    glfwFocusWindow(win);
+
+    // The loading time is not a frame.
+    lastFrameTime =
+        glfwGetTime();
 
 
     // ------------------------------------------------------------
@@ -9045,9 +9190,8 @@ int main(int argc, char** argv)
             std::snprintf(
                 title,
                 sizeof(title),
-                "%s - %.0f FPS",
-                window_title.c_str(),
-                fps
+                "%s",
+                window_title.c_str()
             );
 
 
@@ -9122,6 +9266,9 @@ int main(int argc, char** argv)
             glfwSwapBuffers(win);
         }
 
+        // Splash fade-out over the first frames of the editor.
+        lynx::editor::splash::Tick();
+
         LYNX_PROFILE_FRAME();
     }
 
@@ -9129,6 +9276,9 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
     // Shutdown
     // ------------------------------------------------------------
+
+    // Closed during the splash fade-out.
+    lynx::editor::splash::Close();
 
     lynx::editor::game_build::Shutdown();
     lynx::editor::commands_window::Shutdown();

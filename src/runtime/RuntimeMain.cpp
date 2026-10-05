@@ -525,10 +525,9 @@ static void FramebufferSizeCallback(
     int width,
     int height)
 {
-    HRL_WindowResizeCallback(
-        width,
-        height
-    );
+    // Renderer + widgets (DPI scale).
+    if (lynx::Engine* engine = lynx::Engine::Get())
+        engine->SetRenderSize(width, height);
 }
 
 
@@ -787,7 +786,15 @@ int main(int argc, char** argv)
         appSettings.vsync ? 1 : 0
     );
 
-    const auto iconFile = lynx::fs::ReadBinary("icon.png");
+    // Icon chosen in Ship Game : written in the executable as "GLFW_ICON",
+    // which GLFW uses for the window and the taskbar. assets/icon.png only
+    // when the executable has none.
+    bool exeHasIcon = false;
+#ifdef _WIN32
+    exeHasIcon = FindResourceW(nullptr, L"GLFW_ICON", MAKEINTRESOURCEW(14) /* RT_GROUP_ICON */) != nullptr;
+#endif
+
+    const auto iconFile = exeHasIcon ? std::vector<unsigned char>() : lynx::fs::ReadBinary("icon.png");
     if (!iconFile.empty() && iconFile.size() <= static_cast<size_t>(std::numeric_limits<int>::max()))
     {
         int iconWidth = 0;
@@ -821,6 +828,9 @@ int main(int argc, char** argv)
         (void*)glfwGetProcAddress
     );
 
+    // Size known by the widgets too.
+    engine->SetRenderSize(winX, winY);
+
     HRL_RegisterErrorCallback(
         ErrorCallback
     );
@@ -839,23 +849,13 @@ int main(int argc, char** argv)
         engine->CreateScene();
 
 
+    // The default player (player 0) got its viewport and its camera with the
+    // scene : its camera is the gameplay camera given to the game hooks.
+    lynx::PlayerController* defaultPlayer =
+        engine->GetDefaultPlayer();
+
     HRL_id gameplay_cam =
-        HRL_CreateCamera(
-            scene,
-            HRL_PERSPECTIVE
-        );
-
-    HRL_SetCameraPerspectiveFov(
-        gameplay_cam,
-        20.f
-    );
-
-    HRL_SetCameraRotation(
-        gameplay_cam,
-        0.f,
-        -90.f,
-        0.f
-    );
+        defaultPlayer->GetDefaultCamera();
 
 
     // ------------------------------------------------------------
@@ -941,17 +941,8 @@ int main(int argc, char** argv)
     HRL_SetVoxelPhysicalSize(scene, 1.f);
 
 
-    HRL_id viewport =
-        HRL_CreateViewport(
-            scene,
-            gameplay_cam,
-            0.f,
-            0.f,
-            1.f,
-            1.f
-        );
-
-    lynx::SetViewportID(viewport);
+    // No viewport here : each PlayerController owns one (split-screen).
+    defaultPlayer->SetViewCamera(gameplay_cam);
 
 
     HRL_SetVoxelRenderMode(
@@ -965,17 +956,24 @@ int main(int argc, char** argv)
             HRL_DEFAULT_POST_PROCESS_SHADER
         );
 
-    HRL_CreatePostProcess(
-        viewport,
-        post_mat,
-        1
-    );
-
     HRL_MaterialSetFloat(
         post_mat,
         "vignetteStrength",
         0.4f
     );
+
+    // Same post process on the viewport of every player, also the ones the
+    // game creates later (Engine::CreatePlayer).
+    auto add_post_process = [post_mat](lynx::PlayerController* player)
+    {
+        if (player && player->GetViewportBackend() != HRL_INVALID_ID)
+            HRL_CreatePostProcess(player->GetViewportBackend(), post_mat, 1);
+    };
+
+    for (lynx::PlayerController* player : engine->GetPlayers())
+        add_post_process(player);
+
+    engine->ED_player_created.Subscribe(add_post_process);
 
 
     HRL_BeginVoxelEdit(scene);

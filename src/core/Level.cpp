@@ -5,6 +5,7 @@
 #include "Factory.h"
 #include "Filesystem.h"
 #include "Engine.h"
+#include "../gameplay/PlayerController.h"
 
 #include <xml/tinyxml2.h>
 #include <thread>
@@ -255,6 +256,10 @@ namespace lynx
 			// a deja ete detruit (DestroyActor appele deux fois) -> pas de double delete.
 			if (std::erase(actors_, a) > 0)
 			{
+				// Le joueur le relache (OnUnpossessed) tant qu'il est entier.
+				if (a->controller_)
+					a->controller_->Unpossess();
+
 				// EndPlay des composants tant que l'acteur est encore entier
 				ecs::OnActorDestroyed(a);
 				delete a;

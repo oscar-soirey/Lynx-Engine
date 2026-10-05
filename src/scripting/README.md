@@ -134,6 +134,10 @@ détruit lève une `ReferenceError` au lieu de crasher.
   `Level.findWithTag(tag)`, `Level.all()`, `Level.count(className)`, `Level.destroy(actor)`
 - `Input.pressed(action)`, `Input.held(action)`, `Input.released(action)`, `Input.axis(axis)`
 - `Engine.getTimeDilation()`, `Engine.setTimeDilation(v[, durée])`, `Engine.isPlaying()`
+- Joueurs : `Engine.createPlayer()`, `Engine.destroyPlayer(p)`, `Engine.getPlayer(i)`,
+  `Engine.players`, `Engine.playerCount`, `Engine.defaultPlayer`, `Engine.renderSize`
+- Widgets : `UI.create(path, player, classe)`, `UI.destroy(w)`, `UI.all()`, `UI.classes()`,
+  `UI.getDPIReference()`, `UI.setDPIReference(v)` ; `UserWidget` (classe de base)
 - `globalThis` est partagé par tous les scripts. Les promesses et `async` fonctionnent.
 
 ## Depuis le C++
@@ -335,3 +339,89 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 `SpriteActor` et `SoundActor` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
 `Level.spawn("PointLightActor")`, et une classe JS peut en hériter
 (`class Torch extends PointLightActor { ... }`).
+
+## Joueurs (PlayerController)
+
+Chaque joueur a son viewport (split-screen automatique). Le joueur 0 existe toujours.
+
+```js
+const p2 = Engine.createPlayer();            // détruit à la fin du jeu s'il est créé pendant
+p2.possess(Level.spawn("Hero"));             // l'ancien joueur de Hero le relâche
+p2.possessed;                                // acteur (ou null) ; alias : pawn
+p2.unpossess();
+p2.setViewTarget(Level.find("cam"));         // sa CameraComponent devient la vue de p2
+p2.setViewportSize(0, 0, 0.5, 1);            // fixe (normalisé) ; resetViewportSize() : auto
+p2.index; p2.id; p2.isDefault; p2.valid; p2.viewportRect;   // {x, y, width, height}
+p2.createWidget("ui/Hud.widget");            // = UI.create(path, p2)
+
+const hero = Level.find("h1");
+hero.controller;                             // PlayerController ou null
+hero.isPossessed;
+hero.autoPossessPlayer = 0;                  // = propriété auto_possess_player (-1 : non)
+hero.getComponent("Camera").activateFor(p2);
+```
+
+Dans une classe d'acteur (ou un script attaché) :
+
+```js
+class Hero extends Actor {
+    constructor() { super(); this.autoPossessPlayer = 0; }   // possédé au lancement du jeu
+    OnPossessed(player) { }
+    OnUnpossessed(player) { }
+    ProcessInput(player) {           // chaque frame de jeu, seulement quand il est possédé
+        if (Input.pressed("Jump")) this.Jump();
+    }
+}
+```
+
+## Widgets (UI)
+
+Les `.widget` se font dans le Widget Editor (voir `widgets/README.md`).
+
+```js
+const hud = UI.create("ui/Hud.widget", Engine.defaultPlayer);   // joueur : optionnel
+hud.addToViewport(10);                       // z-order ; removeFromParent() : retiré, réutilisable
+hud.find("Health").percent = 0.4;            // champs en camelCase, vus à la frame suivante
+hud.find("Title").set({ text: "Niveau 2", fontSize: 32, color: "#ffcc00" });
+hud.find("Pause").onClicked(() => Engine.setTimeDilation(0));
+hud.find("Volume").onValueChanged(v => print(v));
+hud.find("Mute").onCheckStateChanged(on => print(on));
+const id = btn.on("hovered", () => {}); btn.off("hovered", id);
+UI.destroy(hud);                             // ou hud.destroy()
+```
+
+- **Champs** : ceux du Widget Editor, en camelCase (`text`, `fontSize`, `percent`,
+  `renderOpacity`, `isEnabled`...). Enums en texte : `visibility = "Collapsed"`
+  (`Visible`, `Collapsed`, `Hidden`, `HitTestInvisible`, `SelfHitTestInvisible`),
+  `hAlign`, `vAlign`, `sizeRule`, `orientation`. Couleurs : `{r, g, b, a}`, `[r, g, b, a]`
+  ou `"#rrggbb(aa)"`. Marges : `{left, top, right, bottom}` ou `{x, y, z, w}`.
+- **Arbre** : `name`, `className`, `parent`, `children`, `childCount`, `root`, `find(nom)`,
+  `getChildAt(i)`, `userWidget`, `visible` (raccourci Visible / Collapsed), `hovered`,
+  `geometry`, `desiredSize`, `inViewport`, `owningPlayer` (modifiable), `valid`.
+- **Construire** : `panel.addChild("Button", { name, text, slot: { sizeRule: "Fill" } })`,
+  `insertChildAt(i, classe, options)`, `addChild("ui/Barre.widget")` (un autre widget),
+  `removeChild(w)`, `clearChildren()`, `w.removeFromParent()` (détruit un widget d'un arbre).
+- **Slot** : `w.slot.offsets`, `.anchorMin`, `.padding`... et pour un CanvasPanel
+  `w.slot.setPosition(x, y).setSize(w, h).setAnchors(minX, minY, maxX, maxY).setAlignment(x, y)`.
+- **Événements** : `onClicked`, `onPressed`, `onReleased`, `onHovered`, `onUnhovered` (Button),
+  `onValueChanged` (Slider), `onCheckStateChanged` (CheckBox). Appelés au début de la frame
+  suivante : on peut détruire n'importe quel widget dedans.
+- Un widget détruit : `valid` vaut `false`, l'utiliser lève une `ReferenceError`.
+
+### Classe de widget (Widget Blueprint en JS)
+
+```js
+// n'importe où dans assets/, comme les classes d'acteurs
+class MainMenu extends UserWidget {
+    Construct() {                            // l'arbre du .widget existe
+        this.find("Play").onClicked(() => this.removeFromParent());
+    }
+    Tick(dt) { }                             // chaque frame tant qu'il est à l'écran
+    Destruct() { }
+}
+```
+
+Dans le Widget Editor, mettre `MainMenu` dans *Class* (bouton *Copy JS class* : squelette
+avec les événements des widgets nommés) : `UI.create("ui/MainMenu.widget")` et
+`lynx::CreateWidget` en C++ créent alors un `MainMenu`. Sinon : `UI.create(path, player, MainMenu)`.
+`new MainMenu()` n'est pas possible (pas de constructeur : initialiser dans `Construct`).

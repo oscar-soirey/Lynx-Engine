@@ -48,7 +48,7 @@ add_library(Lynx SHARED
 		src/gameplay/Object.cpp
 		src/gameplay/Actor.cpp
 		src/gameplay/Input.cpp
-		#src/gameplay/PlayerController.cpp
+		src/gameplay/PlayerController.cpp
 		src/gameplay/Private/InputManager.cpp
 		src/gameplay/CameraShake.cpp
 		src/gameplay/AnimationSystem.cpp
@@ -67,11 +67,17 @@ add_library(Lynx SHARED
 		src/audio/AudioListener.cpp
 		src/audio/AudioSource.cpp
 
-		src/widgets/WidgetScene.cpp
+		src/widgets/Widget.cpp
+		src/widgets/Panels.cpp
+		src/widgets/CommonWidgets.cpp
+		src/widgets/UserWidget.cpp
+		src/widgets/WidgetSystem.cpp
 		src/widgets/WidgetContainers.cpp
+		src/widgets/WidgetScene.cpp
 
 		src/scripting/ScriptSystem.cpp
 		src/scripting/ComponentBindings.cpp
+		src/scripting/GameplayBindings.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -150,6 +156,8 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/NodeGraphTest.cpp
 		src/editor/EditorFonts.cpp
 		src/editor/ShipGame.cpp
+		src/editor/SplashScreen.cpp
+		src/editor/WidgetEditor.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp

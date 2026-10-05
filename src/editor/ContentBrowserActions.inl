@@ -31,6 +31,7 @@ namespace content_browser_actions
         JavaScriptScript,
         Level,
         Json,
+        Widget,
         Count,
     };
 
@@ -47,6 +48,7 @@ namespace content_browser_actions
         { "JavaScript script (attached)",        "NewScript", ".js"   },
         { "Level (.xml)",                        "NewLevel",  ".xml"  },
         { "JSON (.json)",                        "NewData",   ".json" },
+        { "Widget (.widget, UI)",                "NewWidget", ".widget" },
     };
 
     struct State
@@ -195,6 +197,9 @@ namespace content_browser_actions
         case NewFileKind::Json:
             return "{\n}\n";
 
+        case NewFileKind::Widget:
+            return lynx::editor::widget_editor::NewFileTemplate();
+
         default:
             return {};
         }
@@ -282,6 +287,8 @@ namespace content_browser_actions
 
         if (stdfs::is_directory(path, error))
             content_browser_current_path = path;
+        else if (lynx::editor::widget_editor::CanOpen(path))
+            lynx::editor::widget_editor::Open(path);
         else if (lynx::editor::script_editors::CanOpen(path))
             lynx::editor::script_editors::Open(path);
         else
@@ -358,6 +365,7 @@ namespace content_browser_actions
             }
 
             lynx::editor::script_editors::PathMoved(state.rename_target, destination);
+            lynx::editor::widget_editor::PathMoved(state.rename_target, destination);
 
             if (content_browser_current_path == state.rename_target)
                 content_browser_current_path = destination;
@@ -404,6 +412,10 @@ namespace content_browser_actions
         {
             ScriptsChanged({ destination });
             lynx::editor::script_editors::Open(destination);
+        }
+        else if (lynx::editor::widget_editor::CanOpen(destination))
+        {
+            lynx::editor::widget_editor::Open(destination);
         }
 
         return true;
@@ -484,6 +496,7 @@ namespace content_browser_actions
                       << " (kept in " << destination.generic_string() << ")\n";
 
             lynx::editor::script_editors::PathDeleted(target);
+            lynx::editor::widget_editor::PathDeleted(target);
 
             if (IsPathInside(content_browser_current_path, target))
                 content_browser_current_path = target.parent_path();
@@ -540,7 +553,10 @@ namespace content_browser_actions
                 stdfs::rename(source, destination, error);
 
                 if (!error)
+                {
                     lynx::editor::script_editors::PathMoved(source, destination);
+                    lynx::editor::widget_editor::PathMoved(source, destination);
+                }
             }
             else
             {

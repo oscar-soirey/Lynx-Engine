@@ -1126,6 +1126,9 @@ namespace lynx
 			// addComponent / getComponent... et les classes des composants
 			script_detail::RegisterComponentBindings(ctx, actor_proto);
 
+			// controller, autoPossessPlayer... (joueurs)
+			script_detail::RegisterGameplayBindings(ctx, actor_proto);
+
 			JS_SetClassProto(ctx, g_actor_class, actor_proto);
 		}
 
@@ -1167,6 +1170,9 @@ namespace lynx
 			JS_SetPropertyStr(ctx, global, "Engine", engine);
 
 			JS_FreeValue(ctx, global);
+
+			// Engine.createPlayer..., UI, UserWidget
+			script_detail::RegisterGameplayGlobals(ctx);
 		}
 
 
@@ -1846,6 +1852,7 @@ namespace lynx
 			// Rechargement : les anciennes classes ne sont plus visibles, sinon
 			// "class Boss extends Enemy" (Boss.js lu avant Enemy.js) heriterait
 			// de l'ancienne version d'Enemy.
+			script_detail::ForgetWidgetClasses(ctx);
 			{
 				JSValue global = JS_GetGlobalObject(ctx);
 
@@ -1944,6 +1951,8 @@ namespace lynx
 
 						if (IsActorClass(ctx, cls))
 							RegisterScriptClass(ctx, n, cls, file.path);
+						else if (script_detail::IsWidgetClassConstructor(ctx, cls))
+							script_detail::RegisterWidgetClass(ctx, n, cls, file.path);
 
 						JS_FreeValue(ctx, cls);
 					}
@@ -2481,6 +2490,9 @@ namespace lynx
 			// Fonctions JS gardees par les composants (evenements d'animation...).
 			script_detail::ShutdownComponentBindings(g->ctx);
 
+			// Joueurs, widgets, leurs callbacks et les classes de widgets.
+			script_detail::ShutdownGameplayBindings(g->ctx);
+
 			// Classes (constructeurs, prototypes)
 			FreeClassValues();
 			g->classes_loaded = false;
@@ -2698,7 +2710,7 @@ namespace lynx
 			std::string prelude =
 				"const __stub = new Proxy(function(){}, { get: (t, k) => k === Symbol.toPrimitive ? (() => 0) : __stub,"
 				" apply: () => __stub, construct: () => __stub });\n"
-				"for (const n of ['print','console','Level','Input','Engine','vec3','vec2','parent','Actor']) globalThis[n] = __stub;\n"
+				"for (const n of ['print','console','Level','Input','Engine','UI','vec3','vec2','parent','Actor']) globalThis[n] = __stub;\n"
 				"globalThis.Actor = class Actor {};\n";
 			for (const std::string& base : WordsAfter(code, "extends"))
 				prelude += "if (typeof globalThis['" + base + "'] !== 'function' || globalThis['" + base + "'] === __stub) "
@@ -2861,6 +2873,12 @@ namespace lynx::script_detail
 	JSContext* Context() { return g ? g->ctx : nullptr; }
 
 	JSValue ActorObject(JSContext* ctx, Actor* actor) { return ActorToJS(ctx, actor); }
+
+	JSValue CallActorFunction(JSContext* ctx, Actor* actor, const char* name, int argc, JSValueConst* argv, bool* found)
+	{
+		bool dummy = false;
+		return lynx::CallActorFunction(ctx, actor, name, argc, argv, found ? found : &dummy);
+	}
 
 	Actor* ActorFromJS(JSValueConst value) { return JSToActor(value); }
 

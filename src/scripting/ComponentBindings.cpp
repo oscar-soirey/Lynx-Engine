@@ -964,6 +964,12 @@ namespace lynx::script_detail
 				 .field("autoActivate", &CameraComponent::auto_activate)
 				 .get("active", [](JSContext* c, CameraComponent& t) { return ToJS(c, t.IsActive()); })
 				 .action("activate", [](CameraComponent& t) { t.Activate(); })
+				 .method("activateFor", 1, [](JSContext*, CameraComponent& t, Actor&, int argc, JSValueConst* argv) -> JSValue
+				 {
+					 // Vue de ce joueur (null : celui qui possede l'acteur).
+					 t.ActivateFor(argc > 0 ? PlayerFromJS(argv[0]) : nullptr);
+					 return JS_UNDEFINED;
+				 })
 				 .action("snap", [](CameraComponent& t) { t.SnapToTarget(); });
 			}
 

@@ -24,6 +24,7 @@
 #include "gameplay/Components.h"
 #include "gameplay/SpriteComponents.h"
 #include "gameplay/CameraComponent.h"
+#include "gameplay/PlayerController.h"
 #include "gameplay/BoxColliderComponent.h"
 #include "gameplay/SoundSourceComponent.h"
 #include "gameplay/LightComponent.h"
@@ -38,5 +39,7 @@
 #include "audio/AudioListener.h"
 #include "audio/Audio2D.h"
 
-#include "widgets/WidgetScene.h"
-#include "widgets/WidgetContainers.h"
+#include "widgets/Widget.h"
+#include "widgets/Panels.h"
+#include "widgets/CommonWidgets.h"
+#include "widgets/UserWidget.h"

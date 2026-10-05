@@ -8,8 +8,11 @@
  *     cam.follow_speed = 3.f;          // 0 = colle a l'acteur
  *
  * Au lancement du jeu (BeginPlay), une camera avec auto_activate devient la
- * camera de la vue. Activate() la choisit a tout moment ; la derniere activee
- * gagne. A l'arret du jeu, l'hote (editeur / runtime) reprend sa camera.
+ * vue du joueur qui possede l'acteur (PlayerController), ou du joueur par
+ * defaut si l'acteur n'est possede par personne. Un acteur possede pendant le
+ * jeu donne aussi sa camera au joueur. Activate() la choisit a tout moment ;
+ * la derniere activee gagne. A l'arret du jeu, l'hote (editeur / runtime)
+ * reprend sa camera.
  *
  * Si le jeu deplace deja sa camera avec LynxGame_UpdateGameplayCamera,
  * utiliser l'un ou l'autre (sinon la camera shake avance deux fois par frame).
@@ -21,6 +24,8 @@
 
 namespace lynx
 {
+	class PlayerController;
+
 	class LYNX_API CameraComponent : public Component
 	{
 	public:
@@ -46,8 +51,16 @@ namespace lynx
 		/** Devient la camera de la vue au lancement du jeu. */
 		bool auto_activate = true;
 
-		/** Cette camera devient celle de la vue. */
+		/**
+		 * Cette camera devient la vue du joueur qui possede l'acteur (joueur
+		 * par defaut si personne ne le possede).
+		 */
 		void Activate();
+
+		/** Cette camera devient la vue de `player` (nullptr = Activate()). */
+		void ActivateFor(PlayerController* player);
+
+		/** Vue d'au moins un joueur. */
 		bool IsActive() const;
 
 		/** Place la camera sur sa cible, sans lissage. */

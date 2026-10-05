@@ -2,6 +2,7 @@
 
 #include "Actor.h"
 #include "CameraShake.h"
+#include "PlayerController.h"
 #include "../core/Engine.h"
 
 #include <hrl/hrl.h>
@@ -23,7 +24,19 @@ namespace lynx
 			return cameras;
 		}
 
-		uint32_t g_active_camera = kInvalid;
+		// Les joueurs qui regardent `camera` reprennent leur camera par defaut.
+		void ReleaseViews(uint32_t camera)
+		{
+			Engine* engine = Engine::Get();
+			if (!engine || camera == kInvalid)
+				return;
+
+			for (PlayerController* player : engine->GetPlayers())
+			{
+				if (player && player->GetViewCamera() == camera)
+					player->SetViewCamera(kInvalid);
+			}
+		}
 	}
 
 	CameraComponent::CameraComponent() = default;
@@ -33,8 +46,9 @@ namespace lynx
 		if (camera_ == kInvalid)
 			return;
 
-		if (g_active_camera == camera_)
-			g_active_camera = kInvalid;
+		// La camera est reutilisee par un autre composant : aucun joueur ne
+		// doit continuer a la regarder.
+		ReleaseViews(camera_);
 
 		FreeCameras().push_back(camera_);
 	}
@@ -102,16 +116,39 @@ namespace lynx
 
 	void CameraComponent::Activate()
 	{
-		if (!EnsureCamera())
+		ActivateFor(nullptr);
+	}
+
+	void CameraComponent::ActivateFor(PlayerController* player)
+	{
+		if (!player)
+		{
+			Actor* owner = GetOwner();
+			player = owner ? owner->GetController() : nullptr;
+		}
+
+		// Acteur possede par personne : joueur par defaut (comportement
+		// d'avant les PlayerController).
+		if (!player && Engine::Get())
+			player = Engine::Get()->GetDefaultPlayer();
+
+		if (!player || !EnsureCamera())
 			return;
 
-		HRL_SetViewportCamera(GetViewport(), camera_);
-		g_active_camera = camera_;
+		player->SetViewCamera(camera_);
 	}
 
 	bool CameraComponent::IsActive() const
 	{
-		return camera_ != kInvalid && g_active_camera == camera_;
+		if (camera_ == kInvalid || !Engine::Get())
+			return false;
+
+		for (const PlayerController* player : Engine::Get()->GetPlayers())
+		{
+			if (player && player->GetViewCamera() == camera_)
+				return true;
+		}
+		return false;
 	}
 
 	void CameraComponent::BeginPlay()
@@ -125,9 +162,9 @@ namespace lynx
 	void CameraComponent::EndPlay()
 	{
 		// La vue est rendue a l'hote (editeur / runtime) : il change lui-meme
-		// la camera de la vue, on oublie seulement l'etat actif.
-		if (IsActive())
-			g_active_camera = kInvalid;
+		// la camera du joueur par defaut. Les joueurs qui la regardent encore
+		// reprennent leur camera par defaut.
+		ReleaseViews(camera_);
 	}
 
 	void CameraComponent::Update(float)

@@ -1,15 +1,11 @@
-un systeme de possession, avec player controller qui decrit un viewport hrl et qui possede un Actor*
-
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
 
 node editor pour les animations et les IA (jumelés avec le javascript)
 
-gestion de la musique pour les jeux open world
+editeur d'animations (pour visualiser, ajouter des events a certains endroits par exemple)
 
-widget editor type unreal
+gestion de la musique pour les jeux open world
 
 editeur graphique de json
 
-compiler les libs en release
-
-pouvoir choisir l'icone de l'executable dans ship game
+collisions qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript

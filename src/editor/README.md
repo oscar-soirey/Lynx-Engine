@@ -226,3 +226,41 @@ elle utilise le `lynx.dll` déjà chargé par l'éditeur.
 
 Police de l'éditeur : `normal-font.ttf` à côté de `LynxEditor.exe` si présent,
 sinon celle du projet (`assets/normal-font.ttf`), sinon celle d'ImGui.
+
+## Ship Game : moteur Release et icône
+
+- `build-release.bat` (à la racine du moteur, à côté de `build.bat`) compile le
+  moteur en **Release** dans `build-release\` (même générateur CMake que
+  `build\`). Ship Game prend alors `LynxRuntime.exe` et les DLL du moteur dans
+  ce dossier (choix *Release* / *Editor build* dans la fenêtre). Si la Release
+  est plus ancienne que le moteur de l'éditeur, la fenêtre le signale : relancer
+  `build-release.bat`.
+- **Icon** : un `.ico` (utilisé tel quel) ou une image (png, jpg, bmp, tga),
+  convertie en 16 à 256 px. Elle est écrite dans les ressources de l'exécutable
+  sous le nom `GLFW_ICON` : l'Explorateur, la barre des tâches et la fenêtre du
+  jeu l'utilisent. Par défaut : `assets/icon.png` du projet.
+- Les réglages de Ship Game sont gardés par projet dans `.lynx/ship.cfg`.
+
+## Widget Editor (UI, type UMG d'Unreal)
+
+Content Browser > clic droit > *New file* > **Widget (.widget, UI)**, puis
+double-clic sur le fichier. La fenêtre s'ouvre à côté du Viewport :
+
+- **Palette** : glisser un widget sur le Designer ou dans la Hierarchy
+  (double-clic : dans le panel sélectionné). *User Widgets* : les autres
+  `.widget` du projet, utilisables comme un widget.
+- **Hierarchy** : glisser pour déplacer / changer de parent ; clic droit :
+  Rename, Duplicate, Copy / Paste, Wrap With (un panel), Move Up / Down, Delete.
+- **Designer** : clic = sélection, glisser = déplacer (enfants d'un
+  CanvasPanel), poignées = redimensionner, molette = zoom, clic droit / milieu
+  = déplacer la vue, F = tout voir. Résolution d'aperçu dans la barre d'outils
+  (la mise en page suit le DPI scale comme en jeu). Snap à la grille.
+- **Details** : le slot du widget (ancres avec presets 4 x 4 : Shift = aussi
+  l'alignement, Ctrl = aussi la position), puis ses champs. Sans sélection :
+  la classe C++ du widget et *Copy C++ class* (squelette avec un pointeur par
+  widget nommé).
+- Raccourcis : Ctrl+S, Ctrl+Z / Ctrl+Y, Suppr, Ctrl+D, F2, Ctrl+C / Ctrl+V,
+  flèches (Shift : pas de la grille).
+
+La mise en page est calculée par le même code que le jeu (`lynx::UserWidget`) ;
+l'aspect est dessiné par l'éditeur, proche du rendu HRL sans être identique.

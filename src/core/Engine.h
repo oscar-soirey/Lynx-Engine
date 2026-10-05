@@ -7,10 +7,13 @@
 
 #include "Common.h"
 #include "Factory.h"
+#include "data/EventDispatcher.h"
 
 namespace lynx
 {
 	class Level;
+	class Actor;
+	class PlayerController;
 
 	// The window (and GLFW) are owned by the host application (Main.cpp), never
 	// by lynx.dll. Kept as an opaque forward declaration for SetWindowHandle().
@@ -24,6 +27,8 @@ namespace lynx
 	//   ... HRL_Init + HRL_InitContext ...
 	//   lynx::Engine::Get()->CreateScene();   // the HRL scene, owned by the engine
 	//   lynx::Engine::GetScene();             // anywhere after that
+	//   lynx::Engine::Get()->GetDefaultPlayer()->GetViewportBackend();
+	//                                         // the viewport to render (player 0)
 	//   ...
 	//   lynx::Engine::Destroy();
 	//
@@ -78,6 +83,53 @@ namespace lynx
 
 		void SetWindowHandle(LynxWindow* win);
 
+		/** true between StartGame() and EndGame(). */
+		bool IsGameRunning() const { return game_tick_enabled_; }
+
+		/**
+		 * Size of the render target in pixels (window, or the image of the
+		 * editor viewport). Hosts call it on every resize : it resizes the
+		 * renderer and the widgets (DPI scale) follow.
+		 */
+		void SetRenderSize(int width, int height);
+		void GetRenderSize(int& width, int& height) const;
+
+
+		// ---------------------------------------------------------------------
+		// Local players (see gameplay/PlayerController.h)
+		// ---------------------------------------------------------------------
+		// Player 0 (default player) exists from Create() and can not be
+		// destroyed. Each player owns its HRL viewport (created with the scene)
+		// and the viewports share the screen automatically (split-screen).
+
+		/** New local player (its viewport is created now if the scene exists). */
+		PlayerController* CreatePlayer();
+
+		/**
+		 * Unpossesses and deletes `player` (`player` is dangling afterwards).
+		 * false : not a player of this engine, or the default player.
+		 */
+		bool DestroyPlayer(PlayerController* player);
+
+		/** nullptr if `index` is out of range. */
+		PlayerController* GetPlayer(int index) const;
+		PlayerController* GetDefaultPlayer() const;
+		int GetPlayerCount() const;
+		const std::vector<PlayerController*>& GetPlayers() const;
+
+		/** Player that possesses `actor` (nullptr = none). */
+		PlayerController* GetPlayerOf(const Actor* actor) const;
+
+		/**
+		 * Lays out the viewports of the players without a custom size :
+		 * 1 = full screen, 2 = top / bottom, 3 = top + two halves at the
+		 * bottom, 4 = quarters, more = grid. Called automatically.
+		 */
+		void UpdatePlayerViewports();
+
+		/** Called with each new player (ex : the host adds its post process). */
+		HEventDispatcher<PlayerController*> ED_player_created;
+
 
 		FactoryObject& GetFactory();
 
@@ -102,6 +154,15 @@ namespace lynx
 
 		//factory
 		FactoryObject factory_{};
+
+		//local players (owned ; [0] = default player)
+		std::vector<PlayerController*> players_;
+		int next_player_id_ = 0;
+
+		// Actor::auto_possess_player of the actors not handled yet.
+		void ProcessAutoPossess();
+		// Every player releases its actor (before the actors are destroyed).
+		void UnpossessAll();
 
 
 		//Can be nullptr if game is not rendered by LynxWindow
@@ -128,7 +189,12 @@ namespace lynx
 	[[deprecated("use lynx::Engine::GetScene()")]]
 	inline uint32_t GetScene() { return Engine::GetScene(); }
 
+	// Each PlayerController owns its viewport now : the host does not create
+	// one anymore. Kept for old code, does nothing.
+	[[deprecated("the viewports belong to the PlayerControllers (Engine::GetDefaultPlayer())")]]
 	LYNX_API void SetViewportID(uint32_t id);
+
+	// Viewport of the default player (player 0).
 	LYNX_API uint32_t GetViewport();
 
 	//Utility functions
