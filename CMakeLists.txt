@@ -232,19 +232,19 @@ target_link_libraries(LynxRuntime PRIVATE
 )
 
 
-## Lynx Launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models,
-## then the engine versions from the GitHub releases, see Launcher/README.md)
+## Lynx launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models,
+## then the engine versions from the GitHub releases, see launcher/README.md)
 # Independent from lynx.dll : it must start on a computer where nothing is installed yet.
 
 add_executable(LynxLauncher src/icon.rc
 		${ImGUI_SOURCE}
 
-		Launcher/main.cpp
-		Launcher/Launcher.cpp
-		Launcher/Dependencies.cpp
-		Launcher/Models.cpp
-		Launcher/Engine.cpp
-		Launcher/Process.cpp
+		launcher/main.cpp
+		launcher/Launcher.cpp
+		launcher/Dependencies.cpp
+		launcher/Models.cpp
+		launcher/Engine.cpp
+		launcher/Process.cpp
 )
 
 target_link_libraries(LynxLauncher PRIVATE

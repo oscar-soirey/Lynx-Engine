@@ -90,7 +90,7 @@ int main(int, char**)
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	GLFWwindow* window = glfwCreateWindow(1440, 900, "Lynx Launcher", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(1440, 900, "Lynx launcher", nullptr, nullptr);
 	if (!window)
 	{
 		glfwTerminate();

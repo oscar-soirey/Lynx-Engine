@@ -9,3 +9,5 @@ gestion de la musique pour les jeux open world
 editeur graphique de json
 
 collisions qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
+
+plugins comme dans Horizon-Next

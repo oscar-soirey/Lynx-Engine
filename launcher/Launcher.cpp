@@ -425,7 +425,7 @@ void Launcher::DrawSidebar()
 	ImGui::PushFont(nullptr, style.FontSizeBase * 1.8f);
 	ImGui::TextColored(kAccent, "LYNX");
 	ImGui::PopFont();
-	ImGui::TextColored(kMuted, "Launcher");
+	ImGui::TextColored(kMuted, "launcher");
 	ImGui::Dummy(ImVec2(0, pad));
 
 	const float row = ImGui::GetFrameHeight() * 1.3f;
