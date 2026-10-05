@@ -98,6 +98,7 @@ struct EditorWindowVisibility
     bool cameraShake = true;
     bool inputSettings = false;
     bool commands = false;
+    bool git = false;
 };
 
 static EditorWindowVisibility editorWindows;
@@ -131,6 +132,10 @@ static void LoadEditorWindowVisibility()
     int commands = 0;
     if (file >> commands)
         editorWindows.commands = commands != 0;
+
+    int git = 0;
+    if (file >> git)
+        editorWindows.git = git != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -147,7 +152,8 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.config ? 1 : 0) << ' '
          << (editorWindows.cameraShake ? 1 : 0) << ' '
          << (editorWindows.inputSettings ? 1 : 0) << ' '
-         << (editorWindows.commands ? 1 : 0) << '\n';
+         << (editorWindows.commands ? 1 : 0) << ' '
+         << (editorWindows.git ? 1 : 0) << '\n';
 }
 
 static bool EditorWindowCheckbox(const char* label, bool* value)
@@ -1152,7 +1158,6 @@ static lynx::Actor* RestoreActorSnapshot(
         return nullptr;
 
     actor->object_id_ = snapshot.object_id;
-    actor->transform = snapshot.transform;
 
     auto& properties = actor->GetProperties();
 
@@ -1163,6 +1168,11 @@ static lynx::Actor* RestoreActorSnapshot(
         if (it != properties.end())
             ApplyEditorProperty(it->second, value);
     }
+
+    // After the properties : "transform" is one of them, with the location of
+    // the CAPTURE. snapshot.transform wins (actor.duplicate puts its offset
+    // there ; before, the copy came back on top of the original).
+    actor->transform = snapshot.transform;
 
     return actor;
 }
@@ -1635,7 +1645,7 @@ void PlaceActorsWindow(lynx::Level* level)
     ImGui::Separator();
 
     auto* factory =
-        lynx::GetEngine()
+        lynx::Engine::Get()
             ->GetFactory()
             .GetInternalFactory();
 
@@ -1802,6 +1812,10 @@ static std::filesystem::path content_browser_root =
 
 static std::filesystem::path content_browser_current_path =
     std::filesystem::path("assets");
+
+// The Content Browser had the keyboard focus (last frame) : its Del / F2 /
+// Ctrl+C... act on files, not on the selected actor.
+static bool content_browser_focused = false;
 
 struct PendingExplorerDrop
 {
@@ -2613,12 +2627,25 @@ static void DrawJavaScriptEditorWindow()
 }
 
 
+// Right click menus, rename / duplicate / delete / new file... of the browser.
+#include "ContentBrowserActions.inl"
+
+// Git window (status, commit, pull / push, history).
+#include "GitWindow.inl"
+
 static void DrawContentBrowser(lynx::Level* level)
 {
+    namespace cba = content_browser_actions;
+
+    content_browser_focused = false;
+
     if (!level)
         return;
 
     ImGui::Begin("Content Browser");
+
+    content_browser_focused =
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     ImGui::SetWindowFontScale(0.62f);
 
     const ImVec2 window_pos =
@@ -2793,6 +2820,7 @@ static void DrawContentBrowser(lynx::Level* level)
 
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
+        const bool selected = cba::state.selected == entry.path();
 
         // Directly open JavaScript files with a double-click. A single click
         // keeps the existing behaviour for folders, and files remain usable
@@ -2840,11 +2868,12 @@ static void DrawContentBrowser(lynx::Level* level)
         draw_list->AddRect(
             cell_min,
             cell_max,
-            hovered ? IM_COL32(120, 120, 120, 255)
-                    : IM_COL32(70, 70, 70, 255),
+            selected ? IM_COL32(90, 155, 235, 255) :
+            hovered  ? IM_COL32(120, 120, 120, 255)
+                     : IM_COL32(70, 70, 70, 255),
             6.f,
             0,
-            1.f
+            selected ? 2.f : 1.f
         );
 
         // Thumbnail / asset icon.
@@ -2968,6 +2997,8 @@ static void DrawContentBrowser(lynx::Level* level)
 
         if (clicked && is_directory)
             content_browser_current_path = entry.path();
+        else if (clicked)
+            cba::state.selected = entry.path();
 
         if (!is_directory &&
             ImGui::BeginDragDropSource(
@@ -2986,6 +3017,9 @@ static void DrawContentBrowser(lynx::Level* level)
             ImGui::EndDragDropSource();
         }
 
+        // Right click : open, rename, duplicate, copy / cut, delete...
+        cba::ItemContextMenu(entry);
+
         ImGui::PopID();
 
         ++column;
@@ -2995,7 +3029,12 @@ static void DrawContentBrowser(lynx::Level* level)
     }
 
     if (entries.empty())
-        ImGui::TextDisabled("Empty folder");
+        ImGui::TextDisabled("Empty folder  (right click : new folder / new file)");
+
+    // Right click on the empty area, keyboard shortcuts, popups.
+    cba::BackgroundContextMenu();
+    cba::Shortcuts();
+    cba::Popups();
 
     ImGui::SetWindowFontScale(0.8f);
     ImGui::End();
@@ -4653,6 +4692,7 @@ static void DrawToolbar()
             EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake);
             EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings);
             EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands);
+            EditorWindowCheckbox("Git", &editorWindows.git);
             ImGui::Separator();
             ImGui::TextDisabled("All editor windows are hidden during Play.");
             ImGui::EndPopup();
@@ -6087,6 +6127,7 @@ namespace editor
         if (!isPlaying &&
             editing_actor &&
             !io.WantTextInput &&
+            !content_browser_focused &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
@@ -7586,6 +7627,16 @@ namespace editor
                 SaveEditorWindowVisibility();
         }
 
+        // Git (version control of the project folder).
+        {
+            const bool was_open = editorWindows.git;
+
+            git_window::Draw(&editorWindows.git, editor_dirty, []() { SaveEditor(); });
+
+            if (was_open != editorWindows.git)
+                SaveEditorWindowVisibility();
+        }
+
 // Level drag & drop
         // --------------------------------------------------------
 
@@ -8120,8 +8171,9 @@ int main(int argc, char** argv)
 
     // The engine reads "assets/" from the working directory : create it only
     // once we are in the project.
+    // Release mode (packed assets) : lynx::Engine::SetReleaseMode(true) before.
     lynx::Engine* engine =
-        lynx::CreateEngine("", false);
+        lynx::Engine::Create();
 
     // The game module is owned through a pointer so the editor can unload it and
     // load it again (toolbar "Reload Game"). Destroying it (reset / destructor)
@@ -8357,10 +8409,10 @@ int main(int argc, char** argv)
     );
 
 
+    // The scene belongs to the engine (Engine::GetScene()) : it needs the
+    // HRL context, created just above.
     scene =
-        HRL_CreateScene(false);
-
-    lynx::SetSceneID(scene);
+        engine->CreateScene();
 
 
     HRL_id gameplay_cam =
@@ -8902,6 +8954,7 @@ int main(int argc, char** argv)
         // --------------------------------------------------------
 
         lynx::editor::commands_window::Update();
+        git_window::Update();
         lynx::editor::command_server::Poll();
 
 
@@ -9042,6 +9095,8 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
 
     lynx::editor::game_build::Shutdown();
+    lynx::editor::commands_window::Shutdown();
+    git_window::Shutdown();
     lynx::editor::script_runner::Shutdown();
     lynx::editor::command_server::Stop();
 
@@ -9053,7 +9108,7 @@ int main(int argc, char** argv)
     gameHooks.Clear();
     gameModule.reset();
 
-    delete lynx::GetEngine();
+    lynx::Engine::Destroy();
 
     editor::Shutdown();
 

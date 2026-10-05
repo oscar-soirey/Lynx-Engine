@@ -110,7 +110,7 @@ namespace lynx
 			std::vector<std::string> native_names;
 			std::unordered_map<std::string, JSValue> native_ctors;
 
-			// Classes de script (assets/classes/) : nom -> constructeur
+			// Classes de script (.js de assets/, tout dossier) : nom -> constructeur
 			struct ScriptClass
 			{
 				JSValue ctor = JS_UNDEFINED;
@@ -786,7 +786,7 @@ namespace lynx
 			Actor* a = JSToActor(this_val);
 			if (!a)
 				return JS_UNDEFINED; // deja detruit : rien a faire
-			if (Level* level = GetEngine() ? GetEngine()->GetCurrentLevel() : nullptr)
+			if (Level* level = Engine::Get() ? Engine::Get()->GetCurrentLevel() : nullptr)
 				level->DestroyActor(a);
 			return JS_UNDEFINED;
 		}
@@ -892,7 +892,7 @@ namespace lynx
 
 		Level* CurrentLevel()
 		{
-			return GetEngine() ? GetEngine()->GetCurrentLevel() : nullptr;
+			return Engine::Get() ? Engine::Get()->GetCurrentLevel() : nullptr;
 		}
 
 		// Level.spawn("ClassName", {position, rotation, scale} | {x,y,z})
@@ -1002,7 +1002,7 @@ namespace lynx
 
 		JSValue EngineGetTimeDilation(JSContext* ctx, JSValueConst, int, JSValueConst*)
 		{
-			return JS_NewFloat64(ctx, GetEngine() ? GetEngine()->GetGlobalTimeDilatation() : 1.0);
+			return JS_NewFloat64(ctx, Engine::Get() ? Engine::Get()->GetGlobalTimeDilatation() : 1.0);
 		}
 
 		// Engine.setTimeDilation(value) ou Engine.setTimeDilation(value, duree)
@@ -1011,7 +1011,7 @@ namespace lynx
 			double v = 1, dur = 0;
 			if (JS_ToFloat64(ctx, &v, argv[0])) return JS_EXCEPTION;
 			if (argc > 1 && JS_ToFloat64(ctx, &dur, argv[1])) return JS_EXCEPTION;
-			if (Engine* e = GetEngine())
+			if (Engine* e = Engine::Get())
 			{
 				if (argc > 1)
 					e->SetGlobalTimeDilatation(static_cast<float>(v), static_cast<float>(dur));
@@ -1175,7 +1175,7 @@ namespace lynx
 		//  - Actor, et chaque classe C++ de la factory (Pawn...), est un
 		//    constructeur JS. new Player() cree l'acteur C++ de la classe C++
 		//    la plus proche, avec Player.prototype comme prototype.
-		//  - Les fichiers de assets/classes/ sont charges avant chaque niveau ;
+		//  - Les .js de assets/ (tous les dossiers) qui declarent une classe sont charges avant chaque niveau ;
 		//    leurs classes rejoignent la factory (niveaux, Level.spawn, editeur).
 		//  - BeginPlay / Update(dt) / EndPlay de la classe sont appeles par un
 		//    composant interne (ScriptClassComponent).
@@ -1518,7 +1518,7 @@ namespace lynx
 			if (native == "Actor")
 				return new Actor();
 
-			Engine* engine = GetEngine();
+			Engine* engine = Engine::Get();
 			if (!engine)
 				return nullptr;
 
@@ -1705,7 +1705,7 @@ namespace lynx
 		/** Constructeurs JS des classes C++ de la factory (Pawn, Mushroom...). */
 		void EnsureNativeClassGlobals()
 		{
-			Engine* engine = GetEngine();
+			Engine* engine = Engine::Get();
 			if (!engine || !engine->GetFactory().GetInternalFactory())
 				return;
 
@@ -1753,7 +1753,7 @@ namespace lynx
 
 		void RegisterScriptClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file)
 		{
-			Engine* engine = GetEngine();
+			Engine* engine = Engine::Get();
 
 			// Une classe C++ porte deja ce nom : la factory ne peut en avoir qu'une.
 			const bool cpp_exists =
@@ -1859,15 +1859,34 @@ namespace lynx
 			struct Pending
 			{
 				std::string path;
+				std::string code;
+				std::vector<std::string> names;
 				std::string error;
 			};
 
 			std::vector<Pending> pending;
 
-			for (const std::string& path : fs::ListFiles("classes", true))
+			// Every .js of assets/ (any folder, not only classes/). Only the
+			// files that declare "class X extends ..." are evaluated here : the
+			// attached scripts (BeginPlay / Update + parent) are left alone.
+			for (const std::string& path : fs::ListFiles("", true))
 			{
-				if (path.size() > 3 && path.compare(path.size() - 3, 3, ".js") == 0)
-					pending.push_back({path, {}});
+				if (path.size() <= 3 || path.compare(path.size() - 3, 3, ".js") != 0)
+					continue;
+
+				const auto data = fs::ReadBinary(path);
+				size_t skip = 0;
+
+				if (data.size() >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+					skip = 3;
+
+				Pending file;
+				file.path = path;
+				file.code.assign(reinterpret_cast<const char*>(data.data()) + skip, data.size() - skip);
+				file.names = DeclaredClasses(file.code);
+
+				if (!file.names.empty())
+					pending.push_back(std::move(file));
 			}
 
 			// Plusieurs passes : un fichier qui herite d'une classe d'un autre
@@ -1881,14 +1900,8 @@ namespace lynx
 
 				for (Pending& file : pending)
 				{
-					const auto data = fs::ReadBinary(file.path);
-					size_t skip = 0;
-
-					if (data.size() >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
-						skip = 3;
-
-					const std::string code(reinterpret_cast<const char*>(data.data()) + skip, data.size() - skip);
-					const std::vector<std::string> names = DeclaredClasses(code);
+					const std::string& code = file.code;
+					const std::vector<std::string>& names = file.names;
 
 					std::string wrapped = "(function () {\n" + code + "\n;return {";
 

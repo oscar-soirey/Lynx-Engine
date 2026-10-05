@@ -356,7 +356,7 @@ namespace lynx::voxels
 
 	uint8_t GetTypeAt(int voxel_x, int voxel_y)
 	{
-		return static_cast<uint8_t>(HRL_GetVoxelType(GetScene(), voxel_x, voxel_y));
+		return static_cast<uint8_t>(HRL_GetVoxelType(Engine::GetScene(), voxel_x, voxel_y));
 	}
 
 
@@ -371,7 +371,7 @@ namespace lynx::voxels
 		float voxel_x = 0.f;
 		float voxel_y = 0.f;
 
-		if (HRL_WorldToVoxelCoordinates(GetScene(), world_x, world_y, &voxel_x, &voxel_y) != HRL_TRUE)
+		if (HRL_WorldToVoxelCoordinates(Engine::GetScene(), world_x, world_y, &voxel_x, &voxel_y) != HRL_TRUE)
 			return 0;
 
 		return GetFlagsAt(

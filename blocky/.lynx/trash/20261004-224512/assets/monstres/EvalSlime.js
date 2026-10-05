@@ -1,0 +1,2 @@
+class EvalSlime extends EvalEnemy {
+}

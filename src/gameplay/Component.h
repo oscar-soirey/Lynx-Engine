@@ -14,7 +14,7 @@
  *         void Tick(float dt) override
  *         {
  *             if (hp <= 0.f)
- *                 lynx::GetEngine()->GetCurrentLevel()->DestroyActor(GetOwner());
+ *                 lynx::Engine::Get()->GetCurrentLevel()->DestroyActor(GetOwner());
  *         }
  *     };
  *

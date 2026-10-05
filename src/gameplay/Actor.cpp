@@ -177,7 +177,7 @@ namespace lynx
 			std::vector<Actor*> out;
 			std::unordered_set<Actor*> seen;
 
-			Level* level = GetEngine() ? GetEngine()->GetCurrentLevel() : nullptr;
+			Level* level = Engine::Get() ? Engine::Get()->GetCurrentLevel() : nullptr;
 			if (level)
 			{
 				for (Actor* a : level->GetActors())

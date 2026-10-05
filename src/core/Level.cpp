@@ -130,7 +130,7 @@ namespace lynx
 	Actor* Level::SpawnActor(const char* _className)
 	{
 		// .value() sur un optional vide leve une exception : on teste d'abord.
-		auto constructor = lynx::GetEngine()->GetFactory().GetObjectConstr(_className);
+		auto constructor = lynx::Engine::Get()->GetFactory().GetObjectConstr(_className);
 		if (!constructor.has_value() || !constructor.value())
 		{
 			printf("Class: %s not found\n", _className);
@@ -147,7 +147,7 @@ namespace lynx
 		}
 
 		//act->backend_scene_id_ = GetEngineHRL_SceneID();
-		act->engine_internal_ = lynx::GetEngine();
+		act->engine_internal_ = lynx::Engine::Get();
 		act->Init();
 		AddActor(act);
 
@@ -164,7 +164,7 @@ namespace lynx
 		if (!actor)
 			return;
 
-		actor->engine_internal_ = lynx::GetEngine();
+		actor->engine_internal_ = lynx::Engine::Get();
 		actor->Init();
 		AddActor(actor);
 	}

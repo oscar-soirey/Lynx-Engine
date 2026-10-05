@@ -89,6 +89,22 @@ Erreurs : `lynx.LynxError` (acteur inconnu, mauvais paramètre…).
 `actor_spawn`…). L'onglet *Commands > AI / MCP* affiche la configuration exacte
 à copier.
 
+## IA locale dans l'éditeur
+
+L'onglet *Commands > Local AI* peut envoyer une demande à un modèle local servi
+par Ollama. Installe Ollama puis télécharge au moins un modèle, par exemple :
+
+```powershell
+ollama pull qwen2.5-coder:7b
+```
+
+L'éditeur détecte les modèles installés via Ollama sur `http://localhost:11434`.
+Le chat reçoit la référence des commandes de l'éditeur et demande au modèle un
+script Python utilisant `lynx_editor`. Le code généré apparaît dans l'éditeur
+de script et peut être modifié. Le bouton *Save and run Python output* écrit
+`commands/ai_output.py` dans le projet puis le lance avec le Python configuré
+dans l'onglet *Scripts*. Le script n'est pas lancé automatiquement.
+
 **Claude Desktop** (`claude_desktop_config.json`) :
 
 ```json

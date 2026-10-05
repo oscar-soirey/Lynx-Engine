@@ -18,10 +18,13 @@
 
 namespace lynx
 {
-	Engine::Engine(const char *config_file, bool release)
+	Engine* Engine::instance_ = nullptr;
+	bool Engine::release_mode_ = false;
+
+	Engine::Engine()
 	{
 		fs::AssetSource asset_src = fs::AssetSource::Directory;
-		if (release) asset_src = fs::AssetSource::Archive;
+		if (release_mode_) asset_src = fs::AssetSource::Archive;
 		fs::Init(asset_src);
 		InitializeAudio();
 		scripting::Init();
@@ -34,7 +37,10 @@ namespace lynx
 		// apres le niveau : les acteurs detruits liberent leurs scripts
 		scripting::Shutdown();
 		ShutdownAudio();
+		// frees every HRL object, the scene too
 		HRL_Shutdown();
+		scene_ = HRL_INVALID_ID;
+		scene_created_ = false;
 	}
 
 	void Engine::ProgressOneFrame(float dt)
@@ -182,7 +188,7 @@ namespace lynx
 
 	Level* Engine::CreateLevel(const char *file_name)
 	{
-		// Classes JavaScript (assets/classes/) : dans la factory avant le chargement.
+		// Classes JavaScript (tous les .js de assets/ qui declarent une classe) : dans la factory avant le chargement.
 		scripting::PrepareClasses();
 
 		current_level_ = new Level();
@@ -211,26 +217,53 @@ namespace lynx
 
 
 
-	static Engine* engine_;
-	Engine *CreateEngine(const char* config_file, bool release)
+	// ------------------------------------------------------------------
+	// Singleton
+	// ------------------------------------------------------------------
+
+	void Engine::SetReleaseMode(bool release)
 	{
-		engine_ = new Engine(config_file, release);
-		return engine_;
-	}
-	Engine* GetEngine()
-	{
-		return engine_;
+		release_mode_ = release;
 	}
 
-
-	static uint32_t scene_id_;
-	void SetSceneID(uint32_t id)
+	bool Engine::IsReleaseMode()
 	{
-		scene_id_ = id;
+		return release_mode_;
 	}
-	uint32_t GetScene()
+
+	Engine* Engine::Create()
 	{
-		return scene_id_;
+		if (!instance_)
+			instance_ = new Engine();
+		return instance_;
+	}
+
+	Engine* Engine::Get()
+	{
+		return instance_;
+	}
+
+	void Engine::Destroy()
+	{
+		// instance_ stays valid during the destructor : the level / scripts
+		// destroyed there may still call Engine::Get().
+		delete instance_;
+		instance_ = nullptr;
+	}
+
+	uint32_t Engine::CreateScene()
+	{
+		if (!scene_created_)
+		{
+			scene_ = HRL_CreateScene(false);
+			scene_created_ = true;
+		}
+		return scene_;
+	}
+
+	uint32_t Engine::GetScene()
+	{
+		return instance_ ? instance_->scene_ : HRL_INVALID_ID;
 	}
 
 	static uint32_t viewport_id_;

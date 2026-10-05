@@ -68,13 +68,58 @@ cause (DLL du jeu ou moteur) au lieu de fermer sans rien dire.
 ## Commandes (Python / IA)
 
 Fenêtre *Windows > Commands (Python / AI)* : scripts Python du projet
-(`<projet>/commands/*.py`), console de commandes, référence de toutes les
-commandes, et configuration MCP pour brancher un modèle d'IA. L'éditeur écoute
+(`<projet>/commands/*.py`), **Lynxie** (assistant IA local via Ollama : il reçoit l'état
+de la scène à chaque message et génère un script Python à relire puis lancer), console
+de commandes, référence de toutes les commandes, et configuration MCP pour brancher un
+modèle d'IA. L'éditeur écoute
 sur `127.0.0.1` (port 7420 ou suivant) ; la connexion est décrite dans
 `<projet>/.lynx/editor.json`. Détails : `python/README.md` (à la racine du moteur).
 
 Code : `editor/commands/` (registre, serveur, runner Python, fenêtre) et
 `editor/EditorCommands.inl` (les commandes elles-mêmes).
+
+## Lynxie (assistant IA local)
+
+Onglet *Lynxie* de la fenêtre Commands : le modèle (Ollama) reçoit à chaque message
+l'état de la scène (acteurs, cellules, cibles probables avec leurs propriétés, types
+de voxels), écrit un script Python, *Save and run* le lance.
+
+- **Auto-fix errors** (coché par défaut) : si le script échoue, ses changements sont
+  annulés, la sortie d'erreur est renvoyée au modèle, et le script corrigé est relancé
+  (2 à 5 essais). Le contexte est toujours reconstruit pour la demande d'origine.
+- Commandes `ai.context` (le prompt exact pour une demande) et `ai.fix_message` :
+  utilisées par l'évaluation (`python/lynxie_eval/`, voir son README).
+
+## Content Browser
+
+Clic droit sur un élément : *Open*, *Rename* (F2), *Duplicate* (Ctrl+D), *Copy* (Ctrl+C),
+*Cut* (Ctrl+X), *Paste into* (dossiers), *Copy path*, *Show in Explorer*, *Delete* (Suppr).
+Clic droit dans le vide : *New folder*, *New file* (texte, classe JavaScript, script
+JavaScript attaché, niveau `.xml`, JSON), *Paste* (Ctrl+V), *Open in Explorer*.
+Un clic sélectionne un fichier ; Entrée l'ouvre.
+
+- Les fichiers supprimés sont **déplacés** dans `.lynx/trash/<date>/` (récupérables).
+- Une nouvelle classe JS a un modèle prêt (`class NewActor extends Actor`) et s'ouvre dans
+  l'éditeur JavaScript ; dupliquer `Enemy.js` renomme la classe de la copie (`Enemy_1`).
+- Après une opération sur un `.js`, les scripts sont rechargés.
+
+## Git
+
+Fenêtre *Windows > Git* : utilise l'exécutable `git` du PATH (rien à configurer), sans
+fenêtre de console, sur un thread (l'éditeur ne bloque jamais).
+
+- Projet sans dépôt : *Initialize a repository* (`git init -b main` + un `.gitignore`
+  Lynx : `build/`, `.lynx/`, `imgui.ini`, `editor_windows.txt`, `editor_camera.txt`...).
+- **Changes** : fichiers modifiés / nouveaux / supprimés ; la case à cocher = stage / unstage ;
+  clic = diff coloré ; clic droit = *Discard changes* (avec confirmation). Message +
+  *Commit*, *Amend*, *Stage all + Commit*. Si le niveau n'est pas sauvegardé, un bouton
+  *Save level* est proposé avant le commit.
+- Barre du haut : branche (changer / *New branch...*), *Fetch*, *Pull* (`--ff-only`),
+  *Push* (`-u origin <branche>` la première fois), en avance / en retard.
+- **History** : les 100 derniers commits, clic = détails et diff du commit.
+- **Settings** : URL du remote `origin`, nom / email de l'auteur, création du `.gitignore`.
+- La sortie de chaque commande git s'affiche en bas de la fenêtre. Les merges avec
+  conflits restent à faire dans un terminal (ou un client Git).
 
 ## Input Settings
 
@@ -100,6 +145,21 @@ Décrits dans `assets/voxels.json` (format : `src/core/Voxels.h`), chargés par
 l'éditeur et le runtime avant le niveau. Le jeu les lit avec `lynx::voxels`
 (`GetFlags`, `GetFlagMask("ROCK")`, `IsIndestructible`, `GetFlagsBelow`...).
 *Reload Game* relit aussi `voxels.json`.
+
+## Moteur (singleton)
+
+```cpp
+lynx::Engine::SetReleaseMode(true);          // optionnel, avant Create() : assets en archive
+lynx::Engine* engine = lynx::Engine::Create();
+// ... HRL_Init + HRL_InitContext ...
+engine->CreateScene();                       // la scène HRL appartient au moteur
+lynx::Engine::Get();                         // partout ensuite
+lynx::Engine::GetScene();
+lynx::Engine::Destroy();
+```
+
+`lynx::GetEngine()` / `lynx::GetScene()` existent encore (marqués `[[deprecated]]`) pour
+que les projets de jeu compilent ; remplace-les puis supprime-les de `core/Engine.h`.
 
 ## Ce que la DLL du jeu fournit
 

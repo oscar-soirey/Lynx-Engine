@@ -661,8 +661,9 @@ int main(int argc, char** argv)
 
     LoadSettings();
 
+    // Release mode (packed assets) : lynx::Engine::SetReleaseMode(true) before.
     lynx::Engine* engine =
-        lynx::CreateEngine("", false);
+        lynx::Engine::Create();
 
     // Key bindings : input.json at the project root (working directory).
     lynx::LoadConfigFile(
@@ -766,10 +767,10 @@ int main(int argc, char** argv)
     );
 
 
+    // The scene belongs to the engine (Engine::GetScene()) : it needs the
+    // HRL context, created just above.
     scene =
-        HRL_CreateScene(false);
-
-    lynx::SetSceneID(scene);
+        engine->CreateScene();
 
 
     HRL_id gameplay_cam =
@@ -986,7 +987,7 @@ int main(int argc, char** argv)
     gameHooks.Clear();
     gameModule.Unload();
 
-    delete lynx::GetEngine();
+    lynx::Engine::Destroy();
 
     return 0;
 }

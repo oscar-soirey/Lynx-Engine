@@ -62,7 +62,7 @@ namespace lynx
 			return;
 
 		Actor* owner = GetOwner();
-		Level* level = GetEngine() ? GetEngine()->GetCurrentLevel() : nullptr;
+		Level* level = Engine::Get() ? Engine::Get()->GetCurrentLevel() : nullptr;
 		if (owner && level)
 		{
 			destroy_requested_ = true;

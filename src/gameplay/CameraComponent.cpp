@@ -53,7 +53,7 @@ namespace lynx
 		}
 		else
 		{
-			const uint32_t scene = GetScene();
+			const uint32_t scene = Engine::GetScene();
 
 			if (!HRL_IsValidScene(scene))
 				return false;

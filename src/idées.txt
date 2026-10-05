@@ -1,9 +1,7 @@
-assistant IA qui s'appelle Lynxie, il peut créer des fichiers js, placer/supprimer/deplacer des actors
-
 un systeme de possession, avec player controller qui decrit un viewport hrl et qui possede un Actor*
 
-revoir le systeme global et de Singleton
-
-commandes python interprétées par le moteur (pour deplacer des objets, creer des fichiers js par exemple, etc...)
-
 window console
+
+installateur qui installe toutes les dépendances
+
+séléction automatique du modele d'IA, pour generer des pixelart par exemple

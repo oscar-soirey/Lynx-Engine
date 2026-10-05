@@ -13,6 +13,7 @@ namespace lynx::editor::commands_window
 {
 	// Once per frame (script end, log). Call even when the window is closed.
 	void Update();
+	void Shutdown();
 
 	void Draw(bool* open);
 }

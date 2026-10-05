@@ -132,6 +132,7 @@ target_link_libraries(LynxEditor PRIVATE
 		Lynx
 		opengl32
 		ws2_32      # command server (Python scripts / MCP)
+		winhttp     # local Ollama chat API
 		shell32
 )
 
@@ -160,6 +161,31 @@ target_link_libraries(LynxRuntime PRIVATE
 		Lynx
 		opengl32
 )
+
+
+## Lynx Launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models, see Launcher/README.md)
+# Independent from lynx.dll : it must start on a computer where nothing is installed yet.
+
+add_executable(LynxLauncher src/icon.rc
+		${ImGUI_SOURCE}
+
+		Launcher/main.cpp
+		Launcher/Launcher.cpp
+		Launcher/Dependencies.cpp
+		Launcher/Models.cpp
+		Launcher/Process.cpp
+)
+
+target_link_libraries(LynxLauncher PRIVATE
+		${GLFW_LIB}
+		opengl32
+		gdi32
+		shell32     # ShellExecute (links to the websites)
+		advapi32    # registry (PATH refresh after an install)
+)
+
+# Static libstdc++ / libgcc and no console : the launcher runs before MinGW is installed.
+target_link_options(LynxLauncher PRIVATE -static -mwindows)
 
 
 ## Package for the game projects (find_package(Lynx), see cmake/LynxConfig.cmake.in)

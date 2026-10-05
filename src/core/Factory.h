@@ -28,14 +28,14 @@
     { \
         lynx::Factory f; \
         LynxFillFactory(f); \
-        lynx::GetEngine()->GetFactory().InsertFactory(f); \
+        lynx::Engine::Get()->GetFactory().InsertFactory(f); \
     } \
     \
     extern "C" __declspec(dllexport) void FactoryUnregisterClasses() \
     { \
         lynx::Factory f; \
         LynxFillFactory(f); \
-        lynx::GetEngine()->GetFactory().RemoveFactory(f); \
+        lynx::Engine::Get()->GetFactory().RemoveFactory(f); \
     }
 
 namespace lynx

@@ -398,7 +398,7 @@ static std::vector<std::string> CmdClassNames()
 {
     std::vector<std::string> names;
 
-    auto* factory = lynx::GetEngine()->GetFactory().GetInternalFactory();
+    auto* factory = lynx::Engine::Get()->GetFactory().GetInternalFactory();
 
     if (factory)
     {
@@ -415,7 +415,7 @@ static std::vector<std::string> CmdClassNames()
 
 static bool CmdClassExists(const std::string& name)
 {
-    auto* factory = lynx::GetEngine()->GetFactory().GetInternalFactory();
+    auto* factory = lynx::Engine::Get()->GetFactory().GetInternalFactory();
     return factory && factory->find(name) != factory->end();
 }
 

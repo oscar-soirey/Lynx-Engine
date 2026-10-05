@@ -519,11 +519,11 @@ namespace lynx::host
 #ifdef _WIN32
 		HMODULE engine_module = nullptr;
 
-		// The module that contains lynx::GetEngine = the engine DLL.
+		// The module that contains lynx::Engine::Get = the engine DLL.
 		if (!GetModuleHandleExW(
 				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
 				GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				reinterpret_cast<LPCWSTR>(reinterpret_cast<void*>(&lynx::GetEngine)),
+				reinterpret_cast<LPCWSTR>(reinterpret_cast<void*>(&lynx::Engine::Get)),
 				&engine_module))
 		{
 			return {};

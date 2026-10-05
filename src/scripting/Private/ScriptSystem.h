@@ -27,7 +27,7 @@ namespace lynx::scripting
 
 	/**
 	 * Avant la creation d'un niveau (Engine::CreateLevel) : charge les classes
-	 * JavaScript (assets/classes/) la premiere fois et les enregistre dans la
+	 * JavaScript (n'importe ou dans assets/) la premiere fois et les enregistre dans la
 	 * factory, et cree les constructeurs JS des classes C++ (Actor, Pawn...).
 	 */
 	void PrepareClasses();

@@ -16,14 +16,50 @@ namespace lynx
 	// by lynx.dll. Kept as an opaque forward declaration for SetWindowHandle().
 	class LynxWindow;
 
+	// -------------------------------------------------------------------------
+	// Engine (singleton)
+	// -------------------------------------------------------------------------
+	//   lynx::Engine::SetReleaseMode(true);   // optional, BEFORE Create()
+	//   lynx::Engine::Create();               // fs, audio, scripting, factory
+	//   ... HRL_Init + HRL_InitContext ...
+	//   lynx::Engine::Get()->CreateScene();   // the HRL scene, owned by the engine
+	//   lynx::Engine::GetScene();             // anywhere after that
+	//   ...
+	//   lynx::Engine::Destroy();
+	//
+	// The engine exists before the HRL context (the game DLL fills its factory
+	// first) : that is why the scene has its own call.
+	// -------------------------------------------------------------------------
+
 	class LYNX_API Engine {
-		friend Engine* CreateEngine(const char*, bool);
-		//friend void AsyncFunc(float time, std::function<void()> callback);
 	private:
-		Engine(const char* config_file, bool release);
+		Engine();
+		~Engine();
 
 	public:
-		~Engine();
+		Engine(const Engine&) = delete;
+		Engine& operator=(const Engine&) = delete;
+
+		// Asset source of the next Create() : false (default) = the assets/
+		// folder, true = the packed archive (shipped game).
+		static void SetReleaseMode(bool release);
+		static bool IsReleaseMode();
+
+		// Creates the engine (once ; a second call returns the same one).
+		static Engine* Create();
+
+		// nullptr before Create() / after Destroy().
+		static Engine* Get();
+
+		// Deletes the engine (level, scripts, audio, HRL). Get() is nullptr after.
+		static void Destroy();
+
+		// Creates the HRL scene. Needs HRL_Init + HRL_InitContext first ; once.
+		// Returns the scene id (same as GetScene()).
+		uint32_t CreateScene();
+
+		// The HRL scene (HRL_INVALID_ID = 0xFFFFFFFF before CreateScene()).
+		static uint32_t GetScene();
 
 
 		void ProgressOneFrame(float dt);
@@ -71,18 +107,26 @@ namespace lynx
 		//Can be nullptr if game is not rendered by LynxWindow
 		LynxWindow* win_=nullptr;
 
+		//HRL scene (CreateScene)
+		uint32_t scene_ = 0xFFFFFFFFu;   // HRL_INVALID_ID
+		bool scene_created_ = false;
+
+		static Engine* instance_;
+		static bool release_mode_;
+
 
 		//async functions registered
 		//std::unordered_map<float, std::function<void>()> async_registered_;
 	};
 
 
-	//singleton functions
-	LYNX_API Engine* CreateEngine(const char* config_file, bool release);
-	LYNX_API Engine* GetEngine();
+	// Old singleton functions : kept only so that game projects still compile
+	// (with a warning at each use). Replace them, then delete these lines.
+	[[deprecated("use lynx::Engine::Get()")]]
+	inline Engine* GetEngine() { return Engine::Get(); }
 
-	LYNX_API void SetSceneID(uint32_t id);
-	LYNX_API uint32_t GetScene();
+	[[deprecated("use lynx::Engine::GetScene()")]]
+	inline uint32_t GetScene() { return Engine::GetScene(); }
 
 	LYNX_API void SetViewportID(uint32_t id);
 	LYNX_API uint32_t GetViewport();

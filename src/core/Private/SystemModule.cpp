@@ -106,7 +106,7 @@ namespace lynx
 		// Les acteurs (et leurs vtables), les composants, les comportements...
 		// sont du code de la dll. Le niveau est supprime ici, tant que la dll est
 		// encore chargee, pour qu'aucun objet vivant ne pointe dans une dll dechargee.
-		Engine* engine = GetEngine();
+		Engine* engine = Engine::Get();
 
 		if (engine && engine->GetCurrentLevel())
 		{

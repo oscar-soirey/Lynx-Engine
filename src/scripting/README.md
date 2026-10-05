@@ -54,9 +54,10 @@ class Enemy extends Pawn {                     // Actor, ou n'importe quelle cla
 class Boss extends Enemy { /* ... */ }        // héritage entre classes JS, autre fichier possible
 ```
 
-- **Où** : tous les `.js` de `assets/classes/` (sous-dossiers compris) sont chargés avant
-  chaque niveau. Seules les classes `class Nom extends ...` qui héritent d'`Actor` sont
-  enregistrées. L'ordre des fichiers n'a pas d'importance.
+- **Où** : n'importe où dans `assets/` (tous les dossiers et sous-dossiers ; `classes/` n'est
+  qu'une convention). Avant chaque niveau, chaque `.js` qui déclare une `class Nom extends ...`
+  est chargé ; les scripts attachés (sans classe) ne sont pas touchés. Seules les classes qui
+  héritent d'`Actor` sont enregistrées. L'ordre des fichiers n'a pas d'importance.
 - **Où elles apparaissent** : dans la factory, comme une classe C++. Elles sont donc dans
   *Place Actors* de l'éditeur, dans les niveaux (`<Enemy object_id_="e1" hp="40"/>`),
   et se créent par `Level.spawn("Enemy")` ou `new Enemy()` en JS (ajouté au niveau).

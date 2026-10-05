@@ -35,7 +35,7 @@ namespace lynx
 
 		bool VoxelBoxBlocked(float cx, float cy, float w, float h, uint32_t flags)
 		{
-			const uint32_t scene = GetScene();
+			const uint32_t scene = Engine::GetScene();
 
 			float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f;
 
@@ -188,7 +188,7 @@ namespace lynx
 		float step = 0.5f * std::max(std::min(w, h), 1e-3f);
 		{
 			float vx0 = 0.f, vy0 = 0.f, vx1 = 0.f, vy1 = 0.f;
-			const uint32_t scene = GetScene();
+			const uint32_t scene = Engine::GetScene();
 
 			if (HRL_WorldToVoxelCoordinates(scene, 0.f, 0.f, &vx0, &vy0) == HRL_TRUE &&
 			    HRL_WorldToVoxelCoordinates(scene, 1.f, 0.f, &vx1, &vy1) == HRL_TRUE)
@@ -343,7 +343,7 @@ namespace lynx
 
 		// vert : trigger, rouge : bloquant
 		HRL_DrawDebugPolygon(
-			GetScene(),
+			Engine::GetScene(),
 			HRL_DEBUG_HOLLOW,
 			xs, ys, zs, 4,
 			trigger ? 0.2f : 1.f,
