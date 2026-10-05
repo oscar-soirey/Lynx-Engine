@@ -39,6 +39,15 @@ namespace lynx
 	LYNX_API bool EvaluateScript(const char* code, std::string& result_json, std::string& error,
 	                             const char* name = "<eval>");
 
+	/**
+	 * Verifie un fichier .js sans toucher aux scripts du jeu (runtime QuickJS a
+	 * part) : la syntaxe, puis la structure des classes (le fichier est execute
+	 * avec des bouchons : classes de base, Level, Input...). Refuse par exemple
+	 * une methode ecrite dans `static properties`. Sert aux editions de Lynxie.
+	 * `error` : message + position.
+	 */
+	LYNX_API bool CheckScriptSyntax(const std::string& code, const char* name, std::string& error);
+
 	class Actor;
 
 	/**

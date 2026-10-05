@@ -39,6 +39,7 @@
 #include <fstream>
 #include <iterator>
 #include <iomanip>
+#include <sstream>
 #include <random>
 #include <unordered_set>
 #include <unordered_map>
@@ -69,6 +70,16 @@
 #include "commands/CommandServer.h"
 #include "commands/CommandUtils.h"
 #include "commands/CommandsWindow.h"
+#include "OutputConsole.h"
+#include "ProjectTemplates.h"
+#include "LynxieIcon.h"
+#include "EditorIcons.h"
+#include "PropertyWidgets.h"
+#include "ProfilerWindow.h"
+#include "ScriptEditors.h"
+#include "NodeGraphTest.h"
+#include "EditorFonts.h"
+#include "ShipGame.h"
 #include "commands/ScriptRunner.h"
 #include <array>
 #include <chrono>
@@ -93,12 +104,15 @@ struct EditorWindowVisibility
     bool placeActors = true;
     bool contentBrowser = true;
     bool details = true;
-    bool colorPicking = true;
-    bool config = true;
-    bool cameraShake = true;
+    bool colorPicking = false;
+    bool config = true;          // Paint
+    bool cameraShake = false;
     bool inputSettings = false;
-    bool commands = false;
+    bool commands = true;
     bool git = false;
+    bool console = true;
+    bool profiler = true;        // records only while its tab is visible
+    bool nodeGraphTest = false;  // ImNodes test window
 };
 
 static EditorWindowVisibility editorWindows;
@@ -136,6 +150,18 @@ static void LoadEditorWindowVisibility()
     int git = 0;
     if (file >> git)
         editorWindows.git = git != 0;
+
+    int console = 1;
+    if (file >> console)
+        editorWindows.console = console != 0;
+
+    int profiler = 0;
+    if (file >> profiler)
+        editorWindows.profiler = profiler != 0;
+
+    int nodeGraphTest = 0;
+    if (file >> nodeGraphTest)
+        editorWindows.nodeGraphTest = nodeGraphTest != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -153,12 +179,16 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.cameraShake ? 1 : 0) << ' '
          << (editorWindows.inputSettings ? 1 : 0) << ' '
          << (editorWindows.commands ? 1 : 0) << ' '
-         << (editorWindows.git ? 1 : 0) << '\n';
+         << (editorWindows.git ? 1 : 0) << ' '
+         << (editorWindows.console ? 1 : 0) << ' '
+         << (editorWindows.profiler ? 1 : 0) << ' '
+         << (editorWindows.nodeGraphTest ? 1 : 0) << '\n';
 }
 
-static bool EditorWindowCheckbox(const char* label, bool* value)
+static bool EditorWindowCheckbox(const char* label, bool* value,
+                                 lynx::editor::icons::Icon icon = lynx::editor::icons::Icon::Windows)
 {
-    const bool changed = ImGui::Checkbox(label, value);
+    const bool changed = lynx::editor::icons::Checkbox(label, icon, value);
     if (changed) SaveEditorWindowVisibility();
     return changed;
 }
@@ -651,11 +681,15 @@ static std::string world_file_path_string;
 // =============================================================================
 
 
+// Set by InitImGui : BeginImGuiFrame checks imgui.ini before its first frame.
+static bool default_dock_layout_check = false;
+
 void InitImGui(GLFWwindow* window)
 {
     IMGUI_CHECKVERSION();
 
     ImGui::CreateContext();
+    default_dock_layout_check = true;
 
     ImGuiIO& io = ImGui::GetIO();
 
@@ -669,29 +703,9 @@ void InitImGui(GLFWwindow* window)
     if (customCursorsEnabled)
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
 
-    // Editor font : next to the editor executable first, then in the project.
-    // (AddFontFromFileTTF asserts on a missing file : check before.)
-    {
-        const std::filesystem::path candidates[] = {
-            lynx::host::GetEditorDirectory() / "normal-font.ttf",
-            std::filesystem::path("normal-font.ttf"),
-            std::filesystem::path("assets") / "normal-font.ttf",
-        };
-
-        for (const auto& font : candidates)
-        {
-            std::error_code font_error;
-
-            if (std::filesystem::is_regular_file(font, font_error))
-            {
-                io.Fonts->AddFontFromFileTTF(
-                    font.string().c_str(),
-                    24.0f
-                );
-                break;
-            }
-        }
-    }
+    // Fonts : fonts/VCR-OSD-MONO.ttf for the editor, fonts/OpenDyslexic-*.otf
+    // for Lynxie (see EditorFonts.h).
+    lynx::editor::fonts::Load(24.0f);
 
     ImGui::StyleColorsDark();
 
@@ -706,18 +720,128 @@ void InitImGui(GLFWwindow* window)
 }
 
 
+// -----------------------------------------------------------------------------
+// Default dock layout
+// -----------------------------------------------------------------------------
+// A project opened for the first time (no imgui.ini, or one without docking
+// data) gets the windows docked like this, instead of floating everywhere :
+//
+//   +-----------------+--------------------------+-------------------------+
+//   | Outliner, Paint |                          | Details, Commands,      |
+//   |                 |  Viewport (central node, | Color Picking,          |
+//   |-----------------|  scripts, Git, Input...) | Camera Shake            |
+//   | Content Browser |--------------------------|-------------------------|
+//   |                 |  Console, Profiler       | Place Actors            |
+//   +-----------------+--------------------------+-------------------------+
+//
+// The windows that are not visible yet are docked there when they first open.
+static bool default_dock_layout_pending = false;
+
+// Central node of the dockspace (Viewport) : the script editors open there.
+static ImGuiID central_dock_id = 0;
+
+static bool ImGuiIniHasDockLayout(const char* ini_file)
+{
+    if (!ini_file)
+        return true;   // no ini at all : nothing to restore, nothing to build
+
+    std::ifstream file(ini_file);
+    if (!file)
+        return false;
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.rfind("[Docking][Data]", 0) == 0)
+            return true;
+    }
+    return false;
+}
+
+static void BuildDefaultDockLayout(ImGuiID dockspace_id)
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(
+        dockspace_id,
+        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
+            ImGuiDockNodeFlags_PassthruCentralNode
+    );
+    ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+
+    // Proportions of the Blocky layout (3309 x 1360 work area).
+    ImGuiID center = dockspace_id;
+    const ImGuiID right =
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.257f, nullptr, &center);
+    const ImGuiID left =
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.235f, nullptr, &center);
+
+    ImGuiID left_top = left;
+    const ImGuiID left_bottom =
+        ImGui::DockBuilderSplitNode(left_top, ImGuiDir_Down, 0.476f, nullptr, &left_top);
+
+    ImGuiID right_top = right;
+    const ImGuiID right_bottom =
+        ImGui::DockBuilderSplitNode(right_top, ImGuiDir_Down, 0.30f, nullptr, &right_top);
+
+    ImGuiID center_top = center;
+    const ImGuiID center_bottom =
+        ImGui::DockBuilderSplitNode(center_top, ImGuiDir_Down, 0.345f, nullptr, &center_top);
+
+    // Order = order of the tabs ; the first one is the visible tab.
+    ImGui::DockBuilderDockWindow("Outliner", left_top);
+    ImGui::DockBuilderDockWindow("Paint", left_top);
+    ImGui::DockBuilderDockWindow("Content Browser", left_bottom);
+
+    ImGui::DockBuilderDockWindow("Viewport", center_top);
+    ImGui::DockBuilderDockWindow("Input Settings", center_top);
+    ImGui::DockBuilderDockWindow("Git", center_top);
+    ImGui::DockBuilderDockWindow("Node Graph (test)", center_top);
+
+    ImGui::DockBuilderDockWindow("Console", center_bottom);
+    ImGui::DockBuilderDockWindow("Profiler", center_bottom);
+
+    ImGui::DockBuilderDockWindow("Details", right_top);
+    ImGui::DockBuilderDockWindow("Commands", right_top);
+    ImGui::DockBuilderDockWindow("Color Picking", right_top);
+    ImGui::DockBuilderDockWindow("Camera Shake", right_top);
+    ImGui::DockBuilderDockWindow("Place Actors", right_bottom);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
+
 void BeginImGuiFrame()
 {
+    // Before the first NewFrame (which reads imgui.ini) : no saved layout ->
+    // the default one is built.
+    if (default_dock_layout_check)
+    {
+        default_dock_layout_check = false;
+        default_dock_layout_pending =
+            !ImGuiIniHasDockLayout(ImGui::GetIO().IniFilename);
+    }
+
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
     // Main dockspace: every editor panel can be docked/rearranged by ImGui.
-    ImGui::DockSpaceOverViewport(
+    const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
         0,
         ImGui::GetMainViewport(),
         ImGuiDockNodeFlags_PassthruCentralNode
     );
+
+    if (default_dock_layout_pending)
+    {
+        default_dock_layout_pending = false;
+        BuildDefaultDockLayout(dockspace_id);
+    }
+
+    ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace_id);
+    central_dock_id = central ? central->ID : 0;
 }
 
 
@@ -729,6 +853,8 @@ void EndImGuiFrame()
     if (ImGui::GetMouseCursor() == ImGuiMouseCursor_TextInput)
         ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
+    LYNX_PROFILE_SCOPE("ImGui render");
+
     ImGui::Render();
 
     ImGui_ImplOpenGL3_RenderDrawData(
@@ -739,6 +865,7 @@ void EndImGuiFrame()
 
 void ShutdownImGui()
 {
+    lynx::editor::node_graph_test::Shutdown();   // ImNodes context, before ImGui's
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -747,7 +874,7 @@ void ShutdownImGui()
 
 float camX;
 float camY;
-float camZ = 200.f;
+float camZ = 600.f;   // voxel units (1 = 1 voxel)
 
 bool dragging_object = false;
 
@@ -1344,10 +1471,37 @@ static HRL_id GetActorTypePreviewTexture(
     return HRL_INVALID_ID;
 }
 
+// "color", "light_color", "tintColor"... : drawn as a color picker in Details.
+static bool IsColorPropertyName(const std::string& name)
+{
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower.find("color") != std::string::npos || lower.find("colour") != std::string::npos ||
+           lower.find("tint") != std::string::npos;
+}
+
 static void DrawActorTypePreview(
     const std::string& type_name,
     float size)
 {
+    // Engine classes (lights, SpriteActor...) : their icon.
+    {
+        uint32_t texture = HRL_INVALID_ID;
+        float uv[4] = {};
+        if (lynx::GetEngineActorIcon(type_name, texture, uv))
+        {
+            const unsigned int gl_texture = HRL_GL_GetTextureGL_ID(texture);
+            if (gl_texture != 0)
+            {
+                // HRL textures are bottom-up : v swapped.
+                ImGui::Image((ImTextureID)(intptr_t)gl_texture, ImVec2(size, size),
+                             ImVec2(uv[0], uv[3]), ImVec2(uv[2], uv[1]));
+                return;
+            }
+        }
+    }
+
     const HRL_id texture =
         GetActorTypePreviewTexture(
             type_name
@@ -1482,7 +1636,9 @@ static bool UpdateActorLocationFromMouse(lynx::Actor* actor)
 
     actor->transform.location.x = world_x;
     actor->transform.location.y = world_y;
-    actor->transform.location.z = 0.f;
+    // Lights keep their height in front of the level (z), the rest goes on it.
+    if (!dynamic_cast<lynx::LightActor*>(actor))
+        actor->transform.location.z = 0.f;
 
     return true;
 }
@@ -1674,14 +1830,30 @@ void PlaceActorsWindow(lynx::Level* level)
         actor_types.end()
     );
 
+    // Classes of the engine (Actor, lights...) first, then the game's.
+    std::stable_partition(
+        actor_types.begin(),
+        actor_types.end(),
+        [](const std::string& name) { return lynx::IsEngineActorClass(name); }
+    );
+
     if (actor_types.empty())
     {
         ImGui::TextDisabled("No matching actors");
     }
     else
     {
+        int section = -1;   // 0 : engine, 1 : game
+
         for (const std::string& type_name : actor_types)
         {
+            const int type_section = lynx::IsEngineActorClass(type_name) ? 0 : 1;
+            if (type_section != section)
+            {
+                section = type_section;
+                ImGui::SeparatorText(section == 0 ? "Engine" : "Game");
+            }
+
             ImGui::PushID(type_name.c_str());
 
             const float preview_size = 42.f;
@@ -2225,406 +2397,7 @@ static void DropCallback(
 
 
 
-// -----------------------------------------------------------------------------
-// JavaScript editor
-// -----------------------------------------------------------------------------
-// Double-clicking a .js file in the Content Browser opens this window. The
-// editor works directly on the asset file, so Save writes the current text
-// back to the same path.
-static TextEditor javascript_editor;
-static bool javascript_editor_open = false;
-static bool javascript_editor_dirty = false;
-static std::filesystem::path javascript_editor_path;
-static std::string javascript_editor_error;
-static std::string javascript_editor_saved_text;
-static std::filesystem::file_time_type javascript_editor_last_write_time{};
-static bool javascript_editor_has_write_time = false;
-static float javascript_editor_zoom = 1.0f;
-
-static bool IsJavaScriptFile(const std::filesystem::path& path)
-{
-    std::string extension = path.extension().string();
-
-    std::transform(
-        extension.begin(),
-        extension.end(),
-        extension.begin(),
-        [](unsigned char c)
-        {
-            return static_cast<char>(std::tolower(c));
-        }
-    );
-
-    return extension == ".js";
-}
-
-static const TextEditor::LanguageDefinition& JavaScriptLanguageDefinition()
-{
-    static bool initialized = false;
-    static TextEditor::LanguageDefinition definition;
-
-    if (!initialized)
-    {
-        static const char* const keywords[] =
-        {
-            "as", "async", "await", "break", "case", "catch", "class",
-            "const", "continue", "debugger", "default", "delete", "do",
-            "else", "export", "extends", "false", "finally", "for",
-            "from", "function", "get", "if", "implements", "import",
-            "in", "instanceof", "interface", "let", "new", "null",
-            "of", "package", "private", "protected", "public", "return",
-            "set", "static", "super", "switch", "this", "throw", "true",
-            "try", "typeof", "undefined", "var", "void", "while", "with",
-            "yield"
-        };
-
-        for (const char* keyword : keywords)
-            definition.mKeywords.insert(keyword);
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "\\\"(\\\\.|[^\\\"])*\\\"",
-                TextEditor::PaletteIndex::String
-            )
-        );
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "'\\\\?[^']*'",
-                TextEditor::PaletteIndex::String
-            )
-        );
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "`([^`\\\\]|\\\\.)*`",
-                TextEditor::PaletteIndex::String
-            )
-        );
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?",
-                TextEditor::PaletteIndex::Number
-            )
-        );
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "[a-zA-Z_$][a-zA-Z0-9_$]*",
-                TextEditor::PaletteIndex::Identifier
-            )
-        );
-
-        definition.mTokenRegexStrings.push_back(
-            std::make_pair<std::string, TextEditor::PaletteIndex>(
-                "[\\[\\]{}!%\\^&*()\\-+=~|<>?/;,.:]",
-                TextEditor::PaletteIndex::Punctuation
-            )
-        );
-
-        definition.mCommentStart = "/*";
-        definition.mCommentEnd = "*/";
-        definition.mSingleLineComment = "//";
-        definition.mCaseSensitive = true;
-        definition.mAutoIndentation = true;
-        definition.mName = "JavaScript";
-
-        initialized = true;
-    }
-
-    return definition;
-}
-
-static void OpenJavaScriptEditor(const std::filesystem::path& path)
-{
-    if (!IsJavaScriptFile(path))
-        return;
-
-    std::ifstream file(path, std::ios::binary);
-
-    if (!file)
-    {
-        javascript_editor_error =
-            "Could not open:\n" + path.string();
-        javascript_editor_open = true;
-        return;
-    }
-
-    std::string source{
-        std::istreambuf_iterator<char>(file),
-        std::istreambuf_iterator<char>()
-    };
-
-    javascript_editor_path = path;
-    javascript_editor_error.clear();
-
-    std::error_code write_time_error;
-    javascript_editor_last_write_time =
-        std::filesystem::last_write_time(path, write_time_error);
-    javascript_editor_has_write_time = !write_time_error;
-
-    javascript_editor.SetLanguageDefinition(
-        JavaScriptLanguageDefinition()
-    );
-    javascript_editor.SetText(source);
-    javascript_editor_saved_text = source;
-    javascript_editor.SetTabSize(2);
-    javascript_editor.SetShowWhitespaces(false);
-    javascript_editor_dirty = false;
-    javascript_editor_open = true;
-}
-
-static bool SaveJavaScriptEditor()
-{
-    if (!javascript_editor_open || javascript_editor_path.empty())
-        return false;
-
-    const std::string source = javascript_editor.GetText();
-
-    std::ofstream file(
-        javascript_editor_path,
-        std::ios::binary | std::ios::trunc
-    );
-
-    if (!file)
-    {
-        javascript_editor_error =
-            "Could not save:\n" + javascript_editor_path.string();
-        return false;
-    }
-
-    file.write(
-        source.data(),
-        static_cast<std::streamsize>(source.size())
-    );
-
-    file.flush();
-
-    if (!file)
-    {
-        javascript_editor_error =
-            "Could not save:\n" + javascript_editor_path.string();
-        return false;
-    }
-
-    // Keep the timestamp in sync so our automatic reload does not immediately
-    // reload the file we have just saved.
-    std::error_code write_time_error;
-    javascript_editor_last_write_time =
-        std::filesystem::last_write_time(
-            javascript_editor_path,
-            write_time_error
-        );
-    javascript_editor_has_write_time = !write_time_error;
-
-    javascript_editor_saved_text = source;
-    javascript_editor_error.clear();
-    javascript_editor_dirty = false;
-    return true;
-}
-
-static void DrawJavaScriptEditorWindow()
-{
-    if (!javascript_editor_open)
-        return;
-
-    // TextEditor::IsTextChanged() stays true after an edit, so use the text
-    // saved on disk as the authoritative dirty-state reference. We only need
-    // to compare while the editor is currently clean.
-    if (!javascript_editor_dirty &&
-        javascript_editor.GetText() != javascript_editor_saved_text)
-    {
-        javascript_editor_dirty = true;
-    }
-
-    // Automatically reload the file when it changed on disk, but never
-    // overwrite edits that are currently unsaved in the editor.
-    if (!javascript_editor_path.empty())
-    {
-        std::error_code write_time_error;
-        const auto current_write_time =
-            std::filesystem::last_write_time(
-                javascript_editor_path,
-                write_time_error
-            );
-
-        if (!write_time_error &&
-            javascript_editor_has_write_time &&
-            current_write_time != javascript_editor_last_write_time &&
-            !javascript_editor_dirty)
-        {
-            OpenJavaScriptEditor(javascript_editor_path);
-        }
-    }
-
-    const std::string title = javascript_editor_path.filename().string();
-
-    bool open = javascript_editor_open;
-
-    ImGui::SetNextWindowSize(
-        ImVec2(900.f, 650.f),
-        ImGuiCond_FirstUseEver
-    );
-
-    if (ImGui::Begin(title.c_str(), &open))
-    {
-        ImGui::TextDisabled(
-            "%s",
-            javascript_editor_path.generic_string().c_str()
-        );
-
-        ImGui::SameLine();
-
-        if (javascript_editor_dirty)
-            ImGui::TextColored(
-                ImVec4(1.f, 0.75f, 0.2f, 1.f),
-                "Unsaved changes"
-            );
-        else
-            ImGui::TextDisabled("Saved");
-
-        ImGui::Separator();
-
-        ImGuiIO& io = ImGui::GetIO();
-
-        // The TextEditor is a child window, so include child windows when
-        // checking focus/hover state.
-        const bool editor_window_focused =
-            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-
-        const bool editor_window_hovered =
-            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
-                                   ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-
-        // Ctrl + mouse wheel = JavaScript editor zoom.
-        // TextEditor does not expose a font-size setter. Its layout is based
-        // on ImGui's current font size, so temporarily changing
-        // FontGlobalScale while TextEditor::Render() runs makes the editor
-        // recalculate both its text size and character spacing correctly.
-        const bool zoom_with_wheel =
-            editor_window_hovered &&
-            io.KeyCtrl &&
-            io.MouseWheel != 0.0f;
-
-        const float previous_font_global_scale = io.FontGlobalScale;
-
-        if (zoom_with_wheel)
-        {
-            javascript_editor_zoom = std::clamp(
-                javascript_editor_zoom + io.MouseWheel * 0.10f,
-                0.50f,
-                3.00f
-            );
-
-            // Consume Ctrl+wheel so TextEditor does not interpret it as a
-            // normal scroll at the same time.
-            io.MouseWheel = 0.0f;
-        }
-
-        if (!javascript_editor_error.empty())
-        {
-            ImGui::SameLine();
-            ImGui::TextColored(
-                ImVec4(1.f, 0.35f, 0.35f, 1.f),
-                "%s",
-                javascript_editor_error.c_str()
-            );
-        }
-
-        ImGui::Separator();
-
-        const float editor_height =
-            std::max(100.f, ImGui::GetContentRegionAvail().y);
-
-        // Remember the text before Render(). TextEditor consumes keyboard input
-        // during Render(), so this also lets us detect a newly typed opening
-        // bracket afterwards without fighting its normal input handling.
-        const std::string text_before_render = javascript_editor.GetText();
-
-        // Remember Ctrl+S before Render(). The actual save is performed after
-        // Render() so the TextEditor has already consumed all keyboard input
-        // from this frame.
-        const bool save_requested =
-            editor_window_focused &&
-            io.KeyCtrl &&
-            ImGui::IsKeyPressed(ImGuiKey_S, false);
-
-        // FontGlobalScale is applied only for the duration of TextEditor's
-        // render, so the rest of the Lynx editor is completely unaffected.
-        io.FontGlobalScale =
-            previous_font_global_scale * javascript_editor_zoom;
-
-        javascript_editor.Render(
-            "##JavaScriptTextEditor",
-            ImVec2(0.f, editor_height),
-            true
-        );
-
-        io.FontGlobalScale = previous_font_global_scale;
-
-        // Modern-editor style bracket pairing. Only react when exactly one
-        // character was inserted during this frame, so normal typing, paste,
-        // deletion and undo/redo remain untouched.
-        const std::string text_after_render = javascript_editor.GetText();
-
-        if (text_after_render.size() == text_before_render.size() + 1)
-        {
-            const auto cursor = javascript_editor.GetCursorPosition();
-
-            size_t insertion = 0;
-            while (insertion < text_before_render.size() &&
-                   insertion < text_after_render.size() &&
-                   text_before_render[insertion] == text_after_render[insertion])
-            {
-                ++insertion;
-            }
-
-            const bool inserted_at_end =
-                insertion == text_before_render.size();
-
-            const bool suffix_matches =
-                !inserted_at_end &&
-                text_before_render[insertion] ==
-                    text_after_render[insertion + 1] &&
-                text_before_render.compare(
-                    insertion + 1,
-                    std::string::npos,
-                    text_after_render,
-                    insertion + 2,
-                    std::string::npos
-                ) == 0;
-
-            if (inserted_at_end || suffix_matches)
-            {
-                const char inserted = text_after_render[insertion];
-                const char* closing = nullptr;
-
-                switch (inserted)
-                {
-                    case '{': closing = "}"; break;
-                    case '[': closing = "]"; break;
-                    case '(': closing = ")"; break;
-                    default: break;
-                }
-
-                if (closing)
-                {
-                    javascript_editor.InsertText(closing);
-                    javascript_editor.SetCursorPosition(cursor);
-                }
-            }
-        }
-
-        if (save_requested)
-            SaveJavaScriptEditor();
-    }
-
-    ImGui::End();
-
-    if (!open)
-        javascript_editor_open = false;
-}
+// Script editors (one window per file) : ScriptEditors.h / .cpp.
 
 
 // Right click menus, rename / duplicate / delete / new file... of the browser.
@@ -2737,41 +2510,77 @@ static void DrawContentBrowser(lynx::Level* level)
 
     ImGui::Separator();
 
-    std::vector<std::filesystem::directory_entry> entries;
-    std::error_code error;
+    // The folder is listed (and sorted) only when it changes, or twice a
+    // second : listing a big folder every frame (assets/ with hundreds of
+    // files) made the editor drop from ~280 to ~60 fps.
+    static std::filesystem::path listed_path;
+    static double listed_time = -1.0;
+    static std::vector<std::filesystem::directory_entry> entries;
 
-    if (std::filesystem::exists(
-            content_browser_current_path,
-            error))
+    // An action of this window (rename, delete, paste, new file... : a click
+    // or a key) : listed again at once instead of after half a second.
+    const bool browser_action =
+        content_browser_focused &&
+        (ImGui::IsMouseReleased(ImGuiMouseButton_Left) ||
+         ImGui::IsMouseReleased(ImGuiMouseButton_Right) ||
+         ImGui::IsKeyReleased(ImGuiKey_Enter) ||
+         ImGui::IsKeyReleased(ImGuiKey_Delete) ||
+         ImGui::IsKeyReleased(ImGuiKey_V) ||
+         ImGui::IsKeyReleased(ImGuiKey_D));
+
+    if (listed_path != content_browser_current_path ||
+        browser_action ||
+        ImGui::GetTime() - listed_time > 0.5)
     {
-        for (const auto& entry :
-             std::filesystem::directory_iterator(
-                 content_browser_current_path,
-                 std::filesystem::directory_options::skip_permission_denied,
-                 error))
-        {
-            if (error)
-                break;
+        listed_path = content_browser_current_path;
+        listed_time = ImGui::GetTime();
+        entries.clear();
 
-            entries.push_back(entry);
+        std::error_code error;
+
+        if (std::filesystem::exists(
+                content_browser_current_path,
+                error))
+        {
+            for (const auto& entry :
+                 std::filesystem::directory_iterator(
+                     content_browser_current_path,
+                     std::filesystem::directory_options::skip_permission_denied,
+                     error))
+            {
+                if (error)
+                    break;
+
+                entries.push_back(entry);
+            }
         }
+
+        std::vector<std::pair<bool, std::string>> keys;
+        std::vector<size_t> order(entries.size());
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            std::error_code dir_error;
+            keys.emplace_back(entries[i].is_directory(dir_error), entries[i].path().filename().string());
+            order[i] = i;
+        }
+
+        std::sort(
+            order.begin(),
+            order.end(),
+            [&keys](size_t a, size_t b)
+            {
+                if (keys[a].first != keys[b].first)
+                    return keys[a].first > keys[b].first;
+                return keys[a].second < keys[b].second;
+            }
+        );
+
+        std::vector<std::filesystem::directory_entry> sorted;
+        sorted.reserve(entries.size());
+        for (size_t i : order)
+            sorted.push_back(entries[i]);
+        entries.swap(sorted);
     }
-
-    std::sort(
-        entries.begin(),
-        entries.end(),
-        [](const auto& a, const auto& b)
-        {
-            const bool a_dir = a.is_directory();
-            const bool b_dir = b.is_directory();
-
-            if (a_dir != b_dir)
-                return a_dir > b_dir;
-
-            return a.path().filename().string() <
-                   b.path().filename().string();
-        }
-    );
 
     // --------------------------------------------------------
     // Asset grid
@@ -2794,10 +2603,23 @@ static void DrawContentBrowser(lynx::Level* level)
             )
         );
 
-    int column = 0;
+    // Only the visible rows are drawn (a folder can hold hundreds of files).
+    const int row_count =
+        (static_cast<int>(entries.size()) + columns - 1) / columns;
 
-    for (const auto& entry : entries)
+    ImGuiListClipper clipper;
+    clipper.Begin(row_count, item_height + ImGui::GetStyle().ItemSpacing.y);
+
+    while (clipper.Step())
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+    for (int column = 0; column < columns; ++column)
     {
+        const size_t index = static_cast<size_t>(row) * static_cast<size_t>(columns) + static_cast<size_t>(column);
+        if (index >= entries.size())
+            break;
+
+        const std::filesystem::directory_entry& entry = entries[index];
+
         if (column > 0)
             ImGui::SameLine(0.f, item_spacing);
 
@@ -2822,15 +2644,15 @@ static void DrawContentBrowser(lynx::Level* level)
         const bool active = ImGui::IsItemActive();
         const bool selected = cba::state.selected == entry.path();
 
-        // Directly open JavaScript files with a double-click. A single click
-        // keeps the existing behaviour for folders, and files remain usable
-        // as drag sources exactly as before.
+        // Double-click on a text file (.js, .py, .json, .xml, .txt...) : opens
+        // it in a script editor window (one window per file). A single click
+        // keeps the existing behaviour, files stay usable as drag sources.
         if (!is_directory &&
             hovered &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-            IsJavaScriptFile(entry.path()))
+            lynx::editor::script_editors::CanOpen(entry.path()))
         {
-            OpenJavaScriptEditor(entry.path());
+            lynx::editor::script_editors::Open(entry.path());
         }
 
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -2852,130 +2674,56 @@ static void DrawContentBrowser(lynx::Level* level)
             thumb_y + image_size
         );
 
-        // Button background.
-        const ImU32 bg_color =
-            active ? IM_COL32(75, 75, 75, 255) :
-            hovered ? IM_COL32(58, 58, 58, 255) :
-                      IM_COL32(43, 43, 43, 255);
+        // Tile : colors of the theme (frame / hovered / pressed, selection).
+        const ImU32 bg_color = ImGui::GetColorU32(
+            active  ? ImGuiCol_ButtonActive :
+            hovered ? ImGuiCol_ButtonHovered :
+                      ImGuiCol_FrameBg);
 
         draw_list->AddRectFilled(
             cell_min,
             cell_max,
             bg_color,
-            6.f
+            ImGui::GetStyle().FrameRounding
         );
 
         draw_list->AddRect(
             cell_min,
             cell_max,
-            selected ? IM_COL32(90, 155, 235, 255) :
-            hovered  ? IM_COL32(120, 120, 120, 255)
-                     : IM_COL32(70, 70, 70, 255),
-            6.f,
+            ImGui::GetColorU32(selected ? ImGuiCol_SliderGrab : ImGuiCol_Border),
+            ImGui::GetStyle().FrameRounding,
             0,
             selected ? 2.f : 1.f
         );
 
-        // Thumbnail / asset icon.
-        if (is_directory)
+        // Icon of the asset type, tinted by type (pixel art : a multiple of 16 px).
         {
-            // Folder icon.
-            const ImU32 folder_color = IM_COL32(218, 177, 70, 255);
-            const ImU32 folder_top = IM_COL32(236, 196, 88, 255);
+            using lynx::editor::icons::Icon;
 
-            draw_list->AddRectFilled(
-                ImVec2(thumb_min.x + 8.f, thumb_min.y + 25.f),
-                ImVec2(thumb_max.x - 8.f, thumb_max.y - 12.f),
-                folder_color,
-                7.f
+            const Icon icon =
+                lynx::editor::icons::ForFile(entry.path().string().c_str(), is_directory);
+
+            const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            const ImVec4 tint =
+                icon == Icon::Folder    ? ImVec4(0.80f, 0.58f, 0.12f, 1.f) :
+                icon == Icon::FileCode  ? ImVec4(0.20f, 0.42f, 0.78f, 1.f) :
+                icon == Icon::FileImage ? ImVec4(0.25f, 0.58f, 0.25f, 1.f) :
+                icon == Icon::FileSound ? ImVec4(0.55f, 0.30f, 0.70f, 1.f) :
+                                          text;
+
+            const float icon_size =
+                std::max(16.f, std::floor(image_size * 0.75f / 16.f) * 16.f);
+
+            lynx::editor::icons::DrawAt(
+                draw_list,
+                icon,
+                ImVec2(
+                    std::floor(thumb_min.x + (image_size - icon_size) * 0.5f),
+                    std::floor(thumb_min.y + (image_size - icon_size) * 0.5f)
+                ),
+                icon_size,
+                ImGui::ColorConvertFloat4ToU32(tint)
             );
-
-            draw_list->AddRectFilled(
-                ImVec2(thumb_min.x + 13.f, thumb_min.y + 17.f),
-                ImVec2(thumb_min.x + 48.f, thumb_min.y + 32.f),
-                folder_top,
-                5.f
-            );
-        }
-        else
-        {
-            // Generic file thumbnail with a small extension badge.
-            const ImU32 file_color = IM_COL32(125, 145, 175, 255);
-            const ImU32 paper_color = IM_COL32(205, 210, 218, 255);
-
-            const ImVec2 paper_min(
-                thumb_min.x + 22.f,
-                thumb_min.y + 8.f
-            );
-            const ImVec2 paper_max(
-                thumb_max.x - 22.f,
-                thumb_max.y - 8.f
-            );
-
-            draw_list->AddRectFilled(
-                paper_min,
-                paper_max,
-                paper_color,
-                6.f
-            );
-
-            // Folded corner.
-            draw_list->AddTriangleFilled(
-                ImVec2(paper_max.x - 24.f, paper_min.y),
-                ImVec2(paper_max.x, paper_min.y + 24.f),
-                ImVec2(paper_max.x - 24.f, paper_min.y + 24.f),
-                file_color
-            );
-
-            // Asset-type accent based on extension.
-            std::string extension =
-                entry.path().extension().string();
-
-            std::transform(
-                extension.begin(),
-                extension.end(),
-                extension.begin(),
-                [](unsigned char c)
-                {
-                    return static_cast<char>(std::toupper(c));
-                }
-            );
-
-            if (extension.size() > 5)
-                extension.resize(5);
-
-            const ImVec2 badge_min(
-                paper_min.x + 8.f,
-                paper_max.y - 28.f
-            );
-            const ImVec2 badge_max(
-                paper_max.x - 8.f,
-                paper_max.y - 8.f
-            );
-
-            draw_list->AddRectFilled(
-                badge_min,
-                badge_max,
-                file_color,
-                4.f
-            );
-
-            if (!extension.empty())
-            {
-                const ImVec2 text_size =
-                    ImGui::CalcTextSize(extension.c_str());
-
-                draw_list->AddText(
-                    ImVec2(
-                        badge_min.x +
-                            (badge_max.x - badge_min.x - text_size.x) * 0.5f,
-                        badge_min.y +
-                            (badge_max.y - badge_min.y - text_size.y) * 0.5f
-                    ),
-                    IM_COL32(255, 255, 255, 255),
-                    extension.c_str()
-                );
-            }
         }
 
         // Asset name under the image, clipped/wrapped to the cell width.
@@ -2989,14 +2737,14 @@ static void DrawContentBrowser(lynx::Level* level)
             ImGui::GetFont(),
             ImGui::GetFontSize(),
             ImVec2(text_x, cell_pos.y + image_size + 9.f),
-            IM_COL32(235, 235, 235, 255),
+            ImGui::GetColorU32(ImGuiCol_Text),
             filename.c_str(),
             nullptr,
             item_width - 8.f
         );
 
         if (clicked && is_directory)
-            content_browser_current_path = entry.path();
+            content_browser_current_path = entry.path();   // listed again at the next frame
         else if (clicked)
             cba::state.selected = entry.path();
 
@@ -3021,11 +2769,6 @@ static void DrawContentBrowser(lynx::Level* level)
         cba::ItemContextMenu(entry);
 
         ImGui::PopID();
-
-        ++column;
-
-        if (column >= columns)
-            column = 0;
     }
 
     if (entries.empty())
@@ -3403,7 +3146,11 @@ struct AppSettings
     float masterVolume = 0.5f;
     float cameraSpeed = 50.f;
     HRL_EVoxelRenderMode voxelRenderMode = HRL_VOXEL_BLOCKY;
-    float voxelPhysicalSize = 0.3f;
+    // Units : 1 world unit = 1 voxel, always (HRL_SetVoxelPhysicalSize 1).
+    // Projects made before ("physical_voxel_size" in settings.cfg, 0.3 by
+    // default, no "units voxel") are converted once : MigrateToVoxelUnits().
+    float legacyVoxelSize = 0.3f;
+    bool voxelUnits = false;
 
     // Hot reload of the game DLL.
     bool reloadAfterBuild = true;     // "Compile" -> reload when it succeeded
@@ -3425,16 +3172,14 @@ static void SaveSettings()
         return;
     }
 
-    file << "version 1\n";
+    file << "version 2\n";
+    file << "units voxel\n";
     file << "vsync " << (appSettings.vsync ? 1 : 0) << "\n";
     file << std::setprecision(9);
     file << "master_volume " << appSettings.masterVolume << "\n";
     file << "camera_speed " << appSettings.cameraSpeed << "\n";
     file << "voxel_render_mode "
          << static_cast<int>(appSettings.voxelRenderMode)
-         << "\n";
-    file << "physical_voxel_size "
-         << appSettings.voxelPhysicalSize
          << "\n";
     file << "reload_after_build " << (appSettings.reloadAfterBuild ? 1 : 0) << "\n";
     file << "auto_reload_on_change " << (appSettings.autoReloadOnChange ? 1 : 0) << "\n";
@@ -3491,10 +3236,16 @@ static void LoadSettings()
         }
         else if (key == "physical_voxel_size")
         {
-            float value = appSettings.voxelPhysicalSize;
+            float value = appSettings.legacyVoxelSize;
             if (file >> value && std::isfinite(value))
-                appSettings.voxelPhysicalSize =
+                appSettings.legacyVoxelSize =
                     std::clamp(value, 0.001f, 100.f);
+        }
+        else if (key == "units")
+        {
+            std::string value;
+            if (file >> value)
+                appSettings.voxelUnits = value == "voxel";
         }
         else if (key == "reload_after_build")
         {
@@ -3539,10 +3290,7 @@ static void ApplyRuntimeSettings(GLFWwindow* window)
             scene,
             appSettings.voxelRenderMode
         );
-        HRL_SetVoxelPhysicalSize(
-            scene,
-            appSettings.voxelPhysicalSize
-        );
+        HRL_SetVoxelPhysicalSize(scene, 1.f);   // 1 world unit = 1 voxel
     }
 }
 
@@ -3568,8 +3316,9 @@ static const char* VoxelRenderModeName(HRL_EVoxelRenderMode mode)
 // Editor camera height limits and speed scaling.
 // The "Camera Speed" slider is the speed at kCameraSpeedRefZ ; the real speed
 // is proportional to the camera height (far = faster, close = slower).
+// Voxel units (1 = 1 voxel) : the editor sees from ~20 to ~1000 voxels across.
 constexpr float kCameraMinZ = 20.f;
-constexpr float kCameraMaxZ = 1000.f;
+constexpr float kCameraMaxZ = 3000.f;
 constexpr float kCameraSpeedRefZ = 200.f;
 
 static float ClampCameraZ(float z)
@@ -4325,7 +4074,7 @@ static void DrawToolbar()
                 (currentProject.name.empty() ? std::string("Project") : currentProject.name) +
                 "##ProjectButton";
 
-            if (ImGui::Button(project_label.c_str()))
+            if (lynx::editor::icons::ButtonWithLabel(project_label.c_str(), lynx::editor::icons::Icon::Project))
                 ImGui::OpenPopup("ProjectPopup");
 
             tooltip("Project");
@@ -4368,13 +4117,13 @@ static void DrawToolbar()
         // Editing tools are unavailable while the game is running.
         ImGui::BeginDisabled(isPlaying);
 
-        if (ImGui::Button("Save"))
+        if (lynx::editor::icons::Button("Save", lynx::editor::icons::Icon::Save))
             SaveEditor();
         tooltip("Save the level (Ctrl+S)");
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Undo") && !brushPainting)
+        if (lynx::editor::icons::Button("Undo", lynx::editor::icons::Icon::Undo) && !brushPainting)
             UndoLastEditorAction();
         tooltip("Undo (Ctrl+Z)");
 
@@ -4382,32 +4131,21 @@ static void DrawToolbar()
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
-        auto mode_button = [&](const char* label, int index, const char* tip)
+        auto mode_button = [&](const char* label, lynx::editor::icons::Icon icon, int index, const char* tip)
         {
             const bool active = (gizmoModeIndex == index);
 
-            if (active)
-            {
-                ImGui::PushStyleColor(
-                    ImGuiCol_Button,
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                );
-            }
-
-            if (ImGui::Button(label))
+            if (lynx::editor::icons::Button(label, icon, lynx::editor::icons::kThemeTint, active))
                 SetGizmoModeIndex(index);
-
-            if (active)
-                ImGui::PopStyleColor();
 
             tooltip(tip);
         };
 
-        mode_button("Translate", 0, "Translate gizmo (Space cycles modes)");
+        mode_button("Translate", lynx::editor::icons::Icon::Translate, 0, "Translate (Space cycles the gizmo modes)");
         ImGui::SameLine();
-        mode_button("Rotate", 1, "Rotate gizmo (Space cycles modes)");
+        mode_button("Rotate", lynx::editor::icons::Icon::Rotate, 1, "Rotate (Space cycles the gizmo modes)");
         ImGui::SameLine();
-        mode_button("Scale", 2, "Scale gizmo (Space cycles modes)");
+        mode_button("Scale", lynx::editor::icons::Icon::Scale, 2, "Scale (Space cycles the gizmo modes)");
 
         ImGui::EndDisabled();
 
@@ -4415,19 +4153,14 @@ static void DrawToolbar()
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
-        // Play / Stop stays available in both modes.
-        ImGui::PushStyleColor(
-            ImGuiCol_Button,
-            isPlaying
-                ? ImVec4(0.70f, 0.20f, 0.20f, 1.0f)
-                : ImVec4(0.20f, 0.55f, 0.25f, 1.0f)
-        );
-
-        if (ImGui::Button(isPlaying ? "Stop" : "Play"))
+        // Play / Stop stays available in both modes (green triangle / red square).
+        if (lynx::editor::icons::ButtonWithLabel(
+                isPlaying ? "Stop##PlayStop" : "Play##PlayStop",
+                isPlaying ? lynx::editor::icons::Icon::Stop : lynx::editor::icons::Icon::Play,
+                isPlaying ? ImVec4(0.82f, 0.22f, 0.20f, 1.f) : ImVec4(0.22f, 0.62f, 0.26f, 1.f)))
             TogglePlayMode();
 
-        ImGui::PopStyleColor();
-        tooltip("Toggle editor / game (F3)");
+        tooltip(isPlaying ? "Stop the game, back to the editor (F3)" : "Play the game in the editor (F3)");
 
         // Reload the game DLL. Only a REQUEST is raised here : the actual reload
         // happens in main(), between two frames, never in the middle of the ImGui
@@ -4438,7 +4171,7 @@ static void DrawToolbar()
         // the editor uses a copy of the DLL, build/<game>.dll is free.
         ImGui::BeginDisabled(lynx::editor::game_build::IsRunning());
 
-        if (ImGui::Button("Compile"))
+        if (lynx::editor::icons::ButtonWithLabel("Compile", lynx::editor::icons::Icon::Compile))
             lynx::editor::game_build::Start();
 
         ImGui::EndDisabled();
@@ -4455,7 +4188,19 @@ static void DrawToolbar()
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Reload Game"))
+        // Ship Game : compiled game + packed assets in a folder (ShipGame.h).
+        ImGui::BeginDisabled(isPlaying || lynx::editor::ship_game::IsBusy());
+        if (lynx::editor::icons::ButtonWithLabel("Ship Game", lynx::editor::icons::Icon::Project))
+            lynx::editor::ship_game::Open();
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Make the game playable without the editor :\n"
+                              "compile it, pack assets/ inside the executable,\n"
+                              "copy it with its DLLs to a folder.");
+
+        ImGui::SameLine();
+
+        if (lynx::editor::icons::ButtonWithLabel("Reload Game", lynx::editor::icons::Icon::Reload))
         {
             module_changed_notice = false;
             reload_game_requested = true;
@@ -4520,7 +4265,7 @@ static void DrawToolbar()
         // -----------------------------------------------------------------
         ImGui::SameLine();
 
-        if (ImGui::Button("Settings"))
+        if (lynx::editor::icons::Button("Settings", lynx::editor::icons::Icon::Settings))
             ImGui::OpenPopup("SettingsPopup");
 
         if (ImGui::BeginPopup("SettingsPopup"))
@@ -4629,25 +4374,7 @@ static void DrawToolbar()
                 SaveSettings();
             }
 
-            if (ImGui::SliderFloat(
-                    "Physical voxel size",
-                    &appSettings.voxelPhysicalSize,
-                    0.01f,
-                    10.f,
-                    "%.3f"
-                ))
-            {
-                if (HRL_IsValidScene(scene))
-                {
-                    HRL_SetVoxelPhysicalSize(
-                        scene,
-                        appSettings.voxelPhysicalSize
-                    );
-                }
-
-                SaveSettings();
-            }
-            tooltip("Voxel side length in world units.");
+            ImGui::TextDisabled("Units : 1 = 1 voxel (positions, sizes, speeds)");
 
             ImGui::Separator();
 
@@ -4675,29 +4402,48 @@ static void DrawToolbar()
         // Use a regular button + popup instead of BeginMenu().
         // BeginMenu() can open its submenu when merely hovering a toolbar item,
         // which makes the rest of the toolbar difficult to use.
-        if (ImGui::Button("Windows"))
+        if (lynx::editor::icons::ButtonWithLabel("Windows", lynx::editor::icons::Icon::Windows))
             ImGui::OpenPopup("WindowsPopup");
 
         if (ImGui::BeginPopup("WindowsPopup"))
         {
             ImGui::TextDisabled("Editor windows");
             ImGui::Separator();
-            EditorWindowCheckbox("Viewport", &editorWindows.viewport);
-            EditorWindowCheckbox("Outliner", &editorWindows.outliner);
-            EditorWindowCheckbox("Place Actors", &editorWindows.placeActors);
-            EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser);
-            EditorWindowCheckbox("Details", &editorWindows.details);
-            EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking);
-            EditorWindowCheckbox("Paint", &editorWindows.config);
-            EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake);
-            EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings);
-            EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands);
-            EditorWindowCheckbox("Git", &editorWindows.git);
+            EditorWindowCheckbox("Viewport", &editorWindows.viewport, lynx::editor::icons::Icon::Camera);
+            EditorWindowCheckbox("Outliner", &editorWindows.outliner, lynx::editor::icons::Icon::Outliner);
+            EditorWindowCheckbox("Place Actors", &editorWindows.placeActors, lynx::editor::icons::Icon::PlaceActors);
+            EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser, lynx::editor::icons::Icon::ContentBrowser);
+            EditorWindowCheckbox("Details", &editorWindows.details, lynx::editor::icons::Icon::Details);
+            EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, lynx::editor::icons::Icon::ColorPick);
+            EditorWindowCheckbox("Paint", &editorWindows.config, lynx::editor::icons::Icon::Paint);
+            EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, lynx::editor::icons::Icon::Camera);
+            EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, lynx::editor::icons::Icon::Input);
+            EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, lynx::editor::icons::Icon::Commands);
+            EditorWindowCheckbox("Git", &editorWindows.git, lynx::editor::icons::Icon::Git);
+            EditorWindowCheckbox("Console", &editorWindows.console, lynx::editor::icons::Icon::Console);
+            EditorWindowCheckbox("Profiler", &editorWindows.profiler, lynx::editor::icons::Icon::Profiler);
+            EditorWindowCheckbox("Node Graph (test)", &editorWindows.nodeGraphTest, lynx::editor::icons::Icon::Commands);
             ImGui::Separator();
             ImGui::TextDisabled("All editor windows are hidden during Play.");
             ImGui::EndPopup();
         }
         tooltip("Show or hide editor windows");
+
+        // Lynxie : opens Commands on her tab.
+        ImGui::SameLine();
+        {
+            // Same height as the text buttons of the toolbar.
+            const float icon_height =
+                ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.y * 2.f;
+
+            if (lynx::editor::lynxie_icon::Button("Lynxie", icon_height))
+            {
+                editorWindows.commands = true;
+                SaveEditorWindowVisibility();
+                lynx::editor::commands_window::ShowLynxie();
+            }
+        }
+        tooltip("Lynxie : ask a question about the engine, or what to change in the level");
 
         // Master volume stays available in both modes.
         ImGui::SameLine();
@@ -4790,6 +4536,134 @@ static void LoadEditorCamera()
 }
 
 
+// -----------------------------------------------------------------------------
+// Voxel units
+// -----------------------------------------------------------------------------
+// The engine now has ONE unit : 1 = 1 voxel. A project made before stored
+// positions in "world units" (one voxel = physical_voxel_size of them, 0.3 by
+// default). Once, when it opens : the actor positions of its levels and the
+// editor camera are divided by that size (the old files are kept as
+// *.before-voxel-units), then settings.cfg says "units voxel".
+// Sizes and speeds written in the game's code are NOT converted : the
+// warning says so.
+static void SaveSettings();
+
+static void MigrateToVoxelUnits()
+{
+    if (appSettings.voxelUnits)
+        return;
+
+    const float size = appSettings.legacyVoxelSize;
+    appSettings.voxelUnits = true;
+
+    if (std::fabs(size - 1.f) < 1e-6f)
+    {
+        SaveSettings();
+        return;
+    }
+
+    const float factor = 1.f / size;
+    int converted_files = 0;
+    std::error_code error;
+
+    auto scale_number = [factor](const std::string& text) -> std::string
+    {
+        char* end = nullptr;
+        const float value = std::strtof(text.c_str(), &end);
+        if (end == text.c_str())
+            return text;
+        std::ostringstream out;
+        out << std::setprecision(7) << value * factor;
+        return out.str();
+    };
+
+    // Levels : transform="transform:x,y,z;r;s" -> x, y, z divided.
+    const std::filesystem::path assets = std::filesystem::current_path() / "assets";
+    for (std::filesystem::recursive_directory_iterator it(assets, error), end; !error && it != end; it.increment(error))
+    {
+        std::error_code e;
+        if (!it->is_regular_file(e) || it->path().extension() != ".xml")
+            continue;
+
+        std::ifstream in(it->path(), std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        if (text.find("<Level") == std::string::npos || text.find("transform:") == std::string::npos)
+            continue;
+
+        std::string out;
+        size_t pos = 0;
+        bool changed = false;
+        for (;;)
+        {
+            const size_t start = text.find("transform:", pos);
+            if (start == std::string::npos)
+                break;
+            const size_t values = start + 10;
+            const size_t semicolon = text.find(';', values);
+            const size_t quote = text.find('"', values);
+            if (semicolon == std::string::npos || (quote != std::string::npos && quote < semicolon))
+            {
+                out += text.substr(pos, values - pos);
+                pos = values;
+                continue;
+            }
+
+            out += text.substr(pos, values - pos);
+            const std::string location = text.substr(values, semicolon - values);
+            std::string converted;
+            size_t from = 0;
+            for (int k = 0; k < 3; ++k)
+            {
+                const size_t comma = location.find(',', from);
+                const std::string part = location.substr(from, comma == std::string::npos ? std::string::npos : comma - from);
+                converted += scale_number(part);
+                if (comma == std::string::npos)
+                    break;
+                converted += ',';
+                from = comma + 1;
+            }
+            out += converted;
+            pos = semicolon;
+            changed = true;
+        }
+        out += text.substr(pos);
+
+        if (changed)
+        {
+            std::filesystem::copy_file(it->path(), it->path().string() + ".before-voxel-units",
+                                       std::filesystem::copy_options::overwrite_existing, e);
+            std::ofstream file(it->path(), std::ios::binary | std::ios::trunc);
+            file << out;
+            ++converted_files;
+        }
+    }
+
+    // Editor camera.
+    {
+        std::ifstream in(kEditorCameraFile);
+        float x, y, z;
+        if (in >> x >> y >> z)
+        {
+            in.close();
+            std::ofstream file(kEditorCameraFile, std::ios::trunc);
+            file << std::setprecision(9) << x * factor << " " << y * factor << " " << z * factor << "\n";
+        }
+    }
+
+    SaveSettings();
+
+    std::ostringstream message;
+    message << "This project used world units (1 voxel = " << size << " unit).\n"
+            << "The engine now uses voxel units everywhere (1 unit = 1 voxel).\n\n"
+            << "Converted : the actor positions of " << converted_files << " level file(s) (backup : "
+            << "*.before-voxel-units) and the editor camera.\n"
+            << "NOT converted : sizes, speeds and distances in the game's code and properties "
+            << "(multiply them by " << factor << "), and the gameplay camera height.";
+    ShowEditorWarning(message.str());
+}
+
+
 static void SaveEditorCamera()
 {
     std::ofstream file(kEditorCameraFile, std::ios::trunc);
@@ -4867,7 +4741,7 @@ namespace editor
 
         HRL_SetCameraFarPlane(
             editor_camera,
-            1000.f
+            10000.f   // voxel units : kCameraMaxZ and beyond
         );
 
 
@@ -4949,6 +4823,10 @@ namespace editor
             HRL_CreateGizmo(
                 viewport
             );
+
+        // Same size on the screen at any zoom (voxel units : the level is big).
+        HRL_SetGizmoUseScreenSize(gizmo, HRL_TRUE);
+        HRL_SetGizmoScreenSize(gizmo, 110.f);
 
 
         HRL_SetGizmoVisible(
@@ -5227,7 +5105,7 @@ namespace editor
         camZ =
             ClampCameraZ(
                 camZ -
-                static_cast<float>(yoffset) * 10.f
+                static_cast<float>(yoffset) * std::max(2.f, camZ * 0.08f)
             );
     }
 
@@ -5429,8 +5307,7 @@ namespace editor
 
 
         const bool javascript_editor_handles_shortcuts =
-            javascript_editor_open &&
-            ImGui::GetIO().WantCaptureKeyboard;
+            lynx::editor::script_editors::HasKeyboardFocus();
 
 
         if (ctrl_s &&
@@ -6096,7 +5973,17 @@ namespace editor
 
         DrawToolbar();
 
-        // While playing, the toolbar is the only ImGui window that remains visible.
+        // The Console stays visible while playing : output and errors of the game.
+        // (In the editor, it is drawn with the other windows below.)
+        if (isPlaying && editorWindows.console)
+            lynx::editor::output_console::Draw(&editorWindows.console);
+
+        // The Profiler too (profiling the game is the point) ; called even when
+        // closed : it stops recording then.
+        if (isPlaying)
+            lynx::editor::profiler_window::Draw(&editorWindows.profiler);
+
+        // While playing, the toolbar and the Console are the only ImGui windows that remain visible.
         if (!isPlaying)
         {
             ImGuiIO& io =
@@ -6128,6 +6015,7 @@ namespace editor
             editing_actor &&
             !io.WantTextInput &&
             !content_browser_focused &&
+            !lynx::editor::node_graph_test::HasFocus() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
@@ -6548,10 +6436,10 @@ namespace editor
 
 
             // --------------------------------------------------------
-            // JavaScript Editor
+            // Script editors (one window per open file)
             // --------------------------------------------------------
 
-            DrawJavaScriptEditorWindow();
+            lynx::editor::script_editors::DrawAll(central_dock_id);
 
 
             // --------------------------------------------------------
@@ -6628,33 +6516,98 @@ namespace editor
                 // Properties
                 // ----------------------------------------------------
 
-                ImGui::Text("Properties");
-
                 const auto& properties =
                     editing_actor->GetProperties();
 
-                if (properties.empty())
+                // Transform properties first, in their own section
+                // (Location / Rotation / Scale rows, like Unreal).
+                for (const auto& [name, prop] : properties)
+                {
+                    if (prop.GetType() != 7)
+                        continue;
+
+                    auto ptr = std::get_if<lynx::transform*>(&prop.property_member);
+                    if (!ptr || !*ptr)
+                        continue;
+
+                    ImGui::PushID(name.c_str());
+                    const std::string header =
+                        (name == "transform" ? std::string("Transform") : name) + "##section";
+
+                    if (ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen) &&
+                        lynx::editor::property_widgets::BeginTable("##transform"))
+                    {
+                        lynx::transform& value = **ptr;
+
+                        if (lynx::editor::property_widgets::TransformRows(value))
+                        {
+                            // Keep the editor gizmo synchronized with
+                            // the transform edited from the Details panel.
+                            SyncGizmoFromTransform(value);
+                            details_changed = true;
+                            MarkEditorDirty();
+                        }
+
+                        lynx::editor::property_widgets::EndTable();
+                    }
+                    ImGui::PopID();
+                }
+
+                if (!ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    // section closed
+                }
+                else if (properties.size() <= 1)
                 {
                     ImGui::TextDisabled(
                         "No properties"
                     );
                 }
-                else
+                else if (lynx::editor::property_widgets::BeginTable("##properties"))
                 {
                     for (const auto& [name, prop] : properties)
                     {
-                        // object_id_ is edited separately above.
-                        if (name == "object_id_")
+                        // object_id_ is edited separately above, transforms in their section.
+                        if (name == "object_id_" || prop.GetType() == 7)
                             continue;
 
                         ImGui::PushID(name.c_str());
 
-                            ImGui::Text("%s", name.c_str());
-                            ImGui::SameLine();
+                            // Vectors draw their own row (label with its menu) ;
+                            // a vec3 / vec4 called "...color..." is a color picker.
+                            const int type = prop.GetType();
+                            const bool is_color = (type == 5 || type == 6) && IsColorPropertyName(name);
+                            if (type < 4 || type > 6 || is_color)
+                                lynx::editor::property_widgets::RowLabel(name.c_str());
 
                             bool changed = false;
 
-                            switch (prop.GetType())
+                            if (is_color)
+                            {
+                                ImGui::SetNextItemWidth(-FLT_MIN);
+                                if (auto ptr = std::get_if<lynx::vec3*>(&prop.property_member); ptr && *ptr)
+                                {
+                                    float rgb[3] = { (*ptr)->x, (*ptr)->y, (*ptr)->z };
+                                    if (ImGui::ColorEdit3("##color", rgb, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR))
+                                    {
+                                        **ptr = lynx::vec3(rgb[0], rgb[1], rgb[2]);
+                                        changed = true;
+                                    }
+                                }
+                                else if (auto ptr4 = std::get_if<lynx::vec4*>(&prop.property_member); ptr4 && *ptr4)
+                                {
+                                    float rgba[4] = { (*ptr4)->x, (*ptr4)->y, (*ptr4)->z, (*ptr4)->w };
+                                    if (ImGui::ColorEdit4("##color", rgba, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR))
+                                    {
+                                        (*ptr4)->x = rgba[0];
+                                        (*ptr4)->y = rgba[1];
+                                        (*ptr4)->z = rgba[2];
+                                        (*ptr4)->w = rgba[3];
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            else switch (prop.GetType())
                             {
                                 case 0: // int
                                 {
@@ -6724,10 +6677,12 @@ namespace editor
                                                 (*ptr)->y
                                             };
 
-                                            if (ImGui::DragFloat2(
-                                                    "##value",
+                                            if (lynx::editor::property_widgets::VectorRow(
+                                                    name.c_str(),
                                                     values,
-                                                    0.05f
+                                                    2,
+                                                    0.05f,
+                                                    nullptr
                                                 ))
                                             {
                                                 (*ptr)->x = values[0];
@@ -6753,10 +6708,12 @@ namespace editor
                                                 (*ptr)->z
                                             };
 
-                                            if (ImGui::DragFloat3(
-                                                    "##value",
+                                            if (lynx::editor::property_widgets::VectorRow(
+                                                    name.c_str(),
                                                     values,
-                                                    0.05f
+                                                    3,
+                                                    0.05f,
+                                                    nullptr
                                                 ))
                                             {
                                                 (*ptr)->x = values[0];
@@ -6784,10 +6741,12 @@ namespace editor
                                                 (*ptr)->w
                                             };
 
-                                            if (ImGui::DragFloat4(
-                                                    "##value",
+                                            if (lynx::editor::property_widgets::VectorRow(
+                                                    name.c_str(),
                                                     values,
-                                                    0.05f
+                                                    4,
+                                                    0.05f,
+                                                    nullptr
                                                 ))
                                             {
                                                 (*ptr)->x = values[0];
@@ -6893,6 +6852,8 @@ namespace editor
 
                         ImGui::PopID();
                     }
+
+                    lynx::editor::property_widgets::EndTable();
                 }
             }
 
@@ -7627,6 +7588,39 @@ namespace editor
                 SaveEditorWindowVisibility();
         }
 
+        // Ship Game window (and its steps : build, packing).
+        lynx::editor::ship_game::SetProject(currentProject.root, currentProject.name);
+        lynx::editor::ship_game::Draw([]() { SaveEditor(); });
+
+        // Node graph test window (ImNodes with the pixel style).
+        if (editorWindows.nodeGraphTest)
+        {
+            lynx::editor::node_graph_test::Draw(&editorWindows.nodeGraphTest);
+
+            if (!editorWindows.nodeGraphTest)
+                SaveEditorWindowVisibility();
+        }
+
+        // Profiler (frame times, LYNX_PROFILE_SCOPE zones, Tracy).
+        {
+            const bool was_open = editorWindows.profiler;
+
+            lynx::editor::profiler_window::Draw(&editorWindows.profiler);
+
+            if (was_open != editorWindows.profiler)
+                SaveEditorWindowVisibility();
+        }
+
+        // Output of the editor (stdout / stderr, the Windows console is disabled).
+        {
+            const bool was_open = editorWindows.console;
+
+            lynx::editor::output_console::Draw(&editorWindows.console);
+
+            if (was_open != editorWindows.console)
+                SaveEditorWindowVisibility();
+        }
+
         // Git (version control of the project folder).
         {
             const bool was_open = editorWindows.git;
@@ -7667,11 +7661,19 @@ namespace editor
                 ImGui::Separator();
             }
 
-            if (editor_dirty)
+            const bool scripts_dirty =
+                lynx::editor::script_editors::HasUnsavedChanges();
+
+            if (editor_dirty || scripts_dirty)
             {
-                ImGui::TextUnformatted(
-                    "The level has unsaved changes."
-                );
+                if (editor_dirty)
+                    ImGui::TextUnformatted(
+                        "The level has unsaved changes."
+                    );
+                if (scripts_dirty)
+                    ImGui::TextUnformatted(
+                        "Some scripts have unsaved changes (marked * in their tab)."
+                    );
                 ImGui::TextUnformatted(
                     "Do you want to save before quitting?"
                 );
@@ -7679,7 +7681,9 @@ namespace editor
 
                 if (ImGui::Button("Save and Quit"))
                 {
-                    SaveEditor();
+                    if (editor_dirty)
+                        SaveEditor();
+                    lynx::editor::script_editors::SaveAll();
                     glfwSetWindowShouldClose(win, GLFW_TRUE);
                     ImGui::CloseCurrentPopup();
                 }
@@ -8148,6 +8152,9 @@ static LONG WINAPI EditorCrashFilter(EXCEPTION_POINTERS* info)
 
 int main(int argc, char** argv)
 {
+    // No Windows console (-mwindows) : stdout / stderr go to the Console window.
+    lynx::editor::output_console::Start();
+
 #ifdef _WIN32
     SetUnhandledExceptionFilter(EditorCrashFilter);
 #endif
@@ -8284,6 +8291,7 @@ int main(int argc, char** argv)
 
     // Project files (working directory = project root).
     LoadSettings();
+    MigrateToVoxelUnits();
 
     LoadInputConfig();
 
@@ -8617,9 +8625,14 @@ int main(int argc, char** argv)
 
 
 
-    HRL_SetVoxelPhysicalSize(
+    // One unit everywhere : 1 world unit = 1 voxel.
+    HRL_SetVoxelPhysicalSize(scene, 1.f);
+
+    // New project (project browser > New project) : first level of its template,
+    // painted once (.lynx/starter_terrain.txt, deleted afterwards).
+    lynx::editor::project_templates::ApplyStarterTerrain(
         scene,
-        appSettings.voxelPhysicalSize
+        world_file_path_string
     );
 
 
@@ -8752,6 +8765,7 @@ int main(int argc, char** argv)
         gameHooks.Clear();
 
         gameModule.reset();
+        lynx::profiler::Reset();   // zone names of the unloaded DLL
 
         level = nullptr;
 
@@ -8827,9 +8841,14 @@ int main(int argc, char** argv)
     // Main loop
     // ------------------------------------------------------------
 
+    LYNX_PROFILE_THREAD("Main");
+
     while (!glfwWindowShouldClose(win))
     {
-        glfwPollEvents();
+        {
+            LYNX_PROFILE_SCOPE("Events");
+            glfwPollEvents();
+        }
 
 
         // --------------------------------------------------------
@@ -9054,6 +9073,7 @@ int main(int argc, char** argv)
 
         if (!lynx::editor::input_settings::BlocksEditorShortcuts())
         {
+            LYNX_PROFILE_SCOPE("Editor Tick");
             editor::Tick(
                 win,
                 dt
@@ -9065,6 +9085,10 @@ int main(int argc, char** argv)
         // Engine / HRL
         // --------------------------------------------------------
         lynx::gamepad::Poll(editor::BlockGameInput());
+
+        // New lines of the Console : also on the screen of the scene.
+        lynx::editor::output_console::FlushToScreen(scene);
+
         engine->ProgressOneFrame(dt);
 
 
@@ -9073,20 +9097,32 @@ int main(int argc, char** argv)
         // --------------------------------------------------------
 
         if (gameHooks.update_gameplay_camera)
+        {
+            LYNX_PROFILE_SCOPE("Game camera");
             gameHooks.update_gameplay_camera(gameplay_cam, dt);
+        }
 
 
         // --------------------------------------------------------
         // Editor UI (ImGui)
         // --------------------------------------------------------
 
-        editor::DrawUI(win);
+        {
+            LYNX_PROFILE_SCOPE("Editor UI");
+            editor::DrawUI(win);
+        }
 
         // Screenshots / frame waits asked by commands (the frame is drawn).
         ProcessFrameEndCommands();
 
 
-        glfwSwapBuffers(win);
+        {
+            // Includes the wait for vsync when it is on.
+            LYNX_PROFILE_SCOPE("Swap buffers");
+            glfwSwapBuffers(win);
+        }
+
+        LYNX_PROFILE_FRAME();
     }
 
 

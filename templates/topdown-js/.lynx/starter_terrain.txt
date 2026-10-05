@@ -1,0 +1,11 @@
+# First level, painted by the editor the first time the project is opened
+# (then this file is deleted). One rectangle per line, VOXEL units (1 = 1 voxel) :
+#     x_min y_min x_max y_max voxel_type      (type : position in assets/voxels.json)
+953 1637 1047 1697 4
+987 1663 1013 1670 5
+997 1653 1003 1680 5
+953 1637 1047 1638 3
+953 1695 1047 1697 3
+953 1637 955 1697 3
+1045 1637 1047 1697 3
+1010 1682 1023 1688 6

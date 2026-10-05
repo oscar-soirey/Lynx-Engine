@@ -1,4 +1,5 @@
 .build/
 .idea/
 build/
+blocky/
 jeu.txt

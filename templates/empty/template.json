@@ -1,0 +1,5 @@
+{
+    "name": "Vide",
+    "description": "Le minimum pour démarrer : un module C++ avec une classe d'exemple, un niveau vide et une petite bande de terrain.",
+    "order": 1
+}

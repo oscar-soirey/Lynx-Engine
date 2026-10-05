@@ -19,8 +19,17 @@ Petit programme (ImGui + GLFW) qui prépare une machine Windows pour Lynx.
   (`qwen2.5-coder:7b` est conseillé, comme dans `python/README.md`), ou on
   saisit n'importe quel tag Ollama. Le launcher démarre `ollama serve` au besoin,
   affiche la progression de `ollama pull` et permet de supprimer un modèle.
-- **Moteur** : se débloque quand toutes les dépendances sont installées.
-  L'installation d'une version (depuis les releases GitHub) est à venir.
+- **Moteur** : les versions viennent des releases GitHub de
+  [oscar-soirey/Lynx-Engine](https://github.com/oscar-soirey/Lynx-Engine/releases)
+  (API GitHub lue avec `curl`). Chaque version est une carte : numéro,
+  Beta / Stable, date, taille, notes de version, et les boutons
+  *Installer* / *Lancer* / *Dossier* / *Retirer*. L'archive Windows de la
+  release (`lynx-w-x64-binaries.zip`) est téléchargée puis extraite avec `tar`
+  dans `%LOCALAPPDATA%\Lynx\versions\<tag>\` : plusieurs versions peuvent
+  cohabiter. *Lancer* ouvre `LynxEditor.exe` de la version. L'installation
+  demande que toutes les dépendances soient présentes.
+
+  `curl.exe` et `tar.exe` sont fournis avec Windows 10 (1803+) et 11.
 
 Un journal en bas de la fenêtre affiche la sortie des commandes.
 
@@ -33,7 +42,8 @@ et `LynxRuntime` : `cmake --build build --target LynxLauncher` (ou la cible
 
 Il ne dépend pas de `lynx.dll` et il est lié en statique (`-static`) : il doit
 démarrer sur un ordinateur où MinGW n'est pas encore installé.
-Police : `normal-font.ttf` à côté de l'exécutable (comme l'éditeur), sinon Segoe UI.
+Police : `normal-font.ttf` à côté de l'exécutable (comme l'éditeur, en 24 px), sinon Segoe UI.
+Les tailles de l'interface sont calculées à partir du texte (pas de largeurs en pixels).
 
 ## Code
 
@@ -42,6 +52,7 @@ main.cpp              fenêtre GLFW, boucle ImGui, style, polices
 Launcher.*        interface et tâches en arrière-plan (un thread à la fois)
 Dependencies.*    liste des dépendances, détection, installation winget
 Models.*          catalogue de modèles, ollama list / pull / rm / serve
+Engine.*          releases GitHub, téléchargement, extraction, lancement
 Process.*         lancement de commandes avec lecture de la sortie, PATH
 ```
 

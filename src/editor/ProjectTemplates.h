@@ -1,0 +1,59 @@
+#pragma once
+
+// =============================================================================
+// Project templates (editor "New project")
+// -----------------------------------------------------------------------------
+// A template is a folder next to the editor : <editor>/templates/<id>/ (copied
+// from Lynx/templates at build time). A new project = templates/_common/ then
+// templates/<id>/ on top of it (same path : the template's file wins).
+//
+//   templates/<id>/template.json   { "name": ..., "description": ..., "order": 1 }
+//
+// In text files (and file names), these words are replaced :
+//   {{PROJECT_NAME}}    identifier : CMake target, DLL name   (ex : MyGame)
+//   {{PROJECT_TITLE}}   name as typed by the user             (ex : My Game)
+//
+// .lynx/starter_terrain.txt (optional) : voxels painted the first time the
+// project is opened, see ApplyStarterTerrain().
+// =============================================================================
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace lynx::editor::project_templates
+{
+	struct Template
+	{
+		std::string id;            // folder name
+		std::string name;
+		std::string description;
+		int order = 100;
+		std::filesystem::path folder;
+	};
+
+	// <editor>/templates
+	std::filesystem::path TemplatesFolder();
+
+	// Every template, sorted by "order" then name. `error` : why the list is empty.
+	std::vector<Template> List(std::string& error);
+
+	// "Mon jeu 2" -> "MonJeu2" ("Game" in front when it starts with a digit).
+	std::string ToIdentifier(const std::string& title);
+
+	// Folder of the new project : `parent` / title without the characters
+	// Windows does not allow in a file name.
+	std::filesystem::path ProjectFolder(const std::filesystem::path& parent, const std::string& title);
+
+	// Creates the project. The folder must not exist, or be empty.
+	bool Create(const Template& tmpl, const std::filesystem::path& parent, const std::string& title,
+	            std::filesystem::path& out_root, std::string& error);
+
+	// Editor startup, once the voxel world of the project is loaded : paints
+	// the rectangles of .lynx/starter_terrain.txt (working directory = project
+	// root), saves the world to `world_file`, then deletes the text file.
+	// Lines : "x_min y_min x_max y_max type" in WORLD units, '#' comments.
+	// Returns true if something was painted.
+	bool ApplyStarterTerrain(uint32_t scene, const std::string& world_file);
+}

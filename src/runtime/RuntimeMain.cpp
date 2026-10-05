@@ -33,6 +33,10 @@
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <cstdint>
+#ifdef _WIN32
+#include <io.h>
+#endif
 
 #include "../audio/AudioCommon.h"
 #include "../core/Private/SystemModule.h"
@@ -617,6 +621,29 @@ static std::filesystem::path FindGameModule(const std::filesystem::path& project
 }
 
 
+#ifdef _WIN32
+// Shipped game (no console) : a crash writes where it happened in <Game>.log,
+// next to the output of the game.
+static LONG WINAPI ShippedCrashHandler(EXCEPTION_POINTERS* info)
+{
+    const DWORD code = info && info->ExceptionRecord ? info->ExceptionRecord->ExceptionCode : 0;
+    void* address = info && info->ExceptionRecord ? info->ExceptionRecord->ExceptionAddress : nullptr;
+
+    char module_name[MAX_PATH] = "?";
+    HMODULE module = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           static_cast<LPCSTR>(address), &module) && module)
+        GetModuleFileNameA(module, module_name, MAX_PATH);
+
+    std::fprintf(stderr, "\n[CRASH] exception 0x%08lX at %p in %s (+0x%llX)\n",
+                 static_cast<unsigned long>(code), address, module_name,
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(module)));
+    std::fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+
 int main(int argc, char** argv)
 {
     // ------------------------------------------------------------
@@ -625,7 +652,34 @@ int main(int argc, char** argv)
 
     std::error_code path_error;
 
-    if (argc > 1 && argv[1] && argv[1][0] != '\0')
+    // Shipped game (editor > Ship Game) : the assets are packed in this
+    // executable ; the game DLL, the engine DLLs and input.json are next to it.
+    const bool shipped = lynx::fs::HasEmbeddedArchive();
+
+    if (shipped)
+    {
+        std::filesystem::current_path(lynx::host::GetEditorDirectory(), path_error);
+        lynx::Engine::SetReleaseMode(true);
+
+#ifdef _WIN32
+        // No console : everything printed goes to <Game>.log next to the game,
+        // a crash too (where it happened).
+        wchar_t exe_path[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0)
+        {
+            const std::filesystem::path log = std::filesystem::path(exe_path).replace_extension(".log");
+            if (_wfreopen(log.wstring().c_str(), L"w", stdout))
+            {
+                _dup2(_fileno(stdout), _fileno(stderr));
+                std::setvbuf(stdout, nullptr, _IONBF, 0);
+                std::setvbuf(stderr, nullptr, _IONBF, 0);
+            }
+        }
+        SetUnhandledExceptionFilter(ShippedCrashHandler);
+#endif
+        std::cout << "[RUNTIME] Shipped game : assets read from the executable\n";
+    }
+    else if (argc > 1 && argv[1] && argv[1][0] != '\0')
     {
         std::filesystem::current_path(argv[1], path_error);
 
@@ -640,7 +694,7 @@ int main(int argc, char** argv)
     const std::filesystem::path project_root =
         std::filesystem::current_path(path_error);
 
-    if (!std::filesystem::is_directory(project_root / "assets", path_error))
+    if (!shipped && !std::filesystem::is_directory(project_root / "assets", path_error))
     {
         std::cerr << "[RUNTIME] No assets/ folder in " << project_root.string()
                   << " (run it from the project folder, or give the folder as argument)\n";
@@ -693,7 +747,19 @@ int main(int argc, char** argv)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // Window title : the project (folder) name.
-    std::string window_title = project_root.filename().string();
+    // Window title : the executable name for a shipped game, else the project folder.
+    std::string window_title = shipped
+        ? lynx::host::GetEditorDirectory().filename().string()
+        : project_root.filename().string();
+
+    if (shipped)
+    {
+#ifdef _WIN32
+        wchar_t exe_path[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0)
+            window_title = std::filesystem::path(exe_path).stem().string();
+#endif
+    }
 
     if (window_title.empty())
         window_title = "Lynx Engine";
@@ -871,10 +937,8 @@ int main(int argc, char** argv)
     }
 
 
-    HRL_SetVoxelPhysicalSize(
-        scene,
-        appSettings.voxelPhysicalSize
-    );
+    // One unit everywhere : 1 world unit = 1 voxel.
+    HRL_SetVoxelPhysicalSize(scene, 1.f);
 
 
     HRL_id viewport =
@@ -968,9 +1032,18 @@ int main(int argc, char** argv)
         engine->ProgressOneFrame(dt);
 
         if (gameHooks.update_gameplay_camera)
+        {
+            LYNX_PROFILE_SCOPE("Game camera");
             gameHooks.update_gameplay_camera(gameplay_cam, dt);
+        }
 
-        glfwSwapBuffers(win);
+        {
+            LYNX_PROFILE_SCOPE("Swap buffers");
+            glfwSwapBuffers(win);
+        }
+
+        // Tracy : one frame (the runtime has no built-in Profiler window).
+        LYNX_PROFILE_FRAME();
     }
 
 

@@ -1,0 +1,4 @@
+# Painted by the editor the first time the project is opened (then deleted).
+#     x_min y_min x_max y_max voxel_type      (VOXEL units (1 = 1 voxel) ; type : position in assets/voxels.json)
+967 1658 1033 1663 2
+967 1663 1033 1665 1

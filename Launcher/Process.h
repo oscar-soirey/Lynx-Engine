@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <functional>
 #include <string>
 
@@ -15,6 +16,12 @@ namespace Process
 
 	// Lance un processus détaché (ex : `ollama serve`), sans attendre.
 	bool Spawn(const std::string& command);
+
+	// Lance un exécutable graphique (sans console), dans le dossier de travail donné.
+	bool Launch(const std::filesystem::path& executable, const std::filesystem::path& working_directory);
+
+	// Ouvre un dossier dans l'explorateur.
+	void OpenFolder(const std::filesystem::path& folder);
 
 	// Windows : relit le PATH dans le registre (machine + utilisateur) pour que
 	// les programmes qu'on vient d'installer soient trouvés sans relancer.

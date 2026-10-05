@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level>
+    <Player object_id_="player" transform="transform:973.33,1665.33,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_1" transform="transform:1025,1676,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_2" transform="transform:1055,1682.67,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_3" transform="transform:1083.33,1666,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_4" transform="transform:1093.33,1666,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_5" transform="transform:1103.33,1666,0;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:1000,1686.67,10;0,0,0;1,1,1" color="vec3:0.75,0.85,1" intensity="0.4"/>
+    <DirectionalLightActor object_id_="sun" transform="transform:986.67,1690,10;-45,-60,0;1,1,1" color="vec3:1,0.96,0.88" intensity="1.0"/>
+    <PointLightActor object_id_="coin_light" transform="transform:1066.67,1676.67,6.67;0,0,0;1,1,1" color="vec3:1,0.8,0.45" intensity="1.5"/>
+</Level>

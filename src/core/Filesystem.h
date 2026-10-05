@@ -40,4 +40,9 @@ namespace lynx::fs
 
 	// Returns whether the filesystem was initialized successfully.
 	LYNX_API bool IsInitialized();
+
+	// The running executable carries the assets : a zip appended at its end
+	// (a game made by the editor's "Ship Game"). Archive mode then reads the
+	// executable itself, otherwise assets.pak next to it.
+	LYNX_API bool HasEmbeddedArchive();
 }

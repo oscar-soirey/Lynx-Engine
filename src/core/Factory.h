@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #define LYNX_MODULE_FUNCTION extern "C" __declspec(dllexport)
@@ -92,8 +93,19 @@ namespace lynx
         {
             for (const auto& [name, constructor] : factory)
             {
+                // A game class with the name of an engine class was refused
+                // by RegisterObject : the engine one stays.
+                if (builtin_.count(name))
+                    continue;
                 factory_.erase(name);
             }
+        }
+
+        // Classes of the engine itself (EngineActors.h) : kept when a game
+        // module is unloaded.
+        void MarkBuiltin(const char* name)
+        {
+            builtin_.emplace(name);
         }
 
         const Factory* GetInternalFactory() const
@@ -103,5 +115,6 @@ namespace lynx
 
     private:
         Factory factory_;
+        std::unordered_set<std::string> builtin_;
     };
 }

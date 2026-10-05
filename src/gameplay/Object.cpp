@@ -303,6 +303,14 @@ namespace lynx
 
 	std::string Object::GetTypeName() const
 	{
-		return script_class_.empty() ? ETypeName(*this) : script_class_;
+		if (!script_class_.empty())
+			return script_class_;
+
+		// Engine classes (lynx::PointLightActor...) : registered and saved
+		// without the namespace.
+		std::string name = ETypeName(*this);
+		if (name.rfind("lynx::", 0) == 0)
+			name.erase(0, 6);
+		return name;
 	}
 }

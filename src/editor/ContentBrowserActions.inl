@@ -282,8 +282,8 @@ namespace content_browser_actions
 
         if (stdfs::is_directory(path, error))
             content_browser_current_path = path;
-        else if (IsJavaScriptFile(path))
-            OpenJavaScriptEditor(path);
+        else if (lynx::editor::script_editors::CanOpen(path))
+            lynx::editor::script_editors::Open(path);
         else
             OpenInExplorer(path, false);   // default application
     }
@@ -357,8 +357,7 @@ namespace content_browser_actions
                 return false;
             }
 
-            if (javascript_editor_open && javascript_editor_path == state.rename_target)
-                javascript_editor_path = destination;
+            lynx::editor::script_editors::PathMoved(state.rename_target, destination);
 
             if (content_browser_current_path == state.rename_target)
                 content_browser_current_path = destination;
@@ -404,7 +403,7 @@ namespace content_browser_actions
         if (IsJs(destination))
         {
             ScriptsChanged({ destination });
-            OpenJavaScriptEditor(destination);
+            lynx::editor::script_editors::Open(destination);
         }
 
         return true;
@@ -484,11 +483,7 @@ namespace content_browser_actions
             std::cout << "[CONTENT BROWSER] Deleted " << target.generic_string()
                       << " (kept in " << destination.generic_string() << ")\n";
 
-            if (javascript_editor_open && IsPathInside(javascript_editor_path, target))
-            {
-                javascript_editor_open = false;
-                javascript_editor_dirty = false;
-            }
+            lynx::editor::script_editors::PathDeleted(target);
 
             if (IsPathInside(content_browser_current_path, target))
                 content_browser_current_path = target.parent_path();
@@ -544,8 +539,8 @@ namespace content_browser_actions
             {
                 stdfs::rename(source, destination, error);
 
-                if (!error && javascript_editor_open && javascript_editor_path == source)
-                    javascript_editor_path = destination;
+                if (!error)
+                    lynx::editor::script_editors::PathMoved(source, destination);
             }
             else
             {

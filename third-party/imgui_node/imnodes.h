@@ -49,6 +49,7 @@ enum ImNodesCol_
     ImNodesCol_MiniMapLinkSelected,
     ImNodesCol_MiniMapCanvas,
     ImNodesCol_MiniMapCanvasOutline,
+    ImNodesCol_NodeOutlineSelected, // [PIXEL STYLE] 1px frame around the selected nodes (alpha 0 : none)
     ImNodesCol_COUNT
 };
 
@@ -199,6 +200,10 @@ struct ImNodesStyle
     // Mini-map offset from the screen side.
     ImVec2 MiniMapOffset;
 
+    // [PIXEL STYLE] A grid line every GridMajorLinesEvery cells is drawn with
+    // ImNodesCol_GridLinePrimary (graph paper). 0 : only the origin lines (ImNodesStyleFlags_GridLinesPrimary).
+    int GridMajorLinesEvery;
+
     // By default, ImNodesStyleFlags_NodeOutline and ImNodesStyleFlags_Gridlines are enabled.
     ImNodesStyleFlags Flags;
     // Set these mid-frame using Push/PopColorStyle. You can index this color array with with a
@@ -261,7 +266,15 @@ ImNodesIO& GetIO();
 ImNodesStyle& GetStyle();
 // Style presets matching the dear imgui styles of the same name. If dest is NULL, the active
 // context's ImNodesStyle instance will be used as the destination.
-void StyleColorsDark(ImNodesStyle* dest = NULL); // on by default
+void StyleColorsDark(ImNodesStyle* dest = NULL); // on by default (stock imnodes)
+// [PIXEL STYLE] Colors taken from the current ImGui style (the Lynx pixel theme, light or dark) :
+// canvas = window background with its graph paper grid, nodes = small windows (1px outline, raised
+// title bar), links and pins = the plot / selection colors. On by default when the ImGui pixel style
+// is compiled in. Call it again after changing the ImGui theme.
+void StyleColorsPixel(ImNodesStyle* dest = NULL);
+// [PIXEL STYLE] Sizes of the pixel look (grid spacing = ImGui WindowGridSize, stair-stepped corners,
+// square pins, 2px links) + StyleColorsPixel().
+void StylePixel(ImNodesStyle* dest = NULL);
 void StyleColorsClassic(ImNodesStyle* dest = NULL);
 void StyleColorsLight(ImNodesStyle* dest = NULL);
 

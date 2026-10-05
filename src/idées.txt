@@ -1,7 +1,15 @@
 un systeme de possession, avec player controller qui decrit un viewport hrl et qui possede un Actor*
 
-window console
-
-installateur qui installe toutes les dépendances
-
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
+
+node editor pour les animations et les IA (jumelés avec le javascript)
+
+gestion de la musique pour les jeux open world
+
+widget editor type unreal
+
+editeur graphique de json
+
+compiler les libs en release
+
+pouvoir choisir l'icone de l'executable dans ship game

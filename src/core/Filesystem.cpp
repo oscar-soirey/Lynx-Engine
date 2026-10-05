@@ -17,6 +17,49 @@ namespace
 
     bool g_initialized = false;
 
+    std::filesystem::path GetExecutablePath()
+    {
+#ifdef _WIN32
+        wchar_t buffer[MAX_PATH];
+
+        const DWORD length =
+            GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+
+        if (length == 0 || length >= MAX_PATH)
+            return std::filesystem::path();
+
+        return std::filesystem::path(buffer);
+#else
+        return std::filesystem::path();
+#endif
+    }
+
+    // A zip "end of central directory" record in the last 64 KB of the file.
+    bool FileEndsWithZip(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file)
+            return false;
+
+        const std::streamoff size = file.tellg();
+        const std::streamoff tail = std::min<std::streamoff>(size, 22 + 65535);
+        if (tail < 22)
+            return false;
+
+        std::vector<char> data(static_cast<size_t>(tail));
+        file.seekg(size - tail);
+        file.read(data.data(), tail);
+        if (!file)
+            return false;
+
+        for (std::streamoff i = tail - 22; i >= 0; --i)
+        {
+            if (data[i] == 'P' && data[i + 1] == 'K' && data[i + 2] == 5 && data[i + 3] == 6)
+                return true;
+        }
+        return false;
+    }
+
     std::filesystem::path GetExecutableDirectory()
     {
 #ifdef _WIN32
@@ -101,17 +144,24 @@ namespace lynx::fs
 
         if (source == AssetSource::Archive)
         {
-            if (!ArchiveExists())
+            // Assets inside the executable (Ship Game), else assets.pak.
+            const bool embedded = HasEmbeddedArchive();
+
+            if (!embedded && !ArchiveExists())
                 return false;
 
             if (!InitializePhysFS())
                 return false;
 
             const auto archivePath =
-                GetExecutableDirectory() / "assets.pak";
+                embedded ? GetExecutablePath() : GetExecutableDirectory() / "assets.pak";
+
+            // PhysFS takes UTF-8 paths.
+            const auto archive_utf8 = archivePath.u8string();
+            const std::string archive_path(archive_utf8.begin(), archive_utf8.end());
 
             if (!PHYSFS_mount(
-                    archivePath.string().c_str(),
+                    archive_path.c_str(),
                     nullptr,
                     1))
             {
@@ -339,6 +389,15 @@ namespace lynx::fs
 
         std::sort(out.begin(), out.end());
         return out;
+    }
+
+    bool HasEmbeddedArchive()
+    {
+        static const bool embedded = [] {
+            const std::filesystem::path exe = GetExecutablePath();
+            return !exe.empty() && FileEndsWithZip(exe);
+        }();
+        return embedded;
     }
 
     AssetSource GetSource()

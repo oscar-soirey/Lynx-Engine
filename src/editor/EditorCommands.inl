@@ -5,8 +5,8 @@
 // commands/CommandRegistry.h and python/README.md). They reuse what the editor
 // UI does : undo entries, selection, snapshots, dirty flag...
 //
-// Coordinates : world units for actors (transform.location), voxel cells
-// (integers) for voxels.
+// Coordinates : ONE unit everywhere, 1 = 1 voxel (actor locations, sizes,
+// camera) ; voxel cells are the integer part (cell [x, y] covers x..x+1).
 // =============================================================================
 
 namespace cmd = lynx::editor::commands;
@@ -919,7 +919,7 @@ static void RegisterEditorCommands()
         });
 
     cmd::Register("editor.camera",
-        "Moves the editor camera (world units ; z = height, bigger = further). Returns the position.",
+        "Moves the editor camera (voxels ; z = height, bigger = further). Returns the position.",
         {
             { "x", "number", "Camera x.", false },
             { "y", "number", "Camera y.", false },
@@ -1741,7 +1741,7 @@ static void RegisterEditorCommands()
         });
 
     cmd::Register("voxel.world_to_cell",
-        "Converts a world position to a voxel cell.",
+        "Converts a position (voxels, fractional) to its voxel cell (integers). Positions and voxels share one unit.",
         {
             { "x", "number", "World x.", true },
             { "y", "number", "World y.", true },
@@ -1761,7 +1761,7 @@ static void RegisterEditorCommands()
         });
 
     cmd::Register("voxel.cell_to_world",
-        "World position of the center of a voxel cell.",
+        "Position of the center of a voxel cell (cell + 0.5, same unit as the actors).",
         {
             { "x", "integer", "Cell x.", true },
             { "y", "integer", "Cell y.", true },

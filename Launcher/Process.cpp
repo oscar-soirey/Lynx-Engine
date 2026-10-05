@@ -105,6 +105,28 @@ namespace Process
 		return true;
 	}
 
+	bool Launch(const std::filesystem::path& executable, const std::filesystem::path& working_directory)
+	{
+		STARTUPINFOW si{};
+		si.cb = sizeof(si);
+		PROCESS_INFORMATION pi{};
+		std::wstring cmd = L"\"" + executable.wstring() + L"\"";
+		std::vector<wchar_t> buffer(cmd.begin(), cmd.end());
+		buffer.push_back(L'\0');
+		BOOL ok = CreateProcessW(executable.wstring().c_str(), buffer.data(), nullptr, nullptr, FALSE,
+		                         DETACHED_PROCESS, nullptr, working_directory.wstring().c_str(), &si, &pi);
+		if (!ok)
+			return false;
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
+		return true;
+	}
+
+	void OpenFolder(const std::filesystem::path& folder)
+	{
+		ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+	}
+
 	static std::string ReadRegistryPath(HKEY root, const char* key)
 	{
 		HKEY handle;
@@ -167,6 +189,18 @@ namespace Process
 	}
 
 	void RefreshPath() {}
+
+	bool Launch(const std::filesystem::path& executable, const std::filesystem::path& working_directory)
+	{
+		std::string cmd = "cd '" + working_directory.string() + "' && nohup '" + executable.string() + "' >/dev/null 2>&1 &";
+		return std::system(cmd.c_str()) == 0;
+	}
+
+	void OpenFolder(const std::filesystem::path& folder)
+	{
+		std::string cmd = "xdg-open '" + folder.string() + "' >/dev/null 2>&1 &";
+		std::system(cmd.c_str());
+	}
 
 	void OpenUrl(const std::string& url)
 	{

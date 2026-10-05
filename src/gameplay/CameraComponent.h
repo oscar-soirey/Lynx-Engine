@@ -35,7 +35,7 @@ namespace lynx
 
 		float fov = 20.f;
 		float near_plane = 0.1f;
-		float far_plane = 1000.f;
+		float far_plane = 10000.f;   // voxels
 
 		/** Lissage du suivi (par seconde). 0 = suit l'acteur exactement. */
 		float follow_speed = 0.f;

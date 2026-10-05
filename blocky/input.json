@@ -15,9 +15,6 @@
         "select-character": [
             "MOUSE_RIGHT",
             "GAMEPAD_LEFT_BUMPER"
-        ],
-        "Ekip": [
-            "KEY_V"
         ]
     },
     "axis-mappings": {

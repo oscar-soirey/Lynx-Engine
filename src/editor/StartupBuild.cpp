@@ -1,6 +1,7 @@
 #include "StartupBuild.h"
 
 #include "GameBuild.h"
+#include "EditorFonts.h"
 
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
@@ -68,11 +69,7 @@ namespace lynx::editor
 		ImGuiIO& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 
-		const fs::path font = host::GetEditorDirectory() / "normal-font.ttf";
-		std::error_code font_error;
-
-		if (fs::is_regular_file(font, font_error))
-			io.Fonts->AddFontFromFileTTF(font.string().c_str(), 20.f);
+		editor::fonts::Load(20.f);   // same fonts as the editor
 
 		ImGui::StyleColorsDark();
 		ImGui::GetStyle().FrameRounding = 4.f;

@@ -1,6 +1,9 @@
 #pragma once
 #include "Dependencies.h"
+#include "Engine.h"
 #include "Models.h"
+
+#include <imgui/imgui.h>
 
 #include <atomic>
 #include <functional>
@@ -30,6 +33,9 @@ private:
 	void RefreshModels();
 	void PullModels(std::vector<std::string> tags);
 	void RemoveModel(const std::string& tag);
+	void RefreshReleases();
+	void InstallRelease(size_t index);
+	void UninstallRelease(size_t index);
 
 	bool RequiredInstalled() const;   // à appeler sous m_mutex
 	bool OllamaInstalled() const;     // à appeler sous m_mutex
@@ -38,6 +44,7 @@ private:
 	void DrawDependencies();
 	void DrawModels();
 	void DrawEngine();
+	void DrawReleaseCard(size_t index, const ImVec2& size);
 	void DrawLog();
 
 	Page m_page = Page::Dependencies;
@@ -47,8 +54,12 @@ private:
 	std::vector<ModelInfo> m_models;
 	std::vector<std::string> m_other_models;   // installés mais hors catalogue
 	bool m_server_running = false;
+	bool m_models_loaded = false;
 	bool m_package_manager = false;
 	std::string m_package_manager_info;
+	std::vector<EngineRelease> m_releases;
+	std::string m_releases_error;
+	bool m_releases_loaded = false;
 	std::vector<std::string> m_log;
 	std::string m_task_label;
 

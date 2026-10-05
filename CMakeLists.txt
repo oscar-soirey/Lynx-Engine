@@ -40,6 +40,7 @@ add_library(Lynx SHARED
 		src/core/Level.cpp
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
+		src/core/Profiler.cpp
 
 		src/core/data/IniParser.cpp
 		src/core/Private/SystemModule.cpp
@@ -58,6 +59,7 @@ add_library(Lynx SHARED
 		src/gameplay/BoxColliderComponent.cpp
 		src/gameplay/SoundSourceComponent.cpp
 		src/gameplay/LightComponent.cpp
+		src/gameplay/EngineActors.cpp
 
 		src/audio/AudioDecoder.cpp
 		src/audio/Audio2D.cpp
@@ -90,6 +92,24 @@ target_link_libraries(Lynx PRIVATE
 		qjs
 )
 
+# Profiler (src/core/Profiler.h) : the Tracy client lives in lynx.dll, "on demand"
+# (no cost until tracy-profiler.exe connects). The editor, the runtime and the game
+# DLLs use the same client (TRACY_IMPORTS) : their zones show up in Tracy too.
+# The built-in Profiler window of the editor works with or without Tracy.
+option(LYNX_PROFILER_TRACY "Tracy profiler client in the engine (on demand)" ON)
+
+if(LYNX_PROFILER_TRACY)
+	target_sources(Lynx PRIVATE third-party/tracy/TracyClient.cpp)
+	target_compile_definitions(Lynx
+			PUBLIC    TRACY_ENABLE TRACY_ON_DEMAND
+			PRIVATE   TRACY_EXPORTS
+			INTERFACE TRACY_IMPORTS
+	)
+	target_link_libraries(Lynx PRIVATE ws2_32 dbghelp secur32 advapi32 user32)
+	# <tracy/Tracy.hpp> for the engine, the editor and the games
+	target_include_directories(Lynx PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third-party/tracy>")
+endif()
+
 # What a game needs to compile against the engine : the engine headers
 # (<Lynx.h>, <core/...>) and the third-party headers they use (<hrl/hrl.h>...).
 target_include_directories(Lynx INTERFACE
@@ -109,6 +129,7 @@ file(GLOB ImGUI_SOURCE
 add_executable(LynxEditor src/icon.rc
 		${ImGUI_SOURCE}
 		third-party/imgui_textedit/TextEditor.cpp
+		third-party/imgui_node/imnodes.cpp
 		third-party/glad/glad.c
 
 		src/host/GameProject.cpp
@@ -118,13 +139,28 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/InputSettingsEditor.cpp
 		src/editor/GameBuild.cpp
 		src/editor/StartupBuild.cpp
+		src/editor/OutputConsole.cpp
+		src/editor/ProjectTemplates.cpp
+		src/editor/LynxieIcon.cpp
+		src/editor/EditorIcons.cpp
+		src/editor/PropertyWidgets.cpp
+		src/editor/ProfilerWindow.cpp
+		src/editor/ScriptEditors.cpp
+		src/editor/MarkdownText.cpp
+		src/editor/NodeGraphTest.cpp
+		src/editor/EditorFonts.cpp
+		src/editor/ShipGame.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp
 		src/editor/commands/CommandUtils.cpp
 		src/editor/commands/CommandsWindow.cpp
 		src/editor/commands/ScriptRunner.cpp
+		src/editor/commands/FileEdits.cpp
 )
+
+# imnodes includes <imgui.h> / <imgui_internal.h> directly.
+target_include_directories(LynxEditor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third-party/imgui")
 
 target_link_libraries(LynxEditor PRIVATE
 		${HRL_LIB}
@@ -134,7 +170,12 @@ target_link_libraries(LynxEditor PRIVATE
 		ws2_32      # command server (Python scripts / MCP)
 		winhttp     # local Ollama chat API
 		shell32
+		ole32       # Ship Game : folder picker
 )
+
+# No Windows console : stdout / stderr are shown in the editor "Console" window
+# (src/editor/OutputConsole.cpp) and written to editor_output.log.
+target_link_options(LynxEditor PRIVATE -mwindows)
 
 # Python tools next to the editor : lynx_editor module + MCP server (see python/README.md)
 add_custom_command(TARGET LynxEditor POST_BUILD
@@ -142,6 +183,26 @@ add_custom_command(TARGET LynxEditor POST_BUILD
 				"${CMAKE_CURRENT_SOURCE_DIR}/python"
 				"$<TARGET_FILE_DIR:LynxEditor>/python"
 		COMMENT "Copying the Python tools (lynx_editor, lynx_mcp.py)"
+)
+
+# Fonts next to the editor : fonts/VCR-OSD-MONO.ttf (editor), fonts/OpenDyslexic-*.otf
+# (Lynxie's messages). See src/editor/EditorFonts.h.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fonts")
+	add_custom_command(TARGET LynxEditor POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+					"${CMAKE_CURRENT_SOURCE_DIR}/fonts"
+					"$<TARGET_FILE_DIR:LynxEditor>/fonts"
+			COMMENT "Copying the editor fonts"
+	)
+endif()
+
+# Project templates next to the editor : "New project" in the project browser
+# (see src/editor/ProjectTemplates.h). Edit or add templates in templates/.
+add_custom_command(TARGET LynxEditor POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${CMAKE_CURRENT_SOURCE_DIR}/templates"
+				"$<TARGET_FILE_DIR:LynxEditor>/templates"
+		COMMENT "Copying the project templates"
 )
 
 
@@ -163,7 +224,8 @@ target_link_libraries(LynxRuntime PRIVATE
 )
 
 
-## Lynx Launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models, see Launcher/README.md)
+## Lynx Launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models,
+## then the engine versions from the GitHub releases, see Launcher/README.md)
 # Independent from lynx.dll : it must start on a computer where nothing is installed yet.
 
 add_executable(LynxLauncher src/icon.rc
@@ -173,6 +235,7 @@ add_executable(LynxLauncher src/icon.rc
 		Launcher/Launcher.cpp
 		Launcher/Dependencies.cpp
 		Launcher/Models.cpp
+		Launcher/Engine.cpp
 		Launcher/Process.cpp
 )
 

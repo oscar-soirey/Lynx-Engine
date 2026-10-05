@@ -1,3 +1,4 @@
+#include "Profiler.h"
 #include "Level.h"
 
 #include "../gameplay/Actor.h"
@@ -33,6 +34,7 @@ namespace lynx
 
 	void Level::LoadFromFile(const char *_path, Engine* engine)
 	{
+		LYNX_PROFILE_SCOPE("Level::LoadFromFile");
 		using namespace tinyxml2;
 
 		auto file_data = fs::ReadBinary(_path);

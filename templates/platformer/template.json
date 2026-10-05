@@ -1,0 +1,5 @@
+{
+    "name": "Plateforme 2D",
+    "description": "Un joueur en C++ (gravité, saut, collisions avec les voxels), des pièces en JavaScript et un premier niveau. Flèches / A D pour bouger, Espace pour sauter.",
+    "order": 2
+}

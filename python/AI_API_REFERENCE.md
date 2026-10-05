@@ -49,6 +49,25 @@ current cell and the target cell back to world coordinates, then pass their
 difference to `actor.move`. “Right” relative to a camera is ambiguous unless
 the user or documented API specifies the axis; ask instead of guessing.
 
+## Read and write the project files
+
+```python
+text = lynx.project_files.read("src/Player.cpp")       # paths from the project root
+text = lynx.assets.read("classes/Wanderer.js")          # paths inside assets/
+data = lynx.assets.read_json("voxels.json")
+names = lynx.assets.list("classes", pattern="*.js", recursive=True)
+lynx.compile()                                          # build the game DLL after a C++ change
+info = lynx.actor("Pawn").details()                     # properties and functions of an actor
+```
+
+To look something up before answering (a file that is not in the context, a
+value), write a script whose FIRST line is `# lynxie: read` and that prints
+what you need : its output is sent back to you, then you answer the user.
+
+To CHANGE or CREATE a file, do not use Python (`write`, `.replace`) : answer
+with SEARCH / REPLACE blocks, applied and checked by the editor (see the rules
+"EDITING FILES" of your instructions).
+
 ## Script behavior
 
 - Use the editor's documented `lynx_editor` API and Python standard library.
@@ -57,7 +76,10 @@ the user or documented API specifies the axis; ask instead of guessing.
 - For a scene operation, inspect `lynx.actors()` first. Match the user's target
   against actual IDs/classes. If the match is not unique, print the candidates
   and stop without changing the scene.
-- Give a brief French explanation, then put the complete executable Python in
-  exactly one `python` fenced code block.
+- For an action, give a brief explanation in the language the user wrote in
+  (English when unclear), then put the complete executable Python in exactly
+  one `python` fenced code block. It runs as soon as the answer arrives.
+- A question gets a text answer with no `python` block (examples in other
+  languages go in ```cpp / ```js blocks : they are never run).
 - Do not output JavaScript, pseudocode, hypothetical functions, or made-up
   placeholder state.

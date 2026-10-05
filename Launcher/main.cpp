@@ -43,11 +43,13 @@ namespace
 			std::error_code error;
 			if (fs::is_regular_file(font, error))   // AddFontFromFileTTF asserte sur un fichier absent
 			{
-				io.Fonts->AddFontFromFileTTF(font.string().c_str(), 20.0f);
+				io.Fonts->AddFontFromFileTTF(font.string().c_str(), 24.0f);   // même taille que l'éditeur
 				return;
 			}
 		}
-		io.Fonts->AddFontDefault();
+		ImFontConfig config;
+		config.SizePixels = 22.0f;   // la police par défaut (13 px) est trop petite
+		io.Fonts->AddFontDefault(&config);
 	}
 
 	void ApplyStyle()
@@ -88,13 +90,13 @@ int main(int, char**)
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	GLFWwindow* window = glfwCreateWindow(1080, 720, "Lynx Launcher", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(1440, 900, "Lynx Launcher", nullptr, nullptr);
 	if (!window)
 	{
 		glfwTerminate();
 		return 1;
 	}
-	glfwSetWindowSizeLimits(window, 820, 560, GLFW_DONT_CARE, GLFW_DONT_CARE);
+	glfwSetWindowSizeLimits(window, 1100, 700, GLFW_DONT_CARE, GLFW_DONT_CARE);
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(1);
 

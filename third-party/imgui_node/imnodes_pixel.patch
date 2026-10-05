@@ -1,0 +1,380 @@
+--- a/imgui_node/imnodes.h	2026-10-04 00:44:28.000000000 -0400
++++ b/imgui_node/imnodes.h	2026-10-05 04:20:22.092652098 -0400
+@@ -49,6 +49,7 @@
+     ImNodesCol_MiniMapLinkSelected,
+     ImNodesCol_MiniMapCanvas,
+     ImNodesCol_MiniMapCanvasOutline,
++    ImNodesCol_NodeOutlineSelected, // [PIXEL STYLE] 1px frame around the selected nodes (alpha 0 : none)
+     ImNodesCol_COUNT
+ };
+ 
+@@ -199,6 +200,10 @@
+     // Mini-map offset from the screen side.
+     ImVec2 MiniMapOffset;
+ 
++    // [PIXEL STYLE] A grid line every GridMajorLinesEvery cells is drawn with
++    // ImNodesCol_GridLinePrimary (graph paper). 0 : only the origin lines (ImNodesStyleFlags_GridLinesPrimary).
++    int GridMajorLinesEvery;
++
+     // By default, ImNodesStyleFlags_NodeOutline and ImNodesStyleFlags_Gridlines are enabled.
+     ImNodesStyleFlags Flags;
+     // Set these mid-frame using Push/PopColorStyle. You can index this color array with with a
+@@ -261,7 +266,15 @@
+ ImNodesStyle& GetStyle();
+ // Style presets matching the dear imgui styles of the same name. If dest is NULL, the active
+ // context's ImNodesStyle instance will be used as the destination.
+-void StyleColorsDark(ImNodesStyle* dest = NULL); // on by default
++void StyleColorsDark(ImNodesStyle* dest = NULL); // on by default (stock imnodes)
++// [PIXEL STYLE] Colors taken from the current ImGui style (the Lynx pixel theme, light or dark) :
++// canvas = window background with its graph paper grid, nodes = small windows (1px outline, raised
++// title bar), links and pins = the plot / selection colors. On by default when the ImGui pixel style
++// is compiled in. Call it again after changing the ImGui theme.
++void StyleColorsPixel(ImNodesStyle* dest = NULL);
++// [PIXEL STYLE] Sizes of the pixel look (grid spacing = ImGui WindowGridSize, stair-stepped corners,
++// square pins, 2px links) + StyleColorsPixel().
++void StylePixel(ImNodesStyle* dest = NULL);
+ void StyleColorsClassic(ImNodesStyle* dest = NULL);
+ void StyleColorsLight(ImNodesStyle* dest = NULL);
+ 
+--- a/imgui_node/imnodes.cpp	2026-10-04 00:44:28.000000000 -0400
++++ b/imgui_node/imnodes.cpp	2026-10-05 04:23:03.571257567 -0400
+@@ -1326,6 +1326,48 @@
+             ImVec2(0.f, expanded_title_rect.GetHeight()));
+ }
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++// [PIXEL STYLE] Graph paper : 1px lines snapped to whole pixels (no blurry half pixels when the
++// canvas is panned), a darker line every GridMajorLinesEvery cells, origin lines when
++// ImNodesStyleFlags_GridLinesPrimary is set.
++void DrawGrid(ImNodesEditorContext& editor, const ImVec2& canvas_size)
++{
++    const float step = ImMax(2.0f, IM_TRUNC(GImNodes->Style.GridSpacing));
++    const ImVec2 offset = editor.Panning;
++    const ImVec2 origin = GImNodes->CanvasOriginScreenSpace;
++    const ImU32  line_color = GImNodes->Style.Colors[ImNodesCol_GridLine];
++    const ImU32  line_color_major = GImNodes->Style.Colors[ImNodesCol_GridLinePrimary];
++    const bool   draw_origin = (GImNodes->Style.Flags & ImNodesStyleFlags_GridLinesPrimary) != 0;
++    const int    every = GImNodes->Style.GridMajorLinesEvery;
++    ImDrawList*  draw_list = GImNodes->CanvasDrawList;
++
++    for (int axis = 0; axis < 2; ++axis)
++    {
++        const float pan = axis == 0 ? offset.x : offset.y;
++        const float length = axis == 0 ? canvas_size.x : canvas_size.y;
++        // Index of the first visible line (lines sit at grid positions k * step).
++        int   index = (int)ImFloor(-pan / step);
++        float pos = pan + (float)index * step;
++        for (; pos < length; pos += step, ++index)
++        {
++            if (pos < 0.0f)
++                continue;
++            const bool major = (every > 0 && index % every == 0) || (draw_origin && index == 0);
++            const ImU32 col = major ? line_color_major : line_color;
++            if (axis == 0)
++            {
++                const float x = ImFloor(origin.x + pos);
++                draw_list->AddRectFilled(ImVec2(x, origin.y), ImVec2(x + 1.0f, origin.y + canvas_size.y), col);
++            }
++            else
++            {
++                const float y = ImFloor(origin.y + pos);
++                draw_list->AddRectFilled(ImVec2(origin.x, y), ImVec2(origin.x + canvas_size.x, y + 1.0f), col);
++            }
++        }
++    }
++}
++#else
+ void DrawGrid(ImNodesEditorContext& editor, const ImVec2& canvas_size)
+ {
+     const ImVec2 offset = editor.Panning;
+@@ -1351,6 +1393,7 @@
+             offset.y - y == 0.f && draw_primary ? line_color_prim : line_color);
+     }
+ }
++#endif // IMGUI_DISABLE_PIXEL_STYLE
+ 
+ struct QuadOffsets
+ {
+@@ -1400,10 +1443,72 @@
+     return offset;
+ }
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++// [PIXEL STYLE] Pixel-art pins : discs and squares built from 1px rows, centered on a pixel, with a
++// 1px outline (node outline color) like the ImGui pixel widgets. Triangles keep the stock drawing.
++static void PixelDisc(ImDrawList* draw_list, const ImVec2& center, float radius, ImU32 col)
++{
++    const int r = ImMax(1, (int)ImFloor(radius + 0.5f));
++    for (int dy = -r; dy <= r; ++dy)
++    {
++        const int half = (int)ImFloor(ImSqrt((float)(r * r - dy * dy)) + 0.5f);
++        draw_list->AddRectFilled(
++            ImVec2(center.x - (float)half, center.y + (float)dy),
++            ImVec2(center.x + (float)half + 1.0f, center.y + (float)dy + 1.0f),
++            col);
++    }
++}
++
++static void PixelSquare(ImDrawList* draw_list, const ImVec2& center, float half, ImU32 col)
++{
++    draw_list->AddRectFilled(
++        ImVec2(center.x - half, center.y - half), ImVec2(center.x + half + 1.0f, center.y + half + 1.0f), col);
++}
++
++static bool DrawPinShapePixel(const ImVec2& pin_pos, const ImPinData& pin, const ImU32 pin_color)
++{
++    ImDrawList*  draw_list = GImNodes->CanvasDrawList;
++    const ImU32  outline = GImNodes->Style.Colors[ImNodesCol_NodeOutline];
++    const ImU32  hollow = GImNodes->Style.Colors[ImNodesCol_NodeBackground];
++    const ImVec2 c(ImFloor(pin_pos.x), ImFloor(pin_pos.y));
++
++    switch (pin.Shape)
++    {
++    case ImNodesPinShape_Circle:
++    case ImNodesPinShape_CircleFilled:
++    {
++        const float r = GImNodes->Style.PinCircleRadius;
++        PixelDisc(draw_list, c, r + 1.0f, outline);
++        PixelDisc(draw_list, c, r, pin_color);
++        if (pin.Shape == ImNodesPinShape_Circle && r >= 3.0f)
++            PixelDisc(draw_list, c, r - 2.0f, hollow);
++        return true;
++    }
++    case ImNodesPinShape_Quad:
++    case ImNodesPinShape_QuadFilled:
++    {
++        const float half = ImFloor(GImNodes->Style.PinQuadSideLength * 0.5f);
++        PixelSquare(draw_list, c, half + 1.0f, outline);
++        PixelSquare(draw_list, c, half, pin_color);
++        if (pin.Shape == ImNodesPinShape_Quad && half >= 3.0f)
++            PixelSquare(draw_list, c, half - 2.0f, hollow);
++        return true;
++    }
++    default:
++        return false;
++    }
++}
++#endif // IMGUI_DISABLE_PIXEL_STYLE
++
+ void DrawPinShape(const ImVec2& pin_pos, const ImPinData& pin, const ImU32 pin_color)
+ {
+     static const int CIRCLE_NUM_SEGMENTS = 8;
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    if (DrawPinShapePixel(pin_pos, pin, pin_color))
++        return;
++#endif
++
+     switch (pin.Shape)
+     {
+     case ImNodesPinShape_Circle:
+@@ -1542,7 +1647,27 @@
+                 titlebar_background,
+                 node.LayoutStyle.CornerRounding,
+                 ImDrawFlags_RoundCornersTop);
+-
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++            // [PIXEL STYLE] Raised title bar (light / dark 1px bevel) like the ImGui window title
++            // bars, and a 1px line between the title and the body.
++            ImGui::RenderPixelBevel(
++                GImNodes->CanvasDrawList,
++                title_bar_rect.Min,
++                title_bar_rect.Max,
++                titlebar_background,
++                node.LayoutStyle.BorderThickness,
++                false,
++                node.LayoutStyle.CornerRounding,
++                ImDrawFlags_RoundCornersTop);
++            if ((GImNodes->Style.Flags & ImNodesStyleFlags_NodeOutline) != 0)
++            {
++                const float y = ImFloor(title_bar_rect.Max.y + 0.5f) - 1.0f;
++                GImNodes->CanvasDrawList->AddRectFilled(
++                    ImVec2(title_bar_rect.Min.x, y),
++                    ImVec2(title_bar_rect.Max.x, y + 1.0f),
++                    node.ColorStyle.Outline);
++            }
++#endif
+ #endif
+         }
+ 
+@@ -1574,6 +1699,21 @@
+                 ImDrawFlags_RoundCornersAll);
+ #endif
+         }
++
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        // [PIXEL STYLE] Selected node : a second 1px frame just outside the outline.
++        const ImU32 selected_outline = GImNodes->Style.Colors[ImNodesCol_NodeOutlineSelected];
++        if (editor.SelectedNodeIndices.contains(node_idx) && (selected_outline & IM_COL32_A_MASK) != 0)
++        {
++            GImNodes->CanvasDrawList->AddRect(
++                node.Rect.Min - ImVec2(1.0f, 1.0f),
++                node.Rect.Max + ImVec2(1.0f, 1.0f),
++                selected_outline,
++                node.LayoutStyle.CornerRounding + 1.0f,
++                ImDrawFlags_RoundCornersAll,
++                1.0f);
++        }
++#endif
+     }
+ 
+     for (int i = 0; i < node.PinIndices.size(); ++i)
+@@ -1705,7 +1845,11 @@
+     context->CurrentAttributeFlags = ImNodesAttributeFlags_None;
+     context->AttributeFlagStack.push_back(GImNodes->CurrentAttributeFlags);
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    StyleColorsPixel(&context->Style);   // [PIXEL STYLE] follows the ImGui theme
++#else
+     StyleColorsDark(&context->Style);
++#endif
+ }
+ 
+ void Shutdown(ImNodesContext* ctx) { EditorContextFree(ctx->DefaultEditorCtx); }
+@@ -2004,9 +2148,24 @@
+       LinkThickness(3.f), LinkLineSegmentsPerLength(0.1f), LinkHoverDistance(10.f),
+       PinCircleRadius(4.f), PinQuadSideLength(7.f), PinTriangleSideLength(9.5),
+       PinLineThickness(1.f), PinHoverRadius(10.f), PinOffset(0.f), MiniMapPadding(8.0f, 8.0f),
+-      MiniMapOffset(4.0f, 4.0f), Flags(ImNodesStyleFlags_NodeOutline | ImNodesStyleFlags_GridLines),
+-      Colors()
++      MiniMapOffset(4.0f, 4.0f), GridMajorLinesEvery(0),
++      Flags(ImNodesStyleFlags_NodeOutline | ImNodesStyleFlags_GridLines), Colors()
+ {
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Same look as the ImGui pixel widgets (see StylePixel()).
++    GridSpacing = 20.f;
++    GridMajorLinesEvery = 5;
++    NodeCornerRounding = 2.f;   // 1px stair-stepped corners
++    NodePadding = ImVec2(10.f, 6.f);
++    NodeBorderThickness = 1.f;
++    LinkThickness = 2.f;
++    LinkHoverDistance = 8.f;
++    PinCircleRadius = 4.f;
++    PinQuadSideLength = 8.f;
++    PinTriangleSideLength = 9.f;
++    PinLineThickness = 1.f;
++    PinHoverRadius = 8.f;
++#endif
+ }
+ 
+ namespace IMNODES_NAMESPACE
+@@ -2122,6 +2281,98 @@
+     dest->Colors[ImNodesCol_MiniMapCanvasOutline] = IM_COL32(200, 200, 200, 200);
+ }
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++namespace
++{
++ImVec4 PixelMix(const ImVec4& a, const ImVec4& b, float t)
++{
++    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
++}
++
++ImU32 PixelU32(const ImVec4& c, float alpha = -1.0f)
++{
++    return ImGui::ColorConvertFloat4ToU32(ImVec4(c.x, c.y, c.z, alpha < 0.0f ? c.w : alpha));
++}
++} // namespace
++#endif
++
++void StyleColorsPixel(ImNodesStyle* dest)
++{
++    if (dest == nullptr)
++    {
++        dest = &GImNodes->Style;
++    }
++
++#ifdef IMGUI_DISABLE_PIXEL_STYLE
++    StyleColorsDark(dest);
++#else
++    const ImVec4* c = ImGui::GetStyle().Colors;
++    const ImVec4  window = c[ImGuiCol_WindowBg];
++    const ImVec4  text = c[ImGuiCol_Text];
++    const ImVec4  outline = c[ImGuiCol_Border];
++
++    // Canvas : the window color, a bit deeper, and the graph paper of the windows.
++    const ImVec4 canvas = PixelMix(window, outline, 0.06f);
++    const ImVec4 grid = c[ImGuiCol_WindowGrid];
++    dest->Colors[ImNodesCol_GridBackground] = PixelU32(canvas, 1.0f);
++    dest->Colors[ImNodesCol_GridLine] = PixelU32(grid, ImMax(grid.w, 0.035f));
++    dest->Colors[ImNodesCol_GridLinePrimary] = PixelU32(grid, ImMin(1.0f, ImMax(grid.w, 0.035f) * 2.6f));
++
++    // Nodes : small windows (panel color, black 1px outline, title bar in the selection colors).
++    dest->Colors[ImNodesCol_NodeBackground] = PixelU32(window, 1.0f);
++    dest->Colors[ImNodesCol_NodeBackgroundHovered] = PixelU32(PixelMix(window, text, 0.05f), 1.0f);
++    dest->Colors[ImNodesCol_NodeBackgroundSelected] = dest->Colors[ImNodesCol_NodeBackgroundHovered];
++    dest->Colors[ImNodesCol_NodeOutline] = PixelU32(outline, 1.0f);
++    dest->Colors[ImNodesCol_NodeOutlineSelected] = PixelU32(c[ImGuiCol_NavCursor], 1.0f);
++    dest->Colors[ImNodesCol_TitleBar] = PixelU32(c[ImGuiCol_Header], 1.0f);
++    dest->Colors[ImNodesCol_TitleBarHovered] = PixelU32(c[ImGuiCol_HeaderHovered], 1.0f);
++    dest->Colors[ImNodesCol_TitleBarSelected] = PixelU32(c[ImGuiCol_HeaderActive], 1.0f);
++
++    // Links and pins : the plot colors (hover / selection = the plot highlight).
++    dest->Colors[ImNodesCol_Link] = PixelU32(c[ImGuiCol_PlotLines], 1.0f);
++    dest->Colors[ImNodesCol_LinkHovered] = PixelU32(PixelMix(c[ImGuiCol_PlotLines], c[ImGuiCol_PlotLinesHovered], 0.6f), 1.0f);
++    dest->Colors[ImNodesCol_LinkSelected] = PixelU32(c[ImGuiCol_PlotLinesHovered], 1.0f);
++    dest->Colors[ImNodesCol_Pin] = PixelU32(c[ImGuiCol_PlotLines], 1.0f);
++    dest->Colors[ImNodesCol_PinHovered] = PixelU32(c[ImGuiCol_PlotLinesHovered], 1.0f);
++
++    dest->Colors[ImNodesCol_BoxSelector] = PixelU32(c[ImGuiCol_Header], 0.25f);
++    dest->Colors[ImNodesCol_BoxSelectorOutline] = PixelU32(c[ImGuiCol_SeparatorActive], 1.0f);
++
++    // Mini-map : a popup.
++    dest->Colors[ImNodesCol_MiniMapBackground] = PixelU32(c[ImGuiCol_PopupBg], 0.85f);
++    dest->Colors[ImNodesCol_MiniMapBackgroundHovered] = PixelU32(c[ImGuiCol_PopupBg], 1.0f);
++    dest->Colors[ImNodesCol_MiniMapOutline] = PixelU32(outline, 1.0f);
++    dest->Colors[ImNodesCol_MiniMapOutlineHovered] = PixelU32(c[ImGuiCol_SeparatorActive], 1.0f);
++    dest->Colors[ImNodesCol_MiniMapNodeBackground] = PixelU32(c[ImGuiCol_Header], 1.0f);
++    dest->Colors[ImNodesCol_MiniMapNodeBackgroundHovered] = PixelU32(c[ImGuiCol_HeaderHovered], 1.0f);
++    dest->Colors[ImNodesCol_MiniMapNodeBackgroundSelected] = PixelU32(c[ImGuiCol_NavCursor], 1.0f);
++    dest->Colors[ImNodesCol_MiniMapNodeOutline] = PixelU32(outline, 1.0f);
++    dest->Colors[ImNodesCol_MiniMapLink] = dest->Colors[ImNodesCol_Link];
++    dest->Colors[ImNodesCol_MiniMapLinkSelected] = dest->Colors[ImNodesCol_LinkSelected];
++    dest->Colors[ImNodesCol_MiniMapCanvas] = PixelU32(text, 0.08f);
++    dest->Colors[ImNodesCol_MiniMapCanvasOutline] = PixelU32(text, 0.6f);
++#endif
++}
++
++void StylePixel(ImNodesStyle* dest)
++{
++    if (dest == nullptr)
++    {
++        dest = &GImNodes->Style;
++    }
++
++    // Sizes : the pixel defaults of ImNodesStyle(), grid aligned on the ImGui window grid.
++    ImNodesStyle defaults;
++    for (int i = 0; i < ImNodesCol_COUNT; ++i)
++        defaults.Colors[i] = dest->Colors[i];
++    *dest = defaults;
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    if (ImGui::GetStyle().WindowGridSize >= 2.0f)
++        dest->GridSpacing = IM_TRUNC(ImGui::GetStyle().WindowGridSize);
++#endif
++    StyleColorsPixel(dest);
++}
++
+ void StyleColorsClassic(ImNodesStyle* dest)
+ {
+     if (dest == nullptr)
+@@ -2257,12 +2508,20 @@
+         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(1.f, 1.f));
+         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
+         ImGui::PushStyleColor(ImGuiCol_ChildBg, GImNodes->Style.Colors[ImNodesCol_GridBackground]);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        // [PIXEL STYLE] The ImGui grid is fixed on the screen : not under the canvas, which draws
++        // its own grid that moves with the panning.
++        ImGui::PushStyleColor(ImGuiCol_WindowGrid, IM_COL32(0, 0, 0, 0));
++#endif
+         ImGui::BeginChild(
+             "scrolling_region",
+             ImVec2(0.f, 0.f),
+             true,
+             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove |
+                 ImGuiWindowFlags_NoScrollWithMouse);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        ImGui::PopStyleColor();
++#endif
+         GImNodes->CanvasOriginScreenSpace = ImGui::GetCursorScreenPos();
+ 
+         // NOTE: we have to fetch the canvas draw list *after* we call

@@ -1,6 +1,7 @@
 #include "ScriptRunner.h"
 
 #include "CommandServer.h"
+#include "../OutputConsole.h"
 
 #include <json/json.hpp>
 
@@ -58,6 +59,13 @@ namespace lynx::editor::script_runner
 
 		constexpr size_t kMaxLines = 20000;
 
+		// Every line of a script also goes to the editor Console window.
+		void PushLine(std::string line)
+		{
+			output_console::Write("[Python] " + line);
+			g_lines.push_back(std::move(line));
+		}
+
 		void TrimLines()
 		{
 			if (g_lines.size() > kMaxLines)
@@ -77,7 +85,7 @@ namespace lynx::editor::script_runner
 
 				if (c == '\n')
 				{
-					g_lines.push_back(std::move(g_partial));
+					PushLine(std::move(g_partial));
 					g_partial.clear();
 				}
 				else
@@ -526,7 +534,7 @@ namespace lynx::editor::script_runner
 
 			if (!g_partial.empty())
 			{
-				g_lines.push_back(std::move(g_partial));
+				PushLine(std::move(g_partial));
 				g_partial.clear();
 			}
 		}
@@ -572,11 +580,11 @@ namespace lynx::editor::script_runner
 
 		if (!g_partial.empty())
 		{
-			g_lines.push_back(std::move(g_partial));
+			PushLine(std::move(g_partial));
 			g_partial.clear();
 		}
 
-		g_lines.push_back(line);
+		PushLine(line);
 		TrimLines();
 	}
 

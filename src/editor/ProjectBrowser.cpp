@@ -1,4 +1,6 @@
 #include "ProjectBrowser.h"
+#include "ProjectTemplates.h"
+#include "EditorFonts.h"
 
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
@@ -7,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <system_error>
@@ -143,6 +146,15 @@ namespace lynx::editor
 
 			std::string message;
 
+			// "New project" dialog
+			bool new_project_open = false;
+			char new_title[128] = {};
+			char new_location[1024] = {};
+			std::vector<project_templates::Template> templates;
+			std::string templates_error;
+			int template_index = 0;
+			std::string create_error;
+
 			bool open_requested = false;
 			bool quit_requested = false;
 		};
@@ -260,6 +272,201 @@ namespace lynx::editor
 		}
 
 
+		// Where new projects go by default : next to the last project, or
+		// Documents/Lynx Projects.
+		fs::path DefaultProjectsFolder(const BrowserState& state)
+		{
+			if (!state.recent.empty() && state.recent.front().root.has_parent_path())
+				return state.recent.front().root.parent_path();
+
+			const char* home = std::getenv("USERPROFILE");
+			if (!home)
+				home = std::getenv("HOME");
+			return (home ? fs::path(home) / "Documents" : fs::current_path()) / "Lynx Projects";
+		}
+
+
+		void OpenNewProjectDialog(BrowserState& state)
+		{
+			state.new_project_open = true;
+			state.create_error.clear();
+			state.templates = project_templates::List(state.templates_error);
+			state.template_index = std::clamp(state.template_index, 0, std::max(0, static_cast<int>(state.templates.size()) - 1));
+
+			if (state.new_location[0] == '\0')
+				std::snprintf(state.new_location, sizeof(state.new_location), "%s", DefaultProjectsFolder(state).string().c_str());
+			if (state.new_title[0] == '\0')
+				std::snprintf(state.new_title, sizeof(state.new_title), "%s", "My Game");
+
+			ImGui::OpenPopup("New project");
+		}
+
+
+		// One template : its name, then its description (wrapped), as one selectable row.
+		bool TemplateRow(const project_templates::Template& t, bool selected)
+		{
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float width = ImGui::GetContentRegionAvail().x;
+			const float wrap = width - style.FramePadding.x * 2.f;
+			const float line = ImGui::GetTextLineHeight();
+			const ImVec2 description_size = ImGui::CalcTextSize(t.description.c_str(), nullptr, false, wrap);
+			const float height = line + style.ItemSpacing.y * 0.5f + description_size.y + style.FramePadding.y * 2.f;
+
+			ImGui::PushID(t.id.c_str());
+			const bool clicked = ImGui::Selectable("##template", selected, 0, ImVec2(width, height));
+			const ImVec2 min = ImGui::GetItemRectMin();
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			const ImVec2 text_pos(min.x + style.FramePadding.x, min.y + style.FramePadding.y);
+
+			draw->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), t.name.c_str());
+			draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+			              ImVec2(text_pos.x, text_pos.y + line + style.ItemSpacing.y * 0.5f),
+			              // selected : normal text color, the grey would not read on the selection color
+			              ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled),
+			              t.description.c_str(), nullptr, wrap);
+			ImGui::PopID();
+			return clicked;
+		}
+
+
+		void DrawNewProjectDialog(BrowserState& state)
+		{
+			const ImGuiViewport* viewport = ImGui::GetMainViewport();
+			ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.82f, viewport->WorkSize.y * 0.86f), ImGuiCond_Appearing);
+
+			if (!ImGui::BeginPopupModal("New project", &state.new_project_open, ImGuiWindowFlags_NoSavedSettings))
+				return;
+
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float label_width = ImGui::CalcTextSize("Location").x + style.ItemSpacing.x * 2.f;
+
+			// Name
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted("Name");
+			ImGui::SameLine(label_width);
+			ImGui::SetNextItemWidth(-1.f);
+			if (ImGui::IsWindowAppearing())
+				ImGui::SetKeyboardFocusHere();
+			bool create = ImGui::InputText("##NewTitle", state.new_title, sizeof(state.new_title),
+			                               ImGuiInputTextFlags_EnterReturnsTrue);
+
+			// Location
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted("Location");
+			ImGui::SameLine(label_width);
+			const float browse_width = ImGui::CalcTextSize("Browse...").x + style.FramePadding.x * 2.f;
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - browse_width - style.ItemSpacing.x);
+			ImGui::InputText("##NewLocation", state.new_location, sizeof(state.new_location));
+			ImGui::SameLine();
+			if (ImGui::Button("Browse...##NewLocation"))
+			{
+				fs::path picked;
+				if (BrowseForFolder(picked))
+					std::snprintf(state.new_location, sizeof(state.new_location), "%s", picked.string().c_str());
+			}
+
+			// What will be created
+			const std::string identifier = project_templates::ToIdentifier(state.new_title);
+			const fs::path folder = project_templates::ProjectFolder(fs::path(state.new_location), state.new_title);
+			if (identifier.empty() || folder.empty())
+			{
+				ImGui::SetCursorPosX(label_width);
+				ImGui::TextDisabled("Type a name (letters or digits).");
+			}
+			else
+			{
+				ImGui::SetCursorPosX(label_width);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+				ImGui::PushTextWrapPos(0.f);
+				ImGui::Text("Folder : %s", folder.string().c_str());
+				ImGui::SetCursorPosX(label_width);
+				ImGui::Text("Game DLL : %s.dll", identifier.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+			ImGui::TextUnformatted("Template");
+
+			// Room for the buttons (and the error, when there is one) under the list.
+			float bottom_height = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
+			if (!state.create_error.empty())
+				bottom_height += ImGui::CalcTextSize(state.create_error.c_str(), nullptr, false,
+				                                     ImGui::GetContentRegionAvail().x).y + style.ItemSpacing.y;
+			ImGui::BeginChild("##Templates", ImVec2(0.f, -bottom_height), ImGuiChildFlags_Borders);
+
+			if (state.templates.empty())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.45f, 0.45f, 1.f));
+				ImGui::TextWrapped("%s", state.templates_error.c_str());
+				ImGui::PopStyleColor();
+			}
+
+			for (int i = 0; i < static_cast<int>(state.templates.size()); ++i)
+			{
+				if (TemplateRow(state.templates[static_cast<size_t>(i)], i == state.template_index))
+				{
+					state.template_index = i;
+					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+						create = true;
+				}
+			}
+
+			ImGui::EndChild();
+
+			if (!state.create_error.empty())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.45f, 0.45f, 1.f));
+				ImGui::TextWrapped("%s", state.create_error.c_str());
+				ImGui::PopStyleColor();
+			}
+
+			// Buttons, on the right
+			const float create_width = ImGui::CalcTextSize("Create and open").x + style.FramePadding.x * 2.f;
+			const float cancel_width = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.f;
+			ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - create_width - cancel_width - style.ItemSpacing.x);
+
+			if (ImGui::Button("Cancel"))
+			{
+				state.new_project_open = false;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			const bool can_create = !state.templates.empty() && !identifier.empty() && !folder.empty();
+			ImGui::BeginDisabled(!can_create);
+			if (ImGui::Button("Create and open"))
+				create = true;
+			ImGui::EndDisabled();
+
+			if (create && can_create)
+			{
+				fs::path root;
+				const auto& tmpl = state.templates[static_cast<size_t>(state.template_index)];
+
+				if (project_templates::Create(tmpl, fs::path(state.new_location), state.new_title, root, state.create_error))
+				{
+					SetPathText(state, root.string());
+					UpdateInspection(state);
+
+					if (state.inspected_ok)
+						state.open_requested = true;
+					else
+						state.message = "The project was created, but cannot be opened : " + state.inspected_error;
+
+					state.new_project_open = false;
+					state.new_title[0] = '\0';
+					ImGui::CloseCurrentPopup();
+				}
+			}
+
+			ImGui::EndPopup();
+		}
+
+
 		void DrawBrowser(BrowserState& state)
 		{
 			const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -278,7 +485,7 @@ namespace lynx::editor
 			ImGui::PopStyleVar();
 
 			ImGui::TextUnformatted("Lynx Engine");
-			ImGui::TextDisabled("Open a game project : a folder with \"assets\" and the game DLL in \"build\".");
+			ImGui::TextDisabled("Open a game project : a folder with \"assets\" and the game DLL in \"build\", or create a new one.");
 			ImGui::Spacing();
 
 			if (!state.message.empty())
@@ -303,7 +510,7 @@ namespace lynx::editor
 			if (state.recent.empty())
 			{
 				ImGui::Spacing();
-				ImGui::TextDisabled("No recent project. Use \"Browse...\" or drop a project folder on this window.");
+				ImGui::TextDisabled("No recent project. Use \"New project...\", \"Browse...\", or drop a project folder on this window.");
 			}
 
 			const RecentEntry* to_open = nullptr;
@@ -457,9 +664,13 @@ namespace lynx::editor
 			const float open_width = ImGui::CalcTextSize("Open project").x + style.FramePadding.x * 2.f;
 			const float quit_width = ImGui::CalcTextSize("Quit").x + style.FramePadding.x * 2.f;
 
-			ImGui::SetCursorPosX(
-				ImGui::GetCursorPosX() +
-				ImGui::GetContentRegionAvail().x - open_width - quit_width - style.ItemSpacing.x);
+			if (ImGui::Button("New project..."))
+				OpenNewProjectDialog(state);
+
+			ImGui::SameLine();
+			ImGui::SetCursorPosX(std::max(
+				ImGui::GetCursorPosX(),
+				ImGui::GetWindowContentRegionMax().x - open_width - quit_width - style.ItemSpacing.x));
 
 			if (ImGui::Button("Quit"))
 				state.quit_requested = true;
@@ -472,6 +683,8 @@ namespace lynx::editor
 				state.open_requested = true;
 
 			ImGui::EndDisabled();
+
+			DrawNewProjectDialog(state);
 
 			ImGui::End();
 		}
@@ -526,12 +739,8 @@ namespace lynx::editor
 		ImGuiIO& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 
-		// Same font as the editor when it sits next to the executable.
-		const fs::path font = GetEditorDirectory() / "normal-font.ttf";
-		std::error_code font_error;
-
-		if (fs::is_regular_file(font, font_error))
-			io.Fonts->AddFontFromFileTTF(font.string().c_str(), 20.f);
+		// Same fonts as the editor (fonts/ next to the executable).
+		lynx::editor::fonts::Load(20.f);
 
 		ImGui::StyleColorsDark();
 		ImGui::GetStyle().FrameRounding = 4.f;

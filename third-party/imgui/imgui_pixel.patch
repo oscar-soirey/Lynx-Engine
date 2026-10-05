@@ -1,20 +1,38 @@
-diff -ruN imgui_orig/imgui/imgui.cpp imgui/imgui/imgui.cpp
---- imgui_orig/imgui/imgui.cpp	2026-10-04 01:10:25.255283816 +0000
-+++ imgui/imgui/imgui.cpp	2026-10-04 01:11:52.568196130 +0000
-@@ -1509,6 +1509,25 @@
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui.cpp imgui/imgui/imgui.cpp
+--- imgui_orig/imgui/imgui.cpp	2026-01-20 18:51:40.000000000 -0500
++++ imgui/imgui/imgui.cpp	2026-10-05 01:51:47.029542635 -0400
+@@ -1360,6 +1360,9 @@
+ static void             UpdateSettings();
+ static int              UpdateWindowManualResize(ImGuiWindow* window, int* border_hovered, int* border_held, int resize_grip_count, ImU32 resize_grip_col[4], const ImRect& visibility_rect);
+ static void             RenderWindowOuterBorders(ImGuiWindow* window);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++static void             RenderWindowGrid(ImDrawList* draw_list, const ImRect& rect);   // [PIXEL STYLE]
++#endif
+ static void             RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size);
+ static void             RenderWindowTitleBarContents(ImGuiWindow* window, const ImRect& title_bar_rect, const char* name, bool* p_open);
+ static void             RenderDimmedBackgroundBehindWindow(ImGuiWindow* window, ImU32 col);
+@@ -1441,6 +1444,7 @@
+     WindowPadding               = ImVec2(8,8);      // Padding within a window
+     WindowRounding              = 0.0f;             // Radius of window corners rounding. Set to 0.0f to have rectangular windows. Large values tend to lead to variety of artifacts and are not recommended.
+     WindowBorderSize            = 1.0f;             // Thickness of border around windows. Generally set to 0.0f or 1.0f. Other values not well tested.
++    WindowGridSize              = 0.0f;             // [PIXEL STYLE] Background grid spacing (0 = no grid)
+     WindowBorderHoverPadding    = 4.0f;             // Hit-testing extent outside/inside resizing border. Also extend determination of hovered window. Generally meaningfully larger than WindowBorderSize to make it easy to reach borders.
+     WindowMinSize               = ImVec2(32,32);    // Minimum window size
+     WindowTitleAlign            = ImVec2(0.0f,0.5f);// Alignment for title bar text
+@@ -1509,6 +1513,26 @@
      _MainScale                  = 1.0f;
      _NextFrameFontSizeBase      = 0.0f;
  
 +#ifndef IMGUI_DISABLE_PIXEL_STYLE
 +    // [PIXEL STYLE] Aseprite-like look. Purely visual: paddings/spacings are left untouched so layouts don't move.
-+    // A rounding > 0 means "1 pixel notch on the corners" (see ImDrawList::AddRect/AddRectFilled), not an arc.
++    // A rounding > 0 means "stair-stepped pixel corners" (1..2 -> 1px, 3..4 -> 2px...), see ImDrawList::AddRect/AddRectFilled. Not an arc.
 +    WindowRounding              = 0.0f;
 +    ChildRounding               = 0.0f;
 +    PopupRounding               = 1.0f;
 +    FrameRounding               = 1.0f;
 +    ScrollbarRounding           = 1.0f;
 +    GrabRounding                = 1.0f;
-+    TabRounding                 = 1.0f;
++    TabRounding                 = 3.0f;             // 2px stair-stepped corners
 +    PopupBorderSize             = 1.0f;
 +    FrameBorderSize             = 1.0f;             // Outlined buttons / fields / sliders
 +    TabBorderSize               = 1.0f;
@@ -22,23 +40,198 @@ diff -ruN imgui_orig/imgui/imgui.cpp imgui/imgui/imgui.cpp
 +    AntiAliasedLines            = false;            // Crisp, aliased edges everywhere
 +    AntiAliasedLinesUseTex      = false;
 +    AntiAliasedFill             = false;
++    WindowGridSize              = 20.0f;            // Graph paper grid behind the windows' content
 +#endif
 +
      // Default theme
      ImGui::StyleColorsDark(this);
  }
-diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
---- imgui_orig/imgui/imgui_draw.cpp	2026-10-04 01:10:25.256523037 +0000
-+++ imgui/imgui/imgui_draw.cpp	2026-10-04 01:11:43.586060410 +0000
-@@ -186,6 +186,89 @@
+@@ -1523,6 +1547,7 @@
+     WindowRounding = ImTrunc(WindowRounding * scale_factor);
+     WindowMinSize = ImTrunc(WindowMinSize * scale_factor);
+     WindowBorderHoverPadding = ImTrunc(WindowBorderHoverPadding * scale_factor);
++    WindowGridSize = ImTrunc(WindowGridSize * scale_factor);
+     ChildRounding = ImTrunc(ChildRounding * scale_factor);
+     PopupRounding = ImTrunc(PopupRounding * scale_factor);
+     FramePadding = ImTrunc(FramePadding * scale_factor);
+@@ -3802,6 +3827,7 @@
+     case ImGuiCol_NavWindowingHighlight: return "NavWindowingHighlight";
+     case ImGuiCol_NavWindowingDimBg: return "NavWindowingDimBg";
+     case ImGuiCol_ModalWindowDimBg: return "ModalWindowDimBg";
++    case ImGuiCol_WindowGrid: return "WindowGrid";
+     }
+     IM_ASSERT(0);
+     return "Unknown";
+@@ -3972,6 +3998,18 @@
+ }
+ 
+ // Render a rectangle shaped with optional rounding and borders
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++// [PIXEL STYLE] Frames filled with a FrameBg* color (fields, checkboxes, sliders, progress bars...) or a pressed ButtonActive are drawn "sunken", everything else "raised".
++static bool ImPixelIsSunkenFill(const ImGuiStyle& style, ImU32 col)
++{
++    static const ImGuiCol sunken_cols[] = { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_ButtonActive };
++    for (int n = 0; n < IM_ARRAYSIZE(sunken_cols); n++)
++        if ((ImGui::ColorConvertFloat4ToU32(style.Colors[sunken_cols[n]]) & 0x00FFFFFF) == (col & 0x00FFFFFF))
++            return true;
++    return false;
++}
++#endif
++
+ void ImGui::RenderFrame(ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, bool borders, float rounding)
+ {
+     ImGuiContext& g = *GImGui;
+@@ -3982,6 +4020,9 @@
+     {
+         window->DrawList->AddRect(p_min + ImVec2(1, 1), p_max + ImVec2(1, 1), GetColorU32(ImGuiCol_BorderShadow), rounding, 0, border_size);
+         window->DrawList->AddRect(p_min, p_max, GetColorU32(ImGuiCol_Border), rounding, 0, border_size);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        RenderPixelBevel(window->DrawList, p_min, p_max, fill_col, border_size, ImPixelIsSunkenFill(g.Style, fill_col), rounding);
++#endif
+     }
+ }
+ 
+@@ -7366,6 +7407,29 @@
+ 
+ // Draw background and borders
+ // Draw and handle scrollbars
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++// [PIXEL STYLE] 1px grid lines every style.WindowGridSize pixels, color ImGuiCol_WindowGrid.
++// The grid is aligned on the screen (not on the window) : docked windows next to each other
++// continue the same grid, and it does not move when the content scrolls.
++void ImGui::RenderWindowGrid(ImDrawList* draw_list, const ImRect& rect)
++{
++    ImGuiContext& g = *GImGui;
++    const float step = IM_TRUNC(g.Style.WindowGridSize);
++    if (step < 2.0f)
++        return;
++    const ImU32 col = GetColorU32(ImGuiCol_WindowGrid);
++    if ((col & IM_COL32_A_MASK) == 0)
++        return;
++
++    const float x0 = IM_TRUNC(rect.Min.x), y0 = IM_TRUNC(rect.Min.y);
++    const float x1 = IM_TRUNC(rect.Max.x), y1 = IM_TRUNC(rect.Max.y);
++    for (float x = ImCeil(x0 / step) * step; x < x1; x += step)
++        draw_list->AddRectFilled(ImVec2(x, y0), ImVec2(x + 1.0f, y1), col);
++    for (float y = ImCeil(y0 / step) * step; y < y1; y += step)
++        draw_list->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + 1.0f), col);
++}
++#endif
++
+ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size)
+ {
+     ImGuiContext& g = *GImGui;
+@@ -7435,6 +7499,17 @@
+             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
+                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
+             bg_draw_list->AddRectFilled(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size, bg_col, window_rounding, (flags & ImGuiWindowFlags_NoTitleBar) ? 0 : ImDrawFlags_RoundCornersBottom);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++            // [PIXEL STYLE] Graph paper grid over every window background : regular, docked (they carry
++            // ImGuiWindowFlags_ChildWindow too), child windows, popups, menus, tooltips.
++            // A child window that is not fully opaque already shows its parent's grid : not drawn twice.
++            {
++                const ImU32 bg_alpha = (bg_col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT;
++                const bool is_child = (flags & ImGuiWindowFlags_ChildWindow) && !window->DockIsActive && !(flags & ImGuiWindowFlags_Popup);
++                if (bg_alpha == 0xFF || (bg_alpha > 0 && !is_child))
++                    RenderWindowGrid(bg_draw_list, ImRect(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size));
++            }
++#endif
+             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
+                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_FG);
+         }
+@@ -7450,6 +7525,9 @@
+             if (window->ViewportOwned)
+                 title_bar_col |= IM_COL32_A_MASK; // No alpha
+             window->DrawList->AddRectFilled(title_bar_rect.Min, title_bar_rect.Max, title_bar_col, window_rounding, ImDrawFlags_RoundCornersTop);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++            RenderPixelBevel(window->DrawList, title_bar_rect.Min, title_bar_rect.Max, title_bar_col, window_border_size, false, window_rounding, ImDrawFlags_RoundCornersTop);
++#endif
+         }
+ 
+         // Menu bar
+@@ -7500,10 +7578,24 @@
+                 const ImGuiResizeGripDef& grip = resize_grip_def[resize_grip_n];
+                 const ImVec2 corner = ImLerp(window->Pos, window->Pos + window->Size, grip.CornerPosN);
+                 const float border_inner = IM_ROUND(window_border_size * 0.5f);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++                // [PIXEL STYLE] Staircase triangle with its right angle in the window corner, one 1px row per step
++                {
++                    const float cx = ImFloor(corner.x + 0.5f), cy = ImFloor(corner.y + 0.5f);
++                    const int sz = (int)resize_grip_draw_size, bi = (int)border_inner;
++                    for (int i = 0; i < sz - bi; i++)
++                    {
++                        const float xa = cx + grip.InnerDir.x * (float)bi,        xb = cx + grip.InnerDir.x * (float)(sz - i);
++                        const float ya = cy + grip.InnerDir.y * (float)(bi + i),  yb = cy + grip.InnerDir.y * (float)(bi + i + 1);
++                        window->DrawList->AddRectFilled(ImVec2(ImMin(xa, xb), ImMin(ya, yb)), ImVec2(ImMax(xa, xb), ImMax(ya, yb)), col);
++                    }
++                }
++#else
+                 window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(border_inner, resize_grip_draw_size) : ImVec2(resize_grip_draw_size, border_inner)));
+                 window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(resize_grip_draw_size, border_inner) : ImVec2(border_inner, resize_grip_draw_size)));
+                 window->DrawList->PathArcToFast(ImVec2(corner.x + grip.InnerDir.x * (window_rounding + border_inner), corner.y + grip.InnerDir.y * (window_rounding + border_inner)), window_rounding, grip.AngleMin12, grip.AngleMax12);
+                 window->DrawList->PathFillConvex(col);
++#endif
+             }
+         }
+ 
+@@ -17792,6 +17884,10 @@
+                 ImDrawFlags bg_rounding_flags = CalcRoundingFlagsForRectInRect(bg_rect, node->HostWindow->Rect(), g.Style.DockingSeparatorSize);
+                 node->HostWindow->DrawList->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
+                 node->HostWindow->DrawList->AddRectFilled(bg_rect.Min, bg_rect.Max, node->LastBgColor, node->HostWindow->WindowRounding, bg_rounding_flags);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++                if ((node->LastBgColor & IM_COL32_A_MASK) != 0)
++                    RenderWindowGrid(node->HostWindow->DrawList, bg_rect);   // [PIXEL STYLE]
++#endif
+             }
+ }
+ 
+@@ -19031,7 +19127,12 @@
+         host_window->DrawList->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
+         node->LastBgColor = (node_flags & ImGuiDockNodeFlags_PassthruCentralNode) ? 0 : GetColorU32(ImGuiCol_DockingEmptyBg);
+         if (node->LastBgColor != 0)
++        {
+             host_window->DrawList->AddRectFilled(node->Pos, node->Pos + node->Size, node->LastBgColor);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++            RenderWindowGrid(host_window->DrawList, ImRect(node->Pos, node->Pos + node->Size));   // [PIXEL STYLE] Empty dockspace too
++#endif
++        }
+         node->IsBgDrawnThisFrame = true;
+     }
+ 
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui.h imgui/imgui/imgui.h
+--- imgui_orig/imgui/imgui.h	2026-02-01 19:55:46.000000000 -0500
++++ imgui/imgui/imgui.h	2026-10-05 01:51:47.029949622 -0400
+@@ -1871,6 +1871,7 @@
+     ImGuiCol_NavWindowingHighlight, // Highlight window when using Ctrl+Tab
+     ImGuiCol_NavWindowingDimBg,     // Darken/colorize entire screen behind the Ctrl+Tab window list, when active
+     ImGuiCol_ModalWindowDimBg,      // Darken/colorize entire screen behind a modal window, when one is active
++    ImGuiCol_WindowGrid,            // [PIXEL STYLE] Grid lines drawn over the background of regular windows (see ImGuiStyle::WindowGridSize)
+     ImGuiCol_COUNT,
+ 
+ #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+@@ -2361,6 +2362,7 @@
+     ImVec2      WindowPadding;              // Padding within a window.
+     float       WindowRounding;             // Radius of window corners rounding. Set to 0.0f to have rectangular windows. Large values tend to lead to variety of artifacts and are not recommended.
+     float       WindowBorderSize;           // Thickness of border around windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
++    float       WindowGridSize;             // [PIXEL STYLE] Spacing in pixels of the background grid of regular windows (graph paper look). 0.0f: no grid. Color: ImGuiCol_WindowGrid.
+     float       WindowBorderHoverPadding;   // Hit-testing extent outside/inside resizing border. Also extend determination of hovered window. Generally meaningfully larger than WindowBorderSize to make it easy to reach borders.
+     ImVec2      WindowMinSize;              // Minimum window size. This is a global setting. If you want to constrain individual windows, use SetNextWindowSizeConstraints().
+     ImVec2      WindowTitleAlign;           // Alignment for title bar text. Defaults to (0.0f,0.5f) for left-aligned,vertically centered.
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
+--- imgui_orig/imgui/imgui_draw.cpp	2026-01-20 18:51:40.000000000 -0500
++++ imgui/imgui/imgui_draw.cpp	2026-10-05 01:51:47.030100008 -0400
+@@ -186,6 +186,171 @@
      ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
      ImVec4* colors = style->Colors;
  
 +#ifndef IMGUI_DISABLE_PIXEL_STYLE
-+    // [PIXEL STYLE] Aseprite-like dark theme: flat greys, near-black 1px outlines, one warm accent color.
-+    // Tweak the palette here. (Define IMGUI_DISABLE_PIXEL_STYLE to restore the stock Dear ImGui dark theme.)
++    // [PIXEL STYLE] Aseprite-like theme. Tweak the palettes here.
++    //  - default: Aseprite "classic" (light grey faces, beige panels, blue-grey selection, black outlines). Colors sampled from Aseprite.
++    //  - #define IMGUI_PIXEL_THEME_DARK: flat dark greys with one warm accent color.
++    //  - #define IMGUI_DISABLE_PIXEL_STYLE: stock Dear ImGui dark theme.
 +    #define PXC(r, g, b)        ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, 1.00f)
 +    #define PXCA(r, g, b, a)    ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a) / 255.0f)
++#ifdef IMGUI_PIXEL_THEME_DARK
 +    const ImVec4 c_outline      = PXC( 15,  15,  15);   // 1px outlines
 +    const ImVec4 c_deep         = PXC( 30,  30,  30);   // Inset fields, scrollbar tracks, unfocused tabs
 +    const ImVec4 c_panel        = PXC( 46,  46,  46);   // Window background
@@ -110,17 +303,101 @@ diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
 +    colors[ImGuiCol_DragDropTarget]         = c_accent_hot;
 +    colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
 +    colors[ImGuiCol_UnsavedMarker]          = c_accent;
++    colors[ImGuiCol_WindowGrid]             = PXCA(255, 255, 255, 10);   // Faint light grid
 +    colors[ImGuiCol_NavCursor]              = c_accent_hot;
 +    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
 +    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.40f);
 +    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
++#else
++    const ImVec4 c_outline      = PXC(  0,   0,   0);   // 1px outlines
++    const ImVec4 c_bg           = PXC(211, 203, 190);   // #d3cbbe Panels / tab bar strip
++    const ImVec4 c_bg_dark      = PXC(189, 181, 168);   // Tracks, inactive title bars
++    const ImVec4 c_bg_darker    = PXC(156, 149, 137);
++    const ImVec4 c_face         = PXC(198, 198, 198);   // #c6c6c6 Button / tab face
++    const ImVec4 c_face_hot     = PXC(222, 222, 222);
++    const ImVec4 c_face_down    = PXC(169, 169, 169);
++    const ImVec4 c_field        = PXC(255, 255, 255);   // Text fields, sliders, checkboxes
++    const ImVec4 c_sel          = PXC(124, 145, 157);   // #7c919d Selected tab / header / slider grab
++    const ImVec4 c_sel_hot      = PXC(140, 164, 179);   // #8ca4b3
++    const ImVec4 c_sel_light    = PXC(173, 202, 222);   // #adcade
++    const ImVec4 c_sel_dark     = PXC( 84,  99, 108);   // #54636c
++
++    colors[ImGuiCol_Text]                   = PXC(  0,   0,   0);
++    colors[ImGuiCol_TextDisabled]           = PXC(133, 133, 133);
++    colors[ImGuiCol_WindowBg]               = c_bg;
++    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
++    colors[ImGuiCol_PopupBg]                = c_bg;
++    colors[ImGuiCol_Border]                 = c_outline;
++    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
++    colors[ImGuiCol_FrameBg]                = c_field;
++    colors[ImGuiCol_FrameBgHovered]         = PXC(242, 242, 242);
++    colors[ImGuiCol_FrameBgActive]          = PXC(232, 232, 232);
++    colors[ImGuiCol_TitleBg]                = c_bg_dark;
++    colors[ImGuiCol_TitleBgActive]          = c_bg;
++    colors[ImGuiCol_TitleBgCollapsed]       = c_bg_dark;
++    colors[ImGuiCol_MenuBarBg]              = c_bg;
++    colors[ImGuiCol_ScrollbarBg]            = c_bg_dark;
++    colors[ImGuiCol_ScrollbarGrab]          = c_face;
++    colors[ImGuiCol_ScrollbarGrabHovered]   = c_face_hot;
++    colors[ImGuiCol_ScrollbarGrabActive]    = c_face_down;
++    colors[ImGuiCol_CheckMark]              = PXC(  0,   0,   0);
++    colors[ImGuiCol_SliderGrab]             = c_sel;
++    colors[ImGuiCol_SliderGrabActive]       = c_sel_hot;
++    colors[ImGuiCol_Button]                 = c_face;
++    colors[ImGuiCol_ButtonHovered]          = c_face_hot;
++    colors[ImGuiCol_ButtonActive]           = c_face_down;
++    colors[ImGuiCol_Header]                 = c_sel;
++    colors[ImGuiCol_HeaderHovered]          = c_sel_light;
++    colors[ImGuiCol_HeaderActive]           = c_sel_hot;
++    colors[ImGuiCol_Separator]              = PXC(140, 134, 124);
++    colors[ImGuiCol_SeparatorHovered]       = c_sel;
++    colors[ImGuiCol_SeparatorActive]        = c_sel_dark;
++    colors[ImGuiCol_ResizeGrip]             = c_bg_darker;
++    colors[ImGuiCol_ResizeGripHovered]      = c_sel;
++    colors[ImGuiCol_ResizeGripActive]       = c_sel_dark;
++    colors[ImGuiCol_InputTextCursor]        = PXC(  0,   0,   0);
++    colors[ImGuiCol_TabHovered]             = c_face_hot;
++    colors[ImGuiCol_Tab]                    = c_face;
++    colors[ImGuiCol_TabSelected]            = c_sel;
++    colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);   // No overline in Aseprite
++    colors[ImGuiCol_TabDimmed]              = PXC(177, 177, 177);
++    colors[ImGuiCol_TabDimmedSelected]      = PXC(143, 159, 169);
++    colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
++    colors[ImGuiCol_DockingPreview]         = PXCA(124, 145, 157, 160);
++    colors[ImGuiCol_DockingEmptyBg]         = c_bg_darker;
++    colors[ImGuiCol_PlotLines]              = c_sel_dark;
++    colors[ImGuiCol_PlotLinesHovered]       = PXC(200,  84,  30);
++    colors[ImGuiCol_PlotHistogram]          = c_sel;
++    colors[ImGuiCol_PlotHistogramHovered]   = c_sel_hot;
++    colors[ImGuiCol_TableHeaderBg]          = c_face;
++    colors[ImGuiCol_TableBorderStrong]      = c_outline;
++    colors[ImGuiCol_TableBorderLight]       = PXC(160, 154, 142);
++    colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
++    colors[ImGuiCol_TableRowBgAlt]          = ImVec4(0.00f, 0.00f, 0.00f, 0.05f);
++    colors[ImGuiCol_TextLink]               = PXC( 46,  98, 140);
++    colors[ImGuiCol_TextSelectedBg]         = PXCA(124, 145, 157, 150);
++    colors[ImGuiCol_TreeLines]              = PXC(140, 134, 124);
++    colors[ImGuiCol_DragDropTarget]         = PXC(200,  84,  30);
++    colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
++    colors[ImGuiCol_UnsavedMarker]          = c_sel_dark;
++    colors[ImGuiCol_WindowGrid]             = PXCA(  0,   0,   0,  9);   // #ccc4b7 on #d3cbbe : graph paper
++    colors[ImGuiCol_NavCursor]              = PXC( 46, 109, 164);
++    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
++    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.35f);
++    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.40f);
++#endif
 +    #undef PXC
 +    #undef PXCA
 +#else
      colors[ImGuiCol_Text]                   = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
      colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
      colors[ImGuiCol_WindowBg]               = ImVec4(0.06f, 0.06f, 0.06f, 0.94f);
-@@ -248,6 +331,7 @@
+@@ -244,10 +409,12 @@
+     colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+     colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_UnsavedMarker]          = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
++    colors[ImGuiCol_WindowGrid]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_NavCursor]              = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
      colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
      colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
      colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
@@ -128,20 +405,31 @@ diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
  }
  
  void ImGui::StyleColorsClassic(ImGuiStyle* dst)
-@@ -1493,12 +1577,68 @@
+@@ -313,6 +480,7 @@
+     colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+     colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_UnsavedMarker]          = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
++    colors[ImGuiCol_WindowGrid]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_NavCursor]              = colors[ImGuiCol_HeaderHovered];
+     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+@@ -383,6 +551,7 @@
+     colors[ImGuiCol_DragDropTarget]         = ImVec4(0.26f, 0.59f, 0.98f, 0.95f);
+     colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_UnsavedMarker]          = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
++    colors[ImGuiCol_WindowGrid]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+     colors[ImGuiCol_NavCursor]              = colors[ImGuiCol_HeaderHovered];
+     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(0.70f, 0.70f, 0.70f, 0.70f);
+     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.20f, 0.20f, 0.20f, 0.20f);
+@@ -1493,12 +1662,204 @@
      PathStroke(col, 0, thickness);
  }
  
 +#ifndef IMGUI_DISABLE_PIXEL_STYLE
 +// [PIXEL STYLE] Pixel-art rectangles (Aseprite-like).
-+// Any rounding > 0 is turned into a square "notch" of IMGUI_PIXEL_CORNER_SIZE pixels cut out of the corner
-+// (a one step staircase instead of an arc). Everything is drawn with axis-aligned rectangles snapped to the
-+// pixel grid, so edges stay perfectly crisp, with or without anti-aliasing.
++// Any rounding > 0 is turned into a stair-stepped corner of N pixels (see ImGui::RenderPixelCornerSize()) instead of an arc.
++// Everything is drawn with axis-aligned rectangles snapped to the pixel grid, so edges stay perfectly crisp, with or without anti-aliasing.
 +// Define IMGUI_DISABLE_PIXEL_STYLE (e.g. in imconfig.h) to get the stock Dear ImGui behavior back.
-+#ifndef IMGUI_PIXEL_CORNER_SIZE
-+#define IMGUI_PIXEL_CORNER_SIZE 1.0f
-+#endif
-+
 +struct ImPixelRect
 +{
 +    float x0, y0, x1, y1;   // Pixel-snapped bounds (max is exclusive)
@@ -162,8 +450,121 @@ diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
 +    r->tr = (flags & ImDrawFlags_RoundCornersTopRight) != 0;
 +    r->br = (flags & ImDrawFlags_RoundCornersBottomRight) != 0;
 +    r->bl = (flags & ImDrawFlags_RoundCornersBottomLeft) != 0;
-+    r->n = ImMin(IMGUI_PIXEL_CORNER_SIZE, ImFloor(ImMin(r->x1 - r->x0, r->y1 - r->y0) * 0.5f));
++    r->n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(r->x1 - r->x0, r->y1 - r->y0) * 0.5f));
 +    return r->n >= 1.0f;
++}
++#endif // IMGUI_DISABLE_PIXEL_STYLE
++
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++// Bevel colors derived from the face color, so that any palette gets a coherent relief.
++// Highlight: light faces go (almost) white, mid tones get a lighter tint. Shade: ~68% of the face.
++static ImU32 ImPixelBevelColor(ImU32 face, bool highlight)
++{
++    ImVec4 c = ImGui::ColorConvertU32ToFloat4(face);
++    if (highlight)
++    {
++        const float lum = c.x * 0.299f + c.y * 0.587f + c.z * 0.114f;
++        const float f = ImClamp((lum - 0.45f) * 3.2f, 0.20f, 1.0f);
++        c.x = ImLerp(c.x, 1.0f, f); c.y = ImLerp(c.y, 1.0f, f); c.z = ImLerp(c.z, 1.0f, f);
++    }
++    else
++    {
++        c.x *= 0.68f; c.y *= 0.68f; c.z *= 0.68f;
++    }
++    return ImGui::ColorConvertFloat4ToU32(c);   // Alpha is preserved
++}
++
++void ImGui::RenderPixelBevel(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, float inset, bool sunken, float rounding, ImDrawFlags flags)
++{
++    if ((face_col & IM_COL32_A_MASK) == 0)
++        return;
++    const float b = ImFloor(inset + 0.5f);
++    const float ox0 = ImFloor(p_min.x + 0.5f), oy0 = ImFloor(p_min.y + 0.5f), ox1 = ImFloor(p_max.x + 0.5f), oy1 = ImFloor(p_max.y + 0.5f);   // Outer rect
++    const float ix0 = ox0 + b, iy0 = oy0 + b, ix1 = ox1 - b, iy1 = oy1 - b;                                                                      // Inner rect
++    if (ix1 - ix0 < 3.0f || iy1 - iy0 < 3.0f)
++        return;
++
++    // Stair-stepped corners of the outline we are inside of
++    float ntl = 0.0f, ntr = 0.0f, nbr = 0.0f, nbl = 0.0f;
++    if (rounding >= 0.5f && (flags & ImDrawFlags_RoundCornersMask_) != ImDrawFlags_RoundCornersNone)
++    {
++        flags = FixRectCornerFlags(flags);
++        const float n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(ox1 - ox0, oy1 - oy0) * 0.5f));
++        ntl = (flags & ImDrawFlags_RoundCornersTopLeft) ? n : 0.0f;     ntr = (flags & ImDrawFlags_RoundCornersTopRight) ? n : 0.0f;
++        nbr = (flags & ImDrawFlags_RoundCornersBottomRight) ? n : 0.0f; nbl = (flags & ImDrawFlags_RoundCornersBottomLeft) ? n : 0.0f;
++    }
++    else if (rounding >= 0.5f)
++    {
++        const float n = ImMin(ImGui::RenderPixelCornerSize(rounding), ImFloor(ImMin(ox1 - ox0, oy1 - oy0) * 0.5f));
++        ntl = ntr = nbr = nbl = n;
++    }
++
++    const ImU32 hi = ImPixelBevelColor(face_col, true), sh = ImPixelBevelColor(face_col, false);
++    const ImU32 col_tl = sunken ? sh : hi, col_br = sunken ? hi : sh;
++    float sx, ex, sy, ey;
++    sx = ImMax(ix0, ox0 + ntl); ex = ImMin(ix1, ox1 - ntr);                     // Top row
++    if (ex > sx) draw_list->AddRectFilled(ImVec2(sx, iy0), ImVec2(ex, iy0 + 1.0f), col_tl);
++    sy = ImMax(iy0 + 1.0f, oy0 + ntl); ey = ImMin(iy1 - 1.0f, oy1 - nbl);       // Left column
++    if (ey > sy) draw_list->AddRectFilled(ImVec2(ix0, sy), ImVec2(ix0 + 1.0f, ey), col_tl);
++    sx = ImMax(ix0, ox0 + nbl); ex = ImMin(ix1 - 1.0f, ox1 - nbr);              // Bottom row
++    if (ex > sx) draw_list->AddRectFilled(ImVec2(sx, iy1 - 1.0f), ImVec2(ex, iy1), col_br);
++    sy = ImMax(iy0 + 1.0f, oy0 + ntr); ey = ImMin(iy1, oy1 - nbr);              // Right column
++    if (ey > sy) draw_list->AddRectFilled(ImVec2(ix1 - 1.0f, sy), ImVec2(ix1, ey), col_br);
++}
++
++void ImGui::RenderPixelBox(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, ImU32 outline_col, float rounding, ImDrawFlags flags, bool sunken)
++{
++    draw_list->AddRectFilled(p_min, p_max, face_col, rounding, flags);
++    draw_list->AddRect(p_min, p_max, outline_col, rounding, flags, 1.0f);
++    RenderPixelBevel(draw_list, p_min, p_max, face_col, 1.0f, sunken, rounding, flags);
++}
++
++// Horizontal span [x0,x1) of row 'j' of a disc of diameter 'D' (sampled at pixel centers: 5 -> 3,5,5,5,3). Returns false if the row is empty.
++static bool ImPixelDiscSpan(int D, int j, int* x0, int* x1)
++{
++    if (D <= 0 || j < 0 || j >= D)
++        return false;
++    const float r = (float)D * 0.5f;
++    const float dy = ((float)j + 0.5f) - r;
++    const float v = r * r - dy * dy;
++    if (v <= 0.0f)
++        return false;
++    const float hw = ImSqrt(v);
++    *x0 = (int)ImFloor(r - hw + 0.5f);
++    *x1 = (int)ImFloor(r + hw + 0.5f);
++    return *x1 > *x0;
++}
++
++void ImGui::RenderPixelDisc(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col)
++{
++    const float ox = ImFloor(p_min.x + 0.5f), oy = ImFloor(p_min.y + 0.5f);
++    for (int j = 0; j < diameter; j++)
++    {
++        int x0, x1;
++        if (ImPixelDiscSpan(diameter, j, &x0, &x1))
++            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + x1, oy + j + 1), col);
++    }
++}
++
++void ImGui::RenderPixelCircle(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col)
++{
++    const float ox = ImFloor(p_min.x + 0.5f), oy = ImFloor(p_min.y + 0.5f);
++    for (int j = 0; j < diameter; j++)
++    {
++        int x0, x1, ix0, ix1;
++        if (!ImPixelDiscSpan(diameter, j, &x0, &x1))
++            continue;
++        if (ImPixelDiscSpan(diameter - 2, j - 1, &ix0, &ix1))   // Inner disc is the same disc, 2px smaller, shifted by 1px
++        {
++            ix0 += 1; ix1 += 1;
++            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + ix0, oy + j + 1), col);
++            draw_list->AddRectFilled(ImVec2(ox + ix1, oy + j), ImVec2(ox + x1, oy + j + 1), col);
++        }
++        else
++        {
++            draw_list->AddRectFilled(ImVec2(ox + x0, oy + j), ImVec2(ox + x1, oy + j + 1), col);
++        }
++    }
 +}
 +#endif // IMGUI_DISABLE_PIXEL_STYLE
 +
@@ -177,27 +578,55 @@ diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
 +    ImPixelRect r;
 +    if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
 +    {
-+        // Outline = 4 edges. Edges are shortened where a corner is notched, so that nothing overlaps (no double blending with alpha colors).
 +        const float t = ImMax(1.0f, ImFloor(thickness + 0.5f));
-+        const float c = ImMax(r.n, t);                                  // Notch is at least as big as the border thickness
-+        if (c * 2.0f > ImMin(r.x1 - r.x0, r.y1 - r.y0))
++        const int n = (int)r.n;
++        if (t <= 1.0f)
 +        {
-+            AddRectFilled(p_min, p_max, col, rounding, flags);          // Too small to have a hollow center
-+            return;
++            // 1px outline: 4 edges + the diagonal pixels of the stair-stepped corners. Nothing overlaps (no double blending with alpha colors).
++            if (n * 2 > (int)ImMin(r.x1 - r.x0, r.y1 - r.y0))
++            {
++                AddRectFilled(p_min, p_max, col, rounding, flags);      // Too small to have a hollow center
++                return;
++            }
++            const float tl = r.tl ? (float)n : 0.0f, tr = r.tr ? (float)n : 0.0f, br = r.br ? (float)n : 0.0f, bl = r.bl ? (float)n : 0.0f;
++            const int num_rects = 4 + (n - 1) * ((r.tl ? 1 : 0) + (r.tr ? 1 : 0) + (r.br ? 1 : 0) + (r.bl ? 1 : 0));
++            PrimReserve(6 * num_rects, 4 * num_rects);
++            PrimRect(ImVec2(r.x0 + tl, r.y0),        ImVec2(r.x1 - tr, r.y0 + 1.0f), col);                                       // Top
++            PrimRect(ImVec2(r.x0 + bl, r.y1 - 1.0f), ImVec2(r.x1 - br, r.y1),        col);                                       // Bottom
++            PrimRect(ImVec2(r.x0,        r.y0 + (r.tl ? tl : 1.0f)), ImVec2(r.x0 + 1.0f, r.y1 - (r.bl ? bl : 1.0f)), col);       // Left
++            PrimRect(ImVec2(r.x1 - 1.0f, r.y0 + (r.tr ? tr : 1.0f)), ImVec2(r.x1,        r.y1 - (r.br ? br : 1.0f)), col);       // Right
++            for (int i = 1; i < n; i++)
++            {
++                const float k = (float)i, m = (float)(n - i);
++                if (r.tl) PrimRect(ImVec2(r.x0 + m,        r.y0 + k),        ImVec2(r.x0 + m + 1.0f, r.y0 + k + 1.0f), col);
++                if (r.tr) PrimRect(ImVec2(r.x1 - m - 1.0f, r.y0 + k),        ImVec2(r.x1 - m,        r.y0 + k + 1.0f), col);
++                if (r.bl) PrimRect(ImVec2(r.x0 + m,        r.y1 - k - 1.0f), ImVec2(r.x0 + m + 1.0f, r.y1 - k),        col);
++                if (r.br) PrimRect(ImVec2(r.x1 - m - 1.0f, r.y1 - k - 1.0f), ImVec2(r.x1 - m,        r.y1 - k),        col);
++            }
 +        }
-+        const float tl = r.tl ? c : 0.0f, tr = r.tr ? c : 0.0f, br = r.br ? c : 0.0f, bl = r.bl ? c : 0.0f;
-+        PrimReserve(24, 16);
-+        PrimRect(ImVec2(r.x0 + tl, r.y0),     ImVec2(r.x1 - tr, r.y0 + t), col);                                                    // Top
-+        PrimRect(ImVec2(r.x0 + bl, r.y1 - t), ImVec2(r.x1 - br, r.y1),     col);                                                    // Bottom
-+        PrimRect(ImVec2(r.x0,     r.y0 + (r.tl ? tl : t)), ImVec2(r.x0 + t, r.y1 - (r.bl ? bl : t)), col);                          // Left
-+        PrimRect(ImVec2(r.x1 - t, r.y0 + (r.tr ? tr : t)), ImVec2(r.x1,     r.y1 - (r.br ? br : t)), col);                          // Right
++        else
++        {
++            // Thick outline: simple square notch, at least as big as the thickness so edges never overlap
++            const float c = ImMax((float)n, t);
++            if (c * 2.0f > ImMin(r.x1 - r.x0, r.y1 - r.y0))
++            {
++                AddRectFilled(p_min, p_max, col, rounding, flags);
++                return;
++            }
++            const float tl = r.tl ? c : 0.0f, tr = r.tr ? c : 0.0f, br = r.br ? c : 0.0f, bl = r.bl ? c : 0.0f;
++            PrimReserve(24, 16);
++            PrimRect(ImVec2(r.x0 + tl, r.y0),     ImVec2(r.x1 - tr, r.y0 + t), col);
++            PrimRect(ImVec2(r.x0 + bl, r.y1 - t), ImVec2(r.x1 - br, r.y1),     col);
++            PrimRect(ImVec2(r.x0,     r.y0 + (r.tl ? tl : t)), ImVec2(r.x0 + t, r.y1 - (r.bl ? bl : t)), col);
++            PrimRect(ImVec2(r.x1 - t, r.y0 + (r.tr ? tr : t)), ImVec2(r.x1,     r.y1 - (r.br ? br : t)), col);
++        }
 +        return;
 +    }
 +#endif
      if (Flags & ImDrawListFlags_AntiAliasedLines)
          PathRect(p_min + ImVec2(0.50f, 0.50f), p_max - ImVec2(0.50f, 0.50f), rounding, flags);
      else
-@@ -1510,6 +1650,19 @@
+@@ -1510,6 +1871,23 @@
  {
      if ((col & IM_COL32_A_MASK) == 0)
          return;
@@ -205,39 +634,318 @@ diff -ruN imgui_orig/imgui/imgui_draw.cpp imgui/imgui/imgui_draw.cpp
 +    ImPixelRect r;
 +    if (ImPixelRectSetup(&r, p_min, p_max, rounding, flags))
 +    {
-+        // Filled rect with notched corners = top band + middle band + bottom band (no overlap, no seams)
-+        const float n = r.n;
-+        PrimReserve(18, 12);
-+        PrimRect(ImVec2(r.x0 + (r.tl ? n : 0.0f), r.y0),     ImVec2(r.x1 - (r.tr ? n : 0.0f), r.y0 + n), col);
-+        PrimRect(ImVec2(r.x0,                     r.y0 + n), ImVec2(r.x1,                     r.y1 - n), col);
-+        PrimRect(ImVec2(r.x0 + (r.bl ? n : 0.0f), r.y1 - n), ImVec2(r.x1 - (r.br ? n : 0.0f), r.y1),     col);
++        // Filled rect with stair-stepped corners = one row per step at the top and bottom + a middle band (no overlap, no seams)
++        const int n = (int)r.n;
++        PrimReserve(6 * (2 * n + 1), 4 * (2 * n + 1));
++        for (int i = 0; i < n; i++)
++        {
++            const float m = (float)(n - i), k = (float)i;
++            PrimRect(ImVec2(r.x0 + (r.tl ? m : 0.0f), r.y0 + k),        ImVec2(r.x1 - (r.tr ? m : 0.0f), r.y0 + k + 1.0f), col);
++            PrimRect(ImVec2(r.x0 + (r.bl ? m : 0.0f), r.y1 - k - 1.0f), ImVec2(r.x1 - (r.br ? m : 0.0f), r.y1 - k),        col);
++        }
++        PrimRect(ImVec2(r.x0, r.y0 + (float)n), ImVec2(r.x1, r.y1 - (float)n), col);
 +        return;
 +    }
 +#endif
      if (rounding < 0.5f || (flags & ImDrawFlags_RoundCornersMask_) == ImDrawFlags_RoundCornersNone)
      {
          PrimReserve(6, 4);
-diff -ruN imgui_orig/imgui/imgui_internal.h imgui/imgui/imgui_internal.h
---- imgui_orig/imgui/imgui_internal.h	2026-10-04 01:10:25.256720756 +0000
-+++ imgui/imgui/imgui_internal.h	2026-10-04 01:13:30.384397347 +0000
-@@ -54,6 +54,13 @@
- #include "imgui.h"
- #endif
- 
-+// [PIXEL STYLE] Size (in pixels) of the notch cut out of rounded corners. Define IMGUI_DISABLE_PIXEL_STYLE to restore stock rendering.
+@@ -2419,8 +2797,15 @@
+ {
+     memset(this, 0, sizeof(*this));
+     FontDataOwnedByAtlas = true;
 +#ifndef IMGUI_DISABLE_PIXEL_STYLE
-+#ifndef IMGUI_PIXEL_CORNER_SIZE
-+#define IMGUI_PIXEL_CORNER_SIZE 1.0f
++    // [PIXEL STYLE] Glyphs sit on whole pixels (no fractional advance) so bilinear sampling never blurs text. Oversampling is useless in that case.
++    PixelSnapH = true;
++    OversampleH = 1;
++    OversampleV = 1;
++#else
+     OversampleH = 0; // Auto == 1 or 2 depending on size
+     OversampleV = 0; // Auto == 1
 +#endif
+     GlyphMaxAdvanceX = FLT_MAX;
+     RasterizerMultiply = 1.0f;
+     RasterizerDensity = 1.0f;
+@@ -5860,6 +6245,26 @@
+     float r = h * 0.40f * scale;
+     ImVec2 center = pos + ImVec2(h * 0.50f, h * 0.50f * scale);
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art triangle (a 45 degrees staircase): half base = 'half', depth = half + 1 rows
++    {
++        IM_ASSERT(dir != ImGuiDir_None && dir != ImGuiDir_COUNT);
++        const int half = ImMax(1, (int)ImFloor(r * 0.65f + 0.5f));
++        const int len = half + 1;
++        const float cx = ImFloor(center.x + 0.5f), cy = ImFloor(center.y + 0.5f);
++        const bool vertical = (dir == ImGuiDir_Up || dir == ImGuiDir_Down);
++        const float t0 = ImFloor(((vertical ? center.y : center.x) - (float)len * 0.5f) + 0.5f);     // Where the arrow starts along its axis
++        for (int i = 0; i < len; i++)
++        {
++            const int w = half - i;                                                                   // Half-width of this step (shrinks towards the tip)
++            const int k = (dir == ImGuiDir_Down || dir == ImGuiDir_Right) ? i : len - 1 - i;          // Position along the axis
++            if (vertical)
++                draw_list->AddRectFilled(ImVec2(cx - w, t0 + k), ImVec2(cx + w + 1.0f, t0 + k + 1.0f), col);
++            else
++                draw_list->AddRectFilled(ImVec2(t0 + k, cy - w), ImVec2(t0 + k + 1.0f, cy + w + 1.0f), col);
++        }
++    }
++#else
+     ImVec2 a, b, c;
+     switch (dir)
+     {
+@@ -5883,17 +6288,43 @@
+         break;
+     }
+     draw_list->AddTriangleFilled(center + a, center + b, center + c, col);
++#endif
+ }
+ 
+ void ImGui::RenderBullet(ImDrawList* draw_list, ImVec2 pos, ImU32 col)
+ {
+     // FIXME-OPT: This should be baked in font now that it's easier.
+     float font_size = draw_list->_Data->FontSize;
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art disc with an odd diameter, so that it is centered on a pixel (13px font -> 5px bullet)
++    const int D = ImMax(3, (int)ImFloor(font_size * 0.40f) | 1);
++    RenderPixelDisc(draw_list, ImVec2(pos.x - (float)D * 0.5f, pos.y - (float)D * 0.5f), D, col);
++#else
+     draw_list->AddCircleFilled(pos, font_size * 0.20f, col, (font_size < 22) ? 8 : (font_size < 40) ? 12 : 0); // Hardcode optimal/nice tessellation threshold
++#endif
+ }
+ 
+ void ImGui::RenderCheckMark(ImDrawList* draw_list, ImVec2 pos, ImU32 col, float sz)
+ {
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art check mark: two 45 degrees strokes (short one going down, long one going up), 'T' pixels thick, centered in the square.
++    const int S = (int)ImFloor(sz + 0.5f);
++    if (S >= 3)
++    {
++        const int T = ImMax(1, S / 6);
++        const int a = ImMax(2, (int)ImFloor((float)S * 0.25f + 0.5f));      // Short stroke length
++        const int b = ImMin(2 * a + 1, S - 1 - a);                           // Long stroke length
++        const int w = a + b + 1, h = b + T;
++        const float ox = ImFloor(pos.x + 0.5f) + (float)((S - w) / 2);
++        const float oy = ImFloor(pos.y + 0.5f) + (float)((S - h) / 2);
++        for (int x = 0; x < w; x++)
++        {
++            const int y = (x <= a) ? (b - a) + x : b - (x - a);
++            draw_list->AddRectFilled(ImVec2(ox + x, oy + y), ImVec2(ox + x + 1, oy + y + T), col);
++        }
++        return;
++    }
++#endif
+     float thickness = ImMax(sz / 5.0f, 1.0f);
+     sz -= thickness * 0.5f;
+     pos += ImVec2(thickness * 0.25f, thickness * 0.25f);
+@@ -5910,6 +6341,23 @@
+ // Render an arrow. 'pos' is position of the arrow tip. half_sz.x is length from base to tip. half_sz.y is length on each side.
+ void ImGui::RenderArrowPointingAt(ImDrawList* draw_list, ImVec2 pos, ImVec2 half_sz, ImGuiDir direction, ImU32 col)
+ {
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art triangle: 'len' steps from the base to the tip, each step narrower than the previous one
++    if (direction != ImGuiDir_None && direction != ImGuiDir_COUNT)
++    {
++        const int len = ImMax(1, (int)ImFloor(half_sz.x + 0.5f));
++        const float hw = ImFloor(half_sz.y + 0.5f);
++        const float tx = ImFloor(pos.x + 0.5f), ty = ImFloor(pos.y + 0.5f);
++        for (int i = 0; i < len; i++)
++        {
++            const float w = ImFloor(hw * (1.0f - (float)i / (float)len) + 0.5f);                    // Half-width at distance 'i' from the base
++            if (direction == ImGuiDir_Right)     draw_list->AddRectFilled(ImVec2(tx - len + i, ty - w),     ImVec2(tx - len + i + 1, ty + w + 1), col);
++            else if (direction == ImGuiDir_Left) draw_list->AddRectFilled(ImVec2(tx + len - 1 - i, ty - w), ImVec2(tx + len - i, ty + w + 1),     col);
++            else if (direction == ImGuiDir_Down) draw_list->AddRectFilled(ImVec2(tx - w, ty - len + i),     ImVec2(tx + w + 1, ty - len + i + 1), col);
++            else                                 draw_list->AddRectFilled(ImVec2(tx - w, ty + len - 1 - i), ImVec2(tx + w + 1, ty + len - i),     col);
++        }
++    }
++#else
+     switch (direction)
+     {
+     case ImGuiDir_Left:  draw_list->AddTriangleFilled(ImVec2(pos.x + half_sz.x, pos.y - half_sz.y), ImVec2(pos.x + half_sz.x, pos.y + half_sz.y), pos, col); return;
+@@ -5918,6 +6366,7 @@
+     case ImGuiDir_Down:  draw_list->AddTriangleFilled(ImVec2(pos.x - half_sz.x, pos.y - half_sz.y), ImVec2(pos.x + half_sz.x, pos.y - half_sz.y), pos, col); return;
+     case ImGuiDir_None: case ImGuiDir_COUNT: break; // Fix warnings
+     }
++#endif
+ }
+ 
+ // This is less wide than RenderArrow() and we use in dock nodes instead of the regular RenderArrow() to denote a change of functionality,
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui_impl_opengl3.cpp imgui/imgui/imgui_impl_opengl3.cpp
+--- imgui_orig/imgui/imgui_impl_opengl3.cpp	2026-01-20 18:51:40.000000000 -0500
++++ imgui/imgui/imgui_impl_opengl3.cpp	2026-10-05 01:51:47.031283401 -0400
+@@ -607,6 +607,10 @@
+     ImVec2 clip_off = draw_data->DisplayPos;         // (0,0) unless using multi-viewports
+     ImVec2 clip_scale = draw_data->FramebufferScale; // (1,1) unless using retina display which are often (2,2)
+ 
++#ifndef IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR
++    GLuint last_forced_linear_tex = 0xFFFFFFFFu;
 +#endif
 +
- #include <stdio.h>      // FILE*, sscanf
- #include <stdlib.h>     // NULL, malloc, free, qsort, atoi, atof
- #include <math.h>       // sqrtf, fabsf, fmodf, powf, floorf, ceilf, cosf, sinf
-diff -ruN imgui_orig/imgui/imgui_widgets.cpp imgui/imgui/imgui_widgets.cpp
---- imgui_orig/imgui/imgui_widgets.cpp	2026-10-04 01:10:25.256851770 +0000
-+++ imgui/imgui/imgui_widgets.cpp	2026-10-04 01:14:48.370678021 +0000
-@@ -10681,10 +10681,17 @@
+     // Render command lists
+     for (const ImDrawList* draw_list : draw_data->CmdLists)
+     {
+@@ -666,6 +670,20 @@
+ 
+                 // Bind texture, Draw
+                 GL_CALL(glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID()));
++#ifndef IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR
++                // [PIXEL STYLE] Force bilinear sampling on every texture used by Dear ImGui (font atlas, user images...), every time it is bound.
++                // Protects against the application (or another library) changing the filter to NEAREST behind our back, which makes text look blurry/uneven.
++                // Define IMGUI_IMPL_OPENGL_NO_FORCE_LINEAR to let the application pick the filter of its own textures.
++                {
++                    const GLuint bound_tex = (GLuint)(intptr_t)pcmd->GetTexID();
++                    if (bound_tex != last_forced_linear_tex)
++                    {
++                        GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
++                        GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
++                        last_forced_linear_tex = bound_tex;
++                    }
++                }
++#endif
+ #ifdef IMGUI_IMPL_OPENGL_MAY_HAVE_VTX_OFFSET
+                 if (bd->GlVersion >= 320)
+                     GL_CALL(glDrawElementsBaseVertex(GL_TRIANGLES, (GLsizei)pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, (void*)(intptr_t)(pcmd->IdxOffset * sizeof(ImDrawIdx)), (GLint)pcmd->VtxOffset));
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui_internal.h imgui/imgui/imgui_internal.h
+--- imgui_orig/imgui/imgui_internal.h	2026-01-20 18:51:40.000000000 -0500
++++ imgui/imgui/imgui_internal.h	2026-10-05 01:51:47.031712937 -0400
+@@ -3869,6 +3869,18 @@
+     IMGUI_API void          RenderFrameBorder(ImVec2 p_min, ImVec2 p_max, float rounding = 0.0f);
+     IMGUI_API void          RenderColorRectWithAlphaCheckerboard(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, float grid_step, ImVec2 grid_off, float rounding = 0.0f, ImDrawFlags flags = 0);
+     IMGUI_API void          RenderNavCursor(const ImRect& bb, ImGuiID id, ImGuiNavRenderCursorFlags flags = ImGuiNavRenderCursorFlags_None); // Navigation highlight
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] 1px bevel (light on top/left, dark on bottom/right; inverted if 'sunken'), colors derived from 'face_col'. 'inset' = outline thickness to stay inside of.
++    // 'rounding'/'flags' = same as the outline being followed, so the relief hugs the stair-stepped corners.
++    IMGUI_API void      RenderPixelBevel(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, float inset, bool sunken, float rounding = 0.0f, ImDrawFlags flags = 0);
++    // [PIXEL STYLE] Pixel-art discs and 1px rings (e.g. radio buttons). 'p_min' = top-left of the square the circle is inscribed in, 'diameter' in pixels.
++    IMGUI_API void      RenderPixelDisc(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col);
++    IMGUI_API void      RenderPixelCircle(ImDrawList* draw_list, const ImVec2& p_min, int diameter, ImU32 col);
++    // [PIXEL STYLE] Filled face + 1px outline + bevel.
++    IMGUI_API void      RenderPixelBox(ImDrawList* draw_list, const ImVec2& p_min, const ImVec2& p_max, ImU32 face_col, ImU32 outline_col, float rounding, ImDrawFlags flags, bool sunken);
++    // [PIXEL STYLE] A 'rounding' value is turned into a pixel-art corner: a stair of N steps (rounding 1..2 -> 1px, 3..4 -> 2px, 5..6 -> 3px...)
++    inline float        RenderPixelCornerSize(float rounding) { return rounding < 0.5f ? 0.0f : ImMax(1.0f, ImFloor((rounding + 1.0f) * 0.5f)); }
++#endif
+ #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+     inline    void          RenderNavHighlight(const ImRect& bb, ImGuiID id, ImGuiNavRenderCursorFlags flags = ImGuiNavRenderCursorFlags_None) { RenderNavCursor(bb, id, flags); } // Renamed in 1.91.4
+ #endif
+diff -ruN -x imgui_pixel.patch imgui_orig/imgui/imgui_widgets.cpp imgui/imgui/imgui_widgets.cpp
+--- imgui_orig/imgui/imgui_widgets.cpp	2026-01-20 18:51:40.000000000 -0500
++++ imgui/imgui/imgui_widgets.cpp	2026-10-05 01:51:47.032551367 -0400
+@@ -914,14 +914,28 @@
+     // Render
+     ImU32 bg_col = GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
+     if (hovered)
+-        window->DrawList->AddRectFilled(bb.Min, bb.Max, bg_col);
++        window->DrawList->AddRectFilled(bb.Min, bb.Max, bg_col, g.Style.FrameRounding);
+     RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_Compact);
+     const ImU32 cross_col = GetColorU32(ImGuiCol_Text);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art cross: a perfect (2*half+1)^2 'X' made of 1px squares
++    {
++        const float half = ImMax(1.0f, ImFloor(g.FontSize / 6.0f));
++        const float cx = ImFloor(bb.GetCenter().x), cy = ImFloor(bb.GetCenter().y);
++        for (float i = -half; i <= half; i += 1.0f)
++        {
++            window->DrawList->AddRectFilled(ImVec2(cx + i, cy + i), ImVec2(cx + i + 1.0f, cy + i + 1.0f), cross_col);
++            if (i != 0.0f)
++                window->DrawList->AddRectFilled(ImVec2(cx + i, cy - i), ImVec2(cx + i + 1.0f, cy - i + 1.0f), cross_col);
++        }
++    }
++#else
+     const ImVec2 cross_center = bb.GetCenter() - ImVec2(0.5f, 0.5f);
+     const float cross_extent = g.FontSize * 0.5f * 0.7071f - 1.0f;
+     const float cross_thickness = 1.0f; // FIXME-DPI
+     window->DrawList->AddLine(cross_center + ImVec2(+cross_extent, +cross_extent), cross_center + ImVec2(-cross_extent, -cross_extent), cross_col, cross_thickness);
+     window->DrawList->AddLine(cross_center + ImVec2(+cross_extent, -cross_extent), cross_center + ImVec2(-cross_extent, +cross_extent), cross_col, cross_thickness);
++#endif
+ 
+     return pressed;
+ }
+@@ -1114,7 +1128,11 @@
+         grab_rect = ImRect(ImLerp(bb.Min.x, bb.Max.x, grab_v_norm), bb.Min.y, ImLerp(bb.Min.x, bb.Max.x, grab_v_norm) + grab_h_pixels, bb.Max.y);
+     else
+         grab_rect = ImRect(bb.Min.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm), bb.Max.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm) + grab_h_pixels);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    RenderPixelBox(window->DrawList, grab_rect.Min, grab_rect.Max, grab_col, GetColorU32(ImGuiCol_Border, alpha), style.ScrollbarRounding, 0, false);
++#else
+     window->DrawList->AddRectFilled(grab_rect.Min, grab_rect.Max, grab_col, style.ScrollbarRounding);
++#endif
+ 
+     return held;
+ }
+@@ -1373,6 +1391,25 @@
+         MarkItemEdited(id);
+ 
+     RenderNavCursor(total_bb, id);
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Pixel-art radio: sunken disc + 1px ring + a dot of about half its size
++    {
++        IM_UNUSED(radius); IM_UNUSED(center);
++        const int D = (int)ImFloor(square_sz + 0.5f);
++        const ImVec2 p0(ImFloor(check_bb.Min.x + 0.5f), ImFloor(check_bb.Min.y + 0.5f));
++        const ImU32 face_col = GetColorU32((held && hovered) ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
++        RenderPixelDisc(window->DrawList, p0, D, face_col);
++        if (active)
++        {
++            int D2 = ImMax(3, D / 2);
++            if ((D - D2) & 1)
++                D2++;
++            RenderPixelDisc(window->DrawList, p0 + ImVec2((float)((D - D2) / 2), (float)((D - D2) / 2)), D2, GetColorU32(ImGuiCol_CheckMark));
++        }
++        if (style.FrameBorderSize > 0.0f)
++            RenderPixelCircle(window->DrawList, p0, D, GetColorU32(ImGuiCol_Border));
++    }
++#else
+     const int num_segment = window->DrawList->_CalcCircleAutoSegmentCount(radius);
+     window->DrawList->AddCircleFilled(center, radius, GetColorU32((held && hovered) ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), num_segment);
+     if (active)
+@@ -1386,6 +1423,7 @@
+         window->DrawList->AddCircle(center + ImVec2(1, 1), radius, GetColorU32(ImGuiCol_BorderShadow), num_segment, style.FrameBorderSize);
+         window->DrawList->AddCircle(center, radius, GetColorU32(ImGuiCol_Border), num_segment, style.FrameBorderSize);
+     }
++#endif
+ 
+     ImVec2 label_pos = ImVec2(check_bb.Max.x + style.ItemInnerSpacing.x, check_bb.Min.y + style.FramePadding.y);
+     if (g.LogEnabled)
+@@ -3353,7 +3391,13 @@
+ 
+     // Render grab
+     if (grab_bb.Max.x > grab_bb.Min.x)
++    {
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        RenderPixelBox(window->DrawList, grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), GetColorU32(ImGuiCol_Border), style.GrabRounding, 0, false);
++#else
+         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
++#endif
++    }
+ 
+     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
+     char value_buf[64];
+@@ -3503,7 +3547,13 @@
+ 
+     // Render grab
+     if (grab_bb.Max.y > grab_bb.Min.y)
++    {
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++        RenderPixelBox(window->DrawList, grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), GetColorU32(ImGuiCol_Border), style.GrabRounding, 0, false);
++#else
+         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
++#endif
++    }
+ 
+     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
+     // For the vertical slider we allow centered text to overlap the frame padding
+@@ -9662,7 +9712,11 @@
+ 
+     // Draw separator
+     // (it would be misleading to draw this in EndTabBar() suggesting that it may be drawn over tabs, as tab bar are appendable)
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    const ImU32 col = GetColorU32(ImGuiCol_Border);     // [PIXEL STYLE] Outline-colored base line under all tabs
++#else
+     const ImU32 col = GetColorU32((flags & ImGuiTabBarFlags_IsFocused) ? ImGuiCol_TabSelected : ImGuiCol_TabDimmedSelected);
++#endif
+     if (g.Style.TabBarBorderSize > 0.0f)
+     {
+         const float y = tab_bar->BarRect.Max.y;
+@@ -10681,10 +10735,17 @@
              ImU32 overline_col = GetColorU32(tab_bar_focused ? ImGuiCol_TabSelectedOverline : ImGuiCol_TabDimmedSelectedOverline);
              if (style.TabRounding > 0.0f)
              {
@@ -245,7 +953,7 @@ diff -ruN imgui_orig/imgui/imgui_widgets.cpp imgui/imgui/imgui_widgets.cpp
 +                // [PIXEL STYLE] Flat overline, inset by the same notch as the tab corners
 +                const float ol_y = ImFloor(tl.y + 0.5f);
 +                const float ol_t = ImMax(1.0f, ImFloor(style.TabBarOverlineSize + 0.5f));
-+                display_draw_list->AddRectFilled(ImVec2(ImFloor(tl.x + 0.5f) + IMGUI_PIXEL_CORNER_SIZE, ol_y), ImVec2(ImFloor(tr.x + 0.5f) - IMGUI_PIXEL_CORNER_SIZE, ol_y + ol_t), overline_col);
++                display_draw_list->AddRectFilled(ImVec2(ImFloor(tl.x + 0.5f) + RenderPixelCornerSize(style.TabRounding), ol_y), ImVec2(ImFloor(tr.x + 0.5f) - RenderPixelCornerSize(style.TabRounding), ol_y + ol_t), overline_col);
 +#else
                  float rounding = style.TabRounding;
                  display_draw_list->PathArcToFast(tl + ImVec2(+rounding, +rounding), rounding, 7, 9);
@@ -255,32 +963,25 @@ diff -ruN imgui_orig/imgui/imgui_widgets.cpp imgui/imgui/imgui_widgets.cpp
              }
              else
              {
-@@ -10791,6 +10798,24 @@
+@@ -10791,6 +10852,17 @@
      const float rounding = ImMax(0.0f, ImMin((flags & ImGuiTabItemFlags_Button) ? g.Style.FrameRounding : g.Style.TabRounding, width * 0.5f - 1.0f));
      const float y1 = bb.Min.y + 1.0f;
      const float y2 = bb.Max.y - g.Style.TabBarBorderSize;
 +#ifndef IMGUI_DISABLE_PIXEL_STYLE
-+    // [PIXEL STYLE] Notched top corners + 1px outline on 3 sides (the bottom edge is left open so the tab merges with the tab bar)
++    // [PIXEL STYLE] Stair-stepped top corners, 1px outline + bevel. The bottom outline row coincides with the black base line of the tab bar.
 +    {
 +        const float x0 = ImFloor(bb.Min.x + 0.5f), x1 = ImFloor(bb.Max.x + 0.5f);
-+        const float ya = ImFloor(y1 + 0.5f), yb = ImFloor(y2 + 0.5f);
-+        draw_list->AddRectFilled(ImVec2(x0, ya), ImVec2(x1, yb), col, rounding, ImDrawFlags_RoundCornersTop);
++        const float ya = ImFloor(y1 + 0.5f);
 +        if (g.Style.TabBorderSize > 0.0f)
-+        {
-+            const ImU32 border_col = GetColorU32(ImGuiCol_Border);
-+            const float t = ImMax(1.0f, ImFloor(g.Style.TabBorderSize + 0.5f));
-+            const float c = (rounding >= 0.5f) ? ImMax(IMGUI_PIXEL_CORNER_SIZE, t) : 0.0f;   // Corner notch (>= border thickness so edges never overlap)
-+            const float side_y = ya + (c > 0.0f ? c : t);
-+            draw_list->AddRectFilled(ImVec2(x0 + c, ya),   ImVec2(x1 - c, ya + t), border_col);   // Top
-+            draw_list->AddRectFilled(ImVec2(x0,     side_y), ImVec2(x0 + t, yb),    border_col);   // Left
-+            draw_list->AddRectFilled(ImVec2(x1 - t, side_y), ImVec2(x1,     yb),    border_col);   // Right
-+        }
++            RenderPixelBox(draw_list, ImVec2(x0, ya), ImVec2(x1, ImFloor(bb.Max.y + 0.5f)), col, GetColorU32(ImGuiCol_Border), rounding, ImDrawFlags_RoundCornersTop, false);
++        else
++            draw_list->AddRectFilled(ImVec2(x0, ya), ImVec2(x1, ImFloor(y2 + 0.5f)), col, rounding, ImDrawFlags_RoundCornersTop);
 +    }
 +#else
      draw_list->PathLineTo(ImVec2(bb.Min.x, y2));
      draw_list->PathArcToFast(ImVec2(bb.Min.x + rounding, y1 + rounding), rounding, 6, 9);
      draw_list->PathArcToFast(ImVec2(bb.Max.x - rounding, y1 + rounding), rounding, 9, 12);
-@@ -10804,6 +10829,7 @@
+@@ -10804,6 +10876,7 @@
          draw_list->PathLineTo(ImVec2(bb.Max.x - 0.5f, y2));
          draw_list->PathStroke(GetColorU32(ImGuiCol_Border), 0, g.Style.TabBorderSize);
      }
@@ -288,3 +989,36 @@ diff -ruN imgui_orig/imgui/imgui_widgets.cpp imgui/imgui/imgui_widgets.cpp
  }
  
  // Render text label (with custom clipping) + Unsaved Document marker + Close Button logic
+@@ -10842,6 +10915,20 @@
+     const float button_sz = g.FontSize;
+     const ImVec2 button_pos(ImMax(bb.Min.x, bb.Max.x - frame_padding.x - button_sz), bb.Min.y + frame_padding.y);
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    // [PIXEL STYLE] Text (and close button) of the selected tab flip to white when its background is darkish (Aseprite's blue-grey active tab)
++    bool pixel_text_pushed = false;
++    if (is_contents_visible)
++    {
++        const ImVec4& tc = g.Style.Colors[ImGuiCol_TabSelected];
++        if (tc.x * 0.299f + tc.y * 0.587f + tc.z * 0.114f < 0.60f)
++        {
++            PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, g.Style.Colors[ImGuiCol_Text].w));
++            pixel_text_pushed = true;
++        }
++    }
++#endif
++
+     // Close Button & Unsaved Marker
+     // We are relying on a subtle and confusing distinction between 'hovered' and 'g.HoveredId' which happens because we are using ImGuiButtonFlags_AllowOverlapMode + SetItemAllowOverlap()
+     //  'hovered' will be true when hovering the Tab but NOT when hovering the close button
+@@ -10903,6 +10990,11 @@
+         g.Style.Alpha = backup_alpha;
+ #endif
+ 
++#ifndef IMGUI_DISABLE_PIXEL_STYLE
++    if (pixel_text_pushed)
++        PopStyleColor();
++#endif
++
+     if (out_just_closed)
+         *out_just_closed = close_button_pressed;
+ }

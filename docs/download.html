@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx Engine — Downloads</title><meta name="description" content="Download Lynx Engine launcher releases from GitHub."><link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a class="lynxie-link" href="lynxie.html"><img class="lynxie-nav-icon" src="assets/lynxie.png" alt="">Lynxie</a><a href="thirdparty.html">Third-party</a><a class="active" href="download.html">Download</a></nav></header>
+<main class="docs">
+<section class="doc-hero"><p class="eyebrow">LYNX ENGINE // DOWNLOADS</p><h1>Launcher releases</h1><p>Browse every published GitHub release whose tag starts with <code>launcher</code>. Choose an asset to download it, or open the release on GitHub for its full notes.</p></section>
+<section class="section"><div id="download-status" class="download-status" role="status" aria-live="polite">Loading launcher releases from GitHub…</div><div id="download-list" class="download-list" aria-live="polite"></div></section>
+</main><footer><span>LYNX ENGINE</span><span>Downloads served by GitHub Releases</span><span>Developed by Oscar Soirey</span></footer>
+<script>
+const releaseApi = "https://api.github.com/repos/oscar-soirey/Lynx-Engine/releases";
+const statusBox = document.getElementById("download-status");
+const releaseList = document.getElementById("download-list");
+function makeLink(label, url) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.textContent = label;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
+function addRelease(release) {
+  const article = document.createElement("article");
+  article.className = "download-release";
+  const heading = document.createElement("div");
+  heading.className = "release-heading";
+  const title = document.createElement("h2");
+  title.textContent = release.name || release.tag_name;
+  heading.append(title);
+  const tag = document.createElement("span");
+  tag.className = "release-tag";
+  tag.textContent = release.tag_name;
+  heading.append(tag);
+  article.append(heading);
+
+  const meta = document.createElement("p");
+  meta.className = "release-meta";
+  const released = release.published_at ? new Date(release.published_at).toLocaleDateString() : "Release date unavailable";
+  meta.textContent = `${released}${release.prerelease ? " · Pre-release" : ""}`;
+  article.append(meta);
+
+  if (release.body) {
+    const notes = document.createElement("p");
+    notes.className = "release-notes";
+    notes.textContent = release.body;
+    article.append(notes);
+  }
+
+  const assets = document.createElement("div");
+  assets.className = "release-assets";
+  if (Array.isArray(release.assets) && release.assets.length) {
+    for (const asset of release.assets) {
+      const size = asset.size ? ` · ${(asset.size / 1048576).toFixed(1)} MB` : "";
+      assets.append(makeLink(`${asset.name}${size}`, asset.browser_download_url));
+    }
+  } else {
+    assets.append(makeLink("View release on GitHub", release.html_url));
+  }
+  assets.append(makeLink("Release notes", release.html_url));
+  article.append(assets);
+  releaseList.append(article);
+}
+async function loadReleases() {
+  try {
+    const all = [];
+    for (let page = 1; ; page += 1) {
+      statusBox.textContent = `Loading GitHub releases… (page ${page})`;
+      const response = await fetch(`${releaseApi}?per_page=100&page=${page}`, {
+        headers: { Accept: "application/vnd.github+json" }
+      });
+      if (!response.ok) throw new Error(`GitHub returned ${response.status} ${response.statusText}`);
+      const batch = await response.json();
+      all.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const launcherReleases = all.filter(release => typeof release.tag_name === "string" && release.tag_name.startsWith("launcher"));
+    if (!launcherReleases.length) {
+      statusBox.textContent = "No published releases with a tag starting with ‘launcher’ were found.";
+      return;
+    }
+    for (const release of launcherReleases) addRelease(release);
+    statusBox.textContent = `${launcherReleases.length} launcher release${launcherReleases.length === 1 ? "" : "s"} found.`;
+  } catch (error) {
+    statusBox.classList.add("error");
+    statusBox.textContent = `Could not load releases from GitHub. ${error.message}. Please try again later or visit the repository.`;
+    statusBox.append(" ", makeLink("Open Lynx-Engine on GitHub", "https://github.com/oscar-soirey/Lynx-Engine"));
+  }
+}
+loadReleases();
+</script></body></html>

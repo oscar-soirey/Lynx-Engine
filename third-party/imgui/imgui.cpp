@@ -1360,6 +1360,9 @@ static void             UpdateTexturesEndFrame();
 static void             UpdateSettings();
 static int              UpdateWindowManualResize(ImGuiWindow* window, int* border_hovered, int* border_held, int resize_grip_count, ImU32 resize_grip_col[4], const ImRect& visibility_rect);
 static void             RenderWindowOuterBorders(ImGuiWindow* window);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+static void             RenderWindowGrid(ImDrawList* draw_list, const ImRect& rect);   // [PIXEL STYLE]
+#endif
 static void             RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size);
 static void             RenderWindowTitleBarContents(ImGuiWindow* window, const ImRect& title_bar_rect, const char* name, bool* p_open);
 static void             RenderDimmedBackgroundBehindWindow(ImGuiWindow* window, ImU32 col);
@@ -1441,6 +1444,7 @@ ImGuiStyle::ImGuiStyle()
     WindowPadding               = ImVec2(8,8);      // Padding within a window
     WindowRounding              = 0.0f;             // Radius of window corners rounding. Set to 0.0f to have rectangular windows. Large values tend to lead to variety of artifacts and are not recommended.
     WindowBorderSize            = 1.0f;             // Thickness of border around windows. Generally set to 0.0f or 1.0f. Other values not well tested.
+    WindowGridSize              = 0.0f;             // [PIXEL STYLE] Background grid spacing (0 = no grid)
     WindowBorderHoverPadding    = 4.0f;             // Hit-testing extent outside/inside resizing border. Also extend determination of hovered window. Generally meaningfully larger than WindowBorderSize to make it easy to reach borders.
     WindowMinSize               = ImVec2(32,32);    // Minimum window size
     WindowTitleAlign            = ImVec2(0.0f,0.5f);// Alignment for title bar text
@@ -1526,6 +1530,7 @@ ImGuiStyle::ImGuiStyle()
     AntiAliasedLines            = false;            // Crisp, aliased edges everywhere
     AntiAliasedLinesUseTex      = false;
     AntiAliasedFill             = false;
+    WindowGridSize              = 20.0f;            // Graph paper grid behind the windows' content
 #endif
 
     // Default theme
@@ -1542,6 +1547,7 @@ void ImGuiStyle::ScaleAllSizes(float scale_factor)
     WindowRounding = ImTrunc(WindowRounding * scale_factor);
     WindowMinSize = ImTrunc(WindowMinSize * scale_factor);
     WindowBorderHoverPadding = ImTrunc(WindowBorderHoverPadding * scale_factor);
+    WindowGridSize = ImTrunc(WindowGridSize * scale_factor);
     ChildRounding = ImTrunc(ChildRounding * scale_factor);
     PopupRounding = ImTrunc(PopupRounding * scale_factor);
     FramePadding = ImTrunc(FramePadding * scale_factor);
@@ -3821,6 +3827,7 @@ const char* ImGui::GetStyleColorName(ImGuiCol idx)
     case ImGuiCol_NavWindowingHighlight: return "NavWindowingHighlight";
     case ImGuiCol_NavWindowingDimBg: return "NavWindowingDimBg";
     case ImGuiCol_ModalWindowDimBg: return "ModalWindowDimBg";
+    case ImGuiCol_WindowGrid: return "WindowGrid";
     }
     IM_ASSERT(0);
     return "Unknown";
@@ -7400,6 +7407,29 @@ static void ImGui::RenderWindowOuterBorders(ImGuiWindow* window)
 
 // Draw background and borders
 // Draw and handle scrollbars
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+// [PIXEL STYLE] 1px grid lines every style.WindowGridSize pixels, color ImGuiCol_WindowGrid.
+// The grid is aligned on the screen (not on the window) : docked windows next to each other
+// continue the same grid, and it does not move when the content scrolls.
+void ImGui::RenderWindowGrid(ImDrawList* draw_list, const ImRect& rect)
+{
+    ImGuiContext& g = *GImGui;
+    const float step = IM_TRUNC(g.Style.WindowGridSize);
+    if (step < 2.0f)
+        return;
+    const ImU32 col = GetColorU32(ImGuiCol_WindowGrid);
+    if ((col & IM_COL32_A_MASK) == 0)
+        return;
+
+    const float x0 = IM_TRUNC(rect.Min.x), y0 = IM_TRUNC(rect.Min.y);
+    const float x1 = IM_TRUNC(rect.Max.x), y1 = IM_TRUNC(rect.Max.y);
+    for (float x = ImCeil(x0 / step) * step; x < x1; x += step)
+        draw_list->AddRectFilled(ImVec2(x, y0), ImVec2(x + 1.0f, y1), col);
+    for (float y = ImCeil(y0 / step) * step; y < y1; y += step)
+        draw_list->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + 1.0f), col);
+}
+#endif
+
 void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size)
 {
     ImGuiContext& g = *GImGui;
@@ -7469,6 +7499,17 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
             bg_draw_list->AddRectFilled(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size, bg_col, window_rounding, (flags & ImGuiWindowFlags_NoTitleBar) ? 0 : ImDrawFlags_RoundCornersBottom);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+            // [PIXEL STYLE] Graph paper grid over every window background : regular, docked (they carry
+            // ImGuiWindowFlags_ChildWindow too), child windows, popups, menus, tooltips.
+            // A child window that is not fully opaque already shows its parent's grid : not drawn twice.
+            {
+                const ImU32 bg_alpha = (bg_col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT;
+                const bool is_child = (flags & ImGuiWindowFlags_ChildWindow) && !window->DockIsActive && !(flags & ImGuiWindowFlags_Popup);
+                if (bg_alpha == 0xFF || (bg_alpha > 0 && !is_child))
+                    RenderWindowGrid(bg_draw_list, ImRect(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size));
+            }
+#endif
             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_FG);
         }
@@ -17843,6 +17884,10 @@ void ImGui::DockContextEndFrame(ImGuiContext* ctx)
                 ImDrawFlags bg_rounding_flags = CalcRoundingFlagsForRectInRect(bg_rect, node->HostWindow->Rect(), g.Style.DockingSeparatorSize);
                 node->HostWindow->DrawList->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
                 node->HostWindow->DrawList->AddRectFilled(bg_rect.Min, bg_rect.Max, node->LastBgColor, node->HostWindow->WindowRounding, bg_rounding_flags);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+                if ((node->LastBgColor & IM_COL32_A_MASK) != 0)
+                    RenderWindowGrid(node->HostWindow->DrawList, bg_rect);   // [PIXEL STYLE]
+#endif
             }
 }
 
@@ -19082,7 +19127,12 @@ static void ImGui::DockNodeUpdate(ImGuiDockNode* node)
         host_window->DrawList->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
         node->LastBgColor = (node_flags & ImGuiDockNodeFlags_PassthruCentralNode) ? 0 : GetColorU32(ImGuiCol_DockingEmptyBg);
         if (node->LastBgColor != 0)
+        {
             host_window->DrawList->AddRectFilled(node->Pos, node->Pos + node->Size, node->LastBgColor);
+#ifndef IMGUI_DISABLE_PIXEL_STYLE
+            RenderWindowGrid(host_window->DrawList, ImRect(node->Pos, node->Pos + node->Size));   // [PIXEL STYLE] Empty dockspace too
+#endif
+        }
         node->IsBgDrawnThisFrame = true;
     }
 

@@ -1134,7 +1134,13 @@ namespace lynx::script_detail
 				b.prop("type",
 					[](JSContext* c, LightComponent& t)
 					{
-						return ToJS(c, std::string(t.type == LightComponent::Type::Sky ? "sky" : "point"));
+						switch (t.type)
+						{
+							case LightComponent::Type::Sky:         return ToJS(c, std::string("sky"));
+							case LightComponent::Type::Spot:        return ToJS(c, std::string("spot"));
+							case LightComponent::Type::Directional: return ToJS(c, std::string("directional"));
+							default:                                return ToJS(c, std::string("point"));
+						}
 					},
 					[](JSContext* c, LightComponent& t, JSValueConst v) -> JSValue
 					{
@@ -1144,8 +1150,12 @@ namespace lynx::script_detail
 							t.type = LightComponent::Type::Point;
 						else if (type == "sky")
 							t.type = LightComponent::Type::Sky;
+						else if (type == "spot")
+							t.type = LightComponent::Type::Spot;
+						else if (type == "directional" || type == "sun")
+							t.type = LightComponent::Type::Directional;
 						else
-							return JS_ThrowTypeError(c, "type : \"point\" or \"sky\"");
+							return JS_ThrowTypeError(c, "type : \"point\", \"spot\", \"directional\" or \"sky\"");
 
 						return JS_UNDEFINED;
 					});
@@ -1153,7 +1163,14 @@ namespace lynx::script_detail
 				b.field("color", &LightComponent::color)
 				 .field("intensity", &LightComponent::intensity)
 				 .field("offset", &LightComponent::offset)
-				 .field("enabled", &LightComponent::enabled);
+				 .field("enabled", &LightComponent::enabled)
+				 .field("attenuation", &LightComponent::attenuation)
+				 .field("rotation", &LightComponent::rotation)
+				 .field("useActorRotation", &LightComponent::use_actor_rotation)
+				 .field("innerAngle", &LightComponent::inner_angle)
+				 .field("outerAngle", &LightComponent::outer_angle)
+				 .field("castShadows", &LightComponent::cast_shadows)
+				 .field("shadowStrength", &LightComponent::shadow_strength);
 			}
 
 			// ---------------- Velocity / Lifetime ----------------

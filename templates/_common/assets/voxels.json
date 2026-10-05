@@ -1,0 +1,12 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Edited by the editor too (Paint window).
+    "voxels": [
+        { "name": "Grass",      "color": "6fbf3a", "collision": "SOLID" },
+        { "name": "Dirt",       "color": "8b5a2b", "collision": "SOLID" },
+        { "name": "Stone",      "color": "8a8780", "collision": "SOLID", "indestructible": true },
+        { "name": "Floor",      "color": "c9b68f", "collision": "NONE" },
+        { "name": "Floor dark", "color": "b09c76", "collision": "NONE" },
+        { "name": "Water",      "color": "4f8fd6", "collision": "NONE" }
+    ]
+}

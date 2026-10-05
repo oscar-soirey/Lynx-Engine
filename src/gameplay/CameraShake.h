@@ -14,7 +14,7 @@ namespace lynx
 		float duration = 0.15f;
 		float elapsed = 0.f;
 
-		float positionAmplitude = 0.7f;
+		float positionAmplitude = 2.3f;   // voxels
 		float rotationAmplitude = 0.6f;
 		float frequency = 20.0f;
 		float falloff = 1.25f;

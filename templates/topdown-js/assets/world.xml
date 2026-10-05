@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level>
+    <Hero object_id_="hero" transform="transform:1000,1666.67,0;0,0,0;1,1,1"/>
+    <Gem object_id_="gem_1" transform="transform:1020,1676.67,0;0,0,0;1,1,1"/>
+    <Gem object_id_="gem_2" transform="transform:980,1680,0;0,0,0;1,1,1"/>
+    <Gem object_id_="gem_3" transform="transform:1030,1653.33,0;0,0,0;1,1,1"/>
+    <Gem object_id_="gem_4" transform="transform:970,1650,0;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:1000,1686.67,10;0,0,0;1,1,1" color="vec3:0.75,0.85,1" intensity="0.4"/>
+    <DirectionalLightActor object_id_="sun" transform="transform:986.67,1690,10;-45,-60,0;1,1,1" color="vec3:1,0.96,0.88" intensity="1.0"/>
+    <PointLightActor object_id_="gem_light" transform="transform:1020,1676.67,6.67;0,0,0;1,1,1" color="vec3:0.55,0.8,1" intensity="1.5"/>
+    <SpotLightActor object_id_="spot_light" transform="transform:980,1680,16.67;0,-90,0;1,1,1" color="vec3:1,0.95,0.8" intensity="2.0" outer_angle="35.0"/>
+</Level>

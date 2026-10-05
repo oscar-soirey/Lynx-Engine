@@ -1,8 +1,13 @@
 #include "CommandsWindow.h"
+#include "../LynxieIcon.h"
+#include "../MarkdownText.h"
+#include "../EditorFonts.h"
 
 #include "CommandRegistry.h"
 #include "CommandServer.h"
 #include "ScriptRunner.h"
+#include "FileEdits.h"
+#include "../../scripting/Scripting.h"
 
 #include <imgui/imgui.h>
 
@@ -64,6 +69,7 @@ namespace lynx::editor::commands_window
 			std::string model;               // model of the last request (auto-fix uses it)
 			std::string last_request;        // last request typed by the user (context of the fixes)
 			bool answer_has_code = false;    // last answer contained a ```python block
+			std::vector<file_edits::Block> edits;   // SEARCH / REPLACE blocks of the last answer
 			std::string last_context;        // system prompt of the last request (debug view)
 			int last_context_tokens = 0;     // rough estimate
 			int last_num_ctx = 0;
@@ -71,8 +77,8 @@ namespace lynx::editor::commands_window
 
 		LocalAiState g_local_ai;
 		char g_ai_prompt[4096] = {};
-		std::vector<char> g_ai_code_buffer(256 * 1024, '\0');
 		bool g_ai_code_loaded = false;
+		size_t g_ai_chat_entries = 0;   // conversation auto-scroll
 
 #ifdef _WIN32
 		bool OllamaRequest(const wchar_t* method, const wchar_t* path, const std::string& body,
@@ -184,50 +190,64 @@ namespace lynx::editor::commands_window
 			});
 		}
 
-		std::string ExtractPython(const std::string& answer)
+		// The script to run in an answer : the first ```python / ```py block, or a
+		// block without language that uses lynx_editor. Blocks of another language
+		// (```cpp, ```js, ```json...) are examples for the user : never run.
+		struct CodeBlock
 		{
-			size_t fence = answer.find("```python");
-			size_t marker_size = 9;
-			if (fence == std::string::npos)
-			{
-				fence = answer.find("```");
-				marker_size = 3;
-			}
-			if (fence == std::string::npos)
-				return {};
-			size_t start = answer.find('\n', fence + marker_size);
-			if (start == std::string::npos)
-				return {};
-			++start;
-			const size_t end = answer.find("```", start);
-			return end == std::string::npos ? std::string() : answer.substr(start, end - start);
-		}
+			size_t begin = std::string::npos;   // position of the opening ```
+			size_t end = std::string::npos;     // just after the closing ```
+			std::string code;
+		};
 
-		// Answer without its ``` blocks (shown in the chat). An unclosed block
-		// is removed up to the end.
-		std::string StripCodeBlocks(const std::string& answer)
+		CodeBlock FindScriptBlock(const std::string& answer)
 		{
-			std::string out;
-			bool had_code = false;
 			size_t position = 0;
-
-			while (position < answer.size())
+			while (true)
 			{
 				const size_t fence = answer.find("```", position);
 				if (fence == std::string::npos)
-				{
-					out += answer.substr(position);
-					break;
-				}
-				out += answer.substr(position, fence - position);
-				had_code = true;
-				const size_t close = answer.find("```", fence + 3);
+					return {};
+				const size_t line_end = answer.find('\n', fence + 3);
+				if (line_end == std::string::npos)
+					return {};
+				std::string language = answer.substr(fence + 3, line_end - fence - 3);
+				language.erase(std::remove_if(language.begin(), language.end(),
+				                              [](unsigned char c) { return std::isspace(c); }), language.end());
+				std::transform(language.begin(), language.end(), language.begin(),
+				               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+				const size_t close = answer.find("```", line_end + 1);
 				if (close == std::string::npos)
-					break;
+					return {};   // unfinished block : nothing to run
+
+				const std::string code = answer.substr(line_end + 1, close - line_end - 1);
+				const bool edit_block = code.find("<<<<<<<") != std::string::npos && code.find(">>>>>>>") != std::string::npos;
+				const bool python = !edit_block &&
+				                    (language == "python" || language == "py" || language == "python3" ||
+				                     (language.empty() && code.find("lynx_editor") != std::string::npos));
+				if (python)
+					return { fence, close + 3, code };
+
 				position = close + 3;
 			}
+		}
 
-			// Trim the blank lines left where the blocks were.
+		std::string ExtractPython(const std::string& answer)
+		{
+			return FindScriptBlock(answer).code;
+		}
+
+		// Answer shown in the chat : without the script block (it runs, and the
+		// receipt says how it went). Other code blocks (C++, JS examples) stay.
+		std::string StripCodeBlocks(const std::string& answer)
+		{
+			std::string out = answer;
+			const CodeBlock block = FindScriptBlock(answer);
+			if (block.begin != std::string::npos)
+				out = answer.substr(0, block.begin) + answer.substr(block.end);
+
+			// Trim the blank lines left where the block was.
 			std::string clean;
 			int newlines = 0;
 			for (const char c : out)
@@ -245,12 +265,7 @@ namespace lynx::editor::commands_window
 			}
 			const size_t first = clean.find_first_not_of(" \t\r\n");
 			const size_t last = clean.find_last_not_of(" \t\r\n");
-			clean = first == std::string::npos ? std::string() : clean.substr(first, last - first + 1);
-
-			if (had_code)
-				clean += std::string(clean.empty() ? "" : "\n\n") + "(Script : voir \"Generated script\" en bas.)";
-
-			return clean;
+			return first == std::string::npos ? std::string() : clean.substr(first, last - first + 1);
 		}
 
 		bool LooksLikePython(const std::string& code)
@@ -366,6 +381,8 @@ namespace lynx::editor::commands_window
 				"par", "plus", "moins", "cases", "case", "voxels", "voxel", "fois", "peu", "the", "and", "to",
 				"move", "deplace", "déplace", "bouge", "mets", "met", "place", "droite", "gauche", "haut", "bas",
 				"right", "left", "up", "down", "fais", "fait", "est", "qui", "que", "son", "ses", "tout", "tous",
+				"classe", "class", "classes", "fichier", "file", "files", "script", "scripts", "code", "does", "what",
+				"peux", "dire", "explique", "explain", "tell", "comment", "marche", "fonctionne", "works",
 			};
 			std::vector<std::string> words;
 			std::string word;
@@ -467,7 +484,7 @@ namespace lynx::editor::commands_window
 			       " | level loaded: " + (Field(info, "level_loaded", false) ? "yes" : "no") +
 			       " | play mode: " + (playing ? "YES (changes are lost at Stop, voxel edits refused)" : "no") +
 			       " | unsaved changes: " + (Field(info, "unsaved_changes", false) ? "yes" : "no") + "\n";
-			out += "Editor camera (world x, y, height z): " + Vec(Field(info, "camera", Json::array())) + "\n";
+			out += "Editor camera (voxels x, y, height z): " + Vec(Field(info, "camera", Json::array())) + "\n";
 			out += "Selected actor: " + (selected.empty() ? std::string("none") : selected) + "\n";
 
 			// --- Units and directions (measured, not assumed) -----------------
@@ -483,11 +500,11 @@ namespace lynx::editor::commands_window
 			}
 
 			out += "\nCOORDINATES:\n";
-			out += "- Actors use WORLD units (transform.location [x, y, z]). Voxels use integer CELLS [x, y].\n";
+			out += "- ONE unit everywhere : 1 = 1 voxel. Actor location [x, y, z] is in voxels (x right, y up, "
+			       "z = depth in front of the level). Voxel cell [x, y] covers x..x+1 and y..y+1 (center [x+0.5, y+0.5]). "
+			       "Sizes, speeds (voxels per second) and distances are in voxels too.\n";
 			if (have_cells)
 			{
-				out += "- 1 voxel cell = " + Num(std::abs(cell_w)) + " world units in x, " + Num(std::abs(cell_h)) +
-				       " in y. Cell [0, 0] center = world " + Vec(Json::array({ Field(c00, "x", 0.0), Field(c00, "y", 0.0) })) + ".\n";
 				const std::string one_right = Vec(Json::array({ cell_w, 0, 0 }));
 				const std::string one_left = Vec(Json::array({ -cell_w, 0, 0 }));
 				const std::string one_up = Vec(Json::array({ 0, cell_h, 0 }));
@@ -594,7 +611,7 @@ namespace lynx::editor::commands_window
 				out += "- No actor id/class matches the words of the request.";
 				out += selected.empty() ? " Nothing is selected.\n" : " The selected actor is " + selected + ".\n";
 				out += "- If the request is about an actor and the target is not obvious, DO NOT write code : "
-				       "ask in French which actor (quote a few ids from the list).\n";
+				       "ask which actor (in the user's language, quote a few ids from the list).\n";
 			}
 			else
 			{
@@ -708,26 +725,205 @@ namespace lynx::editor::commands_window
 			return out;
 		}
 
-		std::string WorkedExample(const CallSyntax& syntax)
-		{
-			std::string out =
-				"=== WORKED EXAMPLE (illustration only : the ids and numbers of a real answer come from the LIVE SCENE STATE) ===\n"
-				"Scene: actor Hero_1 (class VoxelCharacter) at [4, 2, 0], 1 cell = 1 world unit.\n"
-				"User: déplace le personnage de 3 cases vers la droite\n"
-				"Thinking: target = Hero_1 (best match). Right = +x. 3 cells = [3, 0, 0]. "
-				"Command = actor.set_transform with relative=true.\n"
-				"Assistant:\n"
-				"Je déplace **Hero_1** de 3 cases vers la droite (+3 en x, nouvelle position [7, 2, 0]).\n";
+		// ---------------------------------------------------------------------
+		// Project files : Lynxie sees the list, and the content of the files
+		// the request talks about ("ce que fait la classe Wanderer" -> the file
+		// that declares class Wanderer). Rebuilt at every message.
+		// ---------------------------------------------------------------------
 
-			if (syntax.function.empty())
+		struct ProjectFile
+		{
+			fs::path path;          // absolute
+			std::string relative;   // "assets/classes/Wanderer.js"
+			std::string stem;       // "wanderer" (lower case)
+			std::string text;       // read only for the small text files
+			std::vector<std::string> classes;   // lower case names declared in the file
+			int score = 0;
+		};
+
+		constexpr size_t kMaxListedFiles = 200;
+		constexpr size_t kMaxReadFileSize = 256 * 1024;      // bigger files : listed, not read
+		constexpr size_t kMaxFileExcerpt = 9000;             // characters of one file in the prompt
+		constexpr size_t kMaxFilesContext = 20000;           // characters of all the files in the prompt
+
+		bool IsSourceFile(const fs::path& path)
+		{
+			static const char* const kExtensions[] = {
+				".js", ".cpp", ".h", ".hpp", ".inl", ".c", ".py", ".json", ".xml", ".txt", ".md", ".cfg", ".ini", ".glsl",
+			};
+			std::string extension = Lower(path.extension().string());
+			for (const char* e : kExtensions)
+				if (extension == e)
+					return true;
+			return path.filename() == "CMakeLists.txt";
+		}
+
+		// "class Wanderer extends Actor", "class Player : public Pawn", "struct Foo"
+		std::vector<std::string> DeclaredClasses(const std::string& text)
+		{
+			std::vector<std::string> names;
+			for (const char* keyword : { "class ", "struct " })
 			{
-				out += "(then one ```python block that checks Hero_1 exists, then runs the command actor.set_transform "
-				       "{\"id\": \"Hero_1\", \"location\": [3, 0, 0], \"relative\": true} with the command call "
-				       "function of the Python API reference, inside lynx.undo_group).\n";
-				return out;
+				for (size_t at = text.find(keyword); at != std::string::npos; at = text.find(keyword, at + 1))
+				{
+					if (at > 0 && (std::isalnum(static_cast<unsigned char>(text[at - 1])) || text[at - 1] == '_'))
+						continue;
+					size_t begin = at + std::strlen(keyword);
+					while (begin < text.size() && text[begin] == ' ')
+						++begin;
+					size_t end = begin;
+					while (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) || text[end] == '_'))
+						++end;
+					if (end > begin && end - begin < 64)
+						names.push_back(Lower(text.substr(begin, end - begin)));
+				}
+			}
+			return names;
+		}
+
+		std::vector<ProjectFile> ScanProjectFiles(const fs::path& root)
+		{
+			std::vector<ProjectFile> files;
+			std::error_code ec;
+			if (!fs::is_directory(root, ec))
+				return files;
+
+			size_t read_total = 0;
+			for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec);
+			     !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+			{
+				const std::string name = it->path().filename().string();
+				if (it->is_directory(ec))
+				{
+					// Build output, editor session, version control, IDE folders.
+					if (name == "build" || name == ".lynx" || name == ".git" || name == ".idea" || name == ".vs" ||
+					    name.rfind("cmake-build", 0) == 0 || name == "__pycache__" || name == "node_modules")
+						it.disable_recursion_pending();
+					continue;
+				}
+				if (!IsSourceFile(it->path()) || name == "ai_output.py" || name == "imgui.ini")
+					continue;
+
+				ProjectFile file;
+				file.path = it->path();
+				file.relative = fs::relative(it->path(), root, ec).generic_string();
+				file.stem = Lower(it->path().stem().string());
+
+				const auto size = it->file_size(ec);
+				if (!ec && size <= kMaxReadFileSize && read_total < 4 * 1024 * 1024)
+				{
+					std::ifstream in(it->path(), std::ios::binary);
+					file.text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+					read_total += file.text.size();
+					file.classes = DeclaredClasses(file.text);
+				}
+				files.push_back(std::move(file));
 			}
 
-			out +=
+			std::sort(files.begin(), files.end(),
+			          [](const ProjectFile& a, const ProjectFile& b) { return a.relative < b.relative; });
+			return files;
+		}
+
+		std::string BuildFilesContext(const std::string& prompt)
+		{
+			const fs::path root = script_runner::ScriptsFolder().parent_path();
+			std::vector<ProjectFile> files = ScanProjectFiles(root);
+
+			std::string out = "\n=== PROJECT FILES (" + std::to_string(files.size()) + ", paths from the project root) ===\n";
+			if (files.empty())
+				return out + "(none found)\n";
+
+			for (size_t i = 0; i < files.size() && i < kMaxListedFiles; ++i)
+				out += "  " + files[i].relative + "\n";
+			if (files.size() > kMaxListedFiles)
+				out += "  ... (" + std::to_string(files.size() - kMaxListedFiles) + " more)\n";
+
+			// Which files does the request talk about ? File name, declared class,
+			// or a path written in the request.
+			const std::string lower_prompt = Lower(prompt);
+			const std::vector<std::string> words = RequestWords(prompt);
+			for (ProjectFile& file : files)
+			{
+				if (Contains(lower_prompt, Lower(file.relative)) || Contains(lower_prompt, Lower(file.path.filename().string())))
+					file.score += 10;
+				for (const std::string& word : words)
+				{
+					if (word.size() < 4)
+						continue;
+					if (file.stem == word)
+						file.score += 6;
+					else if (Contains(file.stem, word) || (file.stem.size() >= 4 && Contains(word, file.stem)))
+						file.score += 2;
+					for (const std::string& cls : file.classes)
+						if (cls == word)
+							file.score += 8;   // "Wanderer" -> the file that declares class Wanderer
+				}
+			}
+
+			std::vector<ProjectFile*> ranked;
+			int best = 0;
+			for (ProjectFile& file : files)
+				if (!file.text.empty())
+					best = std::max(best, file.score);
+			// Clear matches only : a weak one (a part of a word) would take the room of the real file.
+			const int threshold = std::max(4, best / 3);   // keeps the .cpp next to the .h that declares the class
+			for (ProjectFile& file : files)
+				if (file.score >= threshold && !file.text.empty())
+					ranked.push_back(&file);
+			std::stable_sort(ranked.begin(), ranked.end(),
+			                 [](const ProjectFile* a, const ProjectFile* b) { return a->score > b->score; });
+
+			if (ranked.empty())
+				return out + "(No file matches the words of the request. To read one, write a `# lynxie: read` script "
+				             "that prints lynx.project_files.read(path).)\n";
+
+			out += "\n=== RELEVANT FILES (full content of the files the request talks about) ===\n";
+			size_t used = 0;
+			int shown = 0;
+			for (const ProjectFile* file : ranked)
+			{
+				if (shown >= 4 || used >= kMaxFilesContext)
+					break;
+				std::string text = file->text;
+				const size_t budget = std::min(kMaxFileExcerpt, kMaxFilesContext - used);
+				if (text.size() > budget)
+					text = text.substr(0, budget) + "\n... (file truncated, " + std::to_string(file->text.size()) + " characters)";
+				out += "--- " + file->relative + " ---\n" + text + (text.empty() || text.back() == '\n' ? "" : "\n");
+				used += text.size();
+				++shown;
+			}
+			return out;
+		}
+
+		std::string SafeFilesContext(const std::string& prompt)
+		{
+			try
+			{
+				return BuildFilesContext(prompt);
+			}
+			catch (const std::exception& error)
+			{
+				return std::string("\n=== PROJECT FILES ===\n(unavailable : ") + error.what() + ")\n";
+			}
+		}
+
+		std::string WorkedExample(const CallSyntax& syntax)
+		{
+			const std::string call = syntax.function.empty()
+				? std::string("hero.move(3 * CELL, 0, 0)")
+				: FormatCall(syntax, "actor.set_transform",
+				             "{\"id\": TARGET, \"location\": OFFSET, \"relative\": True}",
+				             "id=TARGET, location=OFFSET, relative=True");
+
+			return
+				"=== EXAMPLES (illustration only : real ids and numbers come from the LIVE SCENE STATE) ===\n"
+				"Scene of the examples: actor Hero_1 (class Player) at [4, 2, 0] (voxels).\n"
+				"\n"
+				"--- Example 1 : an ACTION (English) -> one sentence + one python block ---\n"
+				"User: move the character 3 cells to the right\n"
+				"Assistant:\n"
+				"I'm moving **Hero_1** 3 cells to the right ([4, 2, 0] -> [7, 2, 0]).\n"
 				"```python\n"
 				"import lynx_editor as lynx\n"
 				"\n"
@@ -735,15 +931,57 @@ namespace lynx::editor::commands_window
 				"OFFSET = [3, 0, 0]  # 3 cells to the right\n"
 				"\n"
 				"if TARGET not in [a.id for a in lynx.actors()]:\n"
-				"    print(\"Acteur introuvable :\", TARGET)\n"
+				"    print(\"Actor not found:\", TARGET)\n"
 				"else:\n"
-				"    with lynx.undo_group(\"Déplacer \" + TARGET):\n"
-				"        result = " + FormatCall(syntax, "actor.set_transform",
-					"{\"id\": TARGET, \"location\": OFFSET, \"relative\": True}",
-					"id=TARGET, location=OFFSET, relative=True") + "\n"
-				"    print(\"Nouvelle position :\", result)\n"
-				"```\n";
-			return out;
+				"    with lynx.undo_group(\"Move \" + TARGET):\n"
+				"        result = " + call + "\n"
+				"    print(\"New position:\", result)\n"
+				"```\n"
+				"\n"
+				"--- Example 2 : a QUESTION (French) -> answer in French, NO code ---\n"
+				"User: comment je fais pour que mon perso saute plus haut ?\n"
+				"Assistant:\n"
+				"Sélectionne **Hero_1** et augmente sa propriété `jump_speed_` dans la fenêtre Details "
+				"(ou demande-moi de le faire). Dans le code C++, c'est la valeur par défaut de `jump_speed_` dans "
+				"`Player.h` ; après une modification, clique sur **Compile**.\n"
+				"\n"
+				"--- Example 3 : a QUESTION about the scene -> answer from the LIVE SCENE STATE, NO code ---\n"
+				"User: where is the player?\n"
+				"Assistant:\n"
+				"**Hero_1** is at [4, 2, 0] (voxel cell [4, 2]).\n"
+				"\n"
+				"--- Example 4 : a CHANGE IN A FILE -> one sentence + SEARCH / REPLACE, no python ---\n"
+				"(RELEVANT FILES contains assets/classes/Wanderer.js, whose class ends with :\n"
+				"        this.Move(this.direction);\n"
+				"    }\n"
+				"}\n"
+				")\n"
+				"User: ajoute un print hello dans le EndPlay de Wanderer\n"
+				"Assistant:\n"
+				"J'ajoute une méthode `EndPlay()` à la classe **Wanderer**, après `Update(dt)`.\n"
+				"FILE: assets/classes/Wanderer.js\n"
+				"<<<<<<< SEARCH\n"
+				"        this.Move(this.direction);\n"
+				"    }\n"
+				"}\n"
+				"=======\n"
+				"        this.Move(this.direction);\n"
+				"    }\n"
+				"\n"
+				"    EndPlay() {\n"
+				"        print(\"hello\");\n"
+				"    }\n"
+				"}\n"
+				">>>>>>> REPLACE\n";
+		}
+
+		std::string ReadDoc(const char* file_name)
+		{
+			std::string text;
+			std::ifstream file(script_runner::PythonFolder() / file_name, std::ios::binary);
+			if (file)
+				text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			return text;
 		}
 
 		std::string ReadPythonReference()
@@ -761,29 +999,76 @@ namespace lynx::editor::commands_window
 		std::string BuildSystemPrompt(const std::string& prompt)
 		{
 			const std::string python_reference = ReadPythonReference();
+			const std::string knowledge = ReadDoc("LYNXIE_KNOWLEDGE.md");
 			const CallSyntax call_syntax = DetectCallSyntax(python_reference);
 
 			return std::string(
-				"You are Lynxie, the assistant of the Lynx 2D voxel game editor. The user speaks French. "
-				"You turn a request into ONE short Python script that drives the open editor.\n\n"
-				"RULES:\n"
-				"1. The LIVE SCENE STATE below is the current level : take actor ids, positions, classes and voxel types from it. "
-				"Never invent an id ; copy it exactly.\n"
-				"2. Find the target with TARGET RESOLUTION. 'le personnage', 'le joueur', 'le perso' = the best-ranked actor. "
-				"If there is no clear target, ask a short question in French and write NO code.\n"
-				"3. Convert directions and distances with COORDINATES (droite = +x, gauche = -x, haut = +y, bas = -y, "
-				"default distance = 1 cell). To move an actor use actor.set_transform with relative=true and a location offset. "
-				"To place or spawn at a voxel cell use the cell -> world conversion (or actor.spawn 'voxel').\n"
+				"You are Lynxie, the friendly assistant of the Lynx editor (a 2D voxel game engine). "
+				"You know how the engine works (ENGINE GUIDE below) and you can change the open level "
+				"with Python scripts that run automatically.\n\n"
+				"LANGUAGE:\n"
+				"- Answer in the language of the user's last OWN message (French -> French, Spanish -> Spanish...) ; "
+				"the script error reports sent by the editor do not count. "
+				"If it is unclear (a single word, only code), answer in English. Never switch language by yourself.\n"
+				"- Code, actor ids, property names and command names stay exactly as they are.\n\n"
+				"FORMAT (your text is shown as Markdown) :\n"
+				"- Use **bold** for the important words, `code` for file names, classes, properties, functions and values.\n"
+				"- Steps : a numbered list (1. 2. 3.). Several points : a bullet list (- item, sub-item indented by 2 spaces).\n"
+				"- A long explanation can have short ## headings ; a comparison can be a small | table |.\n"
+				"- Short answers stay short : one or two sentences, no heading.\n\n"
+				"FIRST DECIDE WHAT THE MESSAGE IS:\n"
+				"A. A QUESTION or a chat (how does X work, why, what does this class do, where is, can I, explain, hello...) "
+				"-> answer in text, WITHOUT any python block. Use the ENGINE GUIDE for the engine and the editor, "
+				"the LIVE SCENE STATE for the current level, and RELEVANT FILES for the code of the game : when the "
+				"file is there, read it and explain it yourself (what the class does, its properties, its functions, "
+				"step by step). Short code examples for the user (C++, JavaScript, JSON) are allowed in ```cpp / ```js / "
+				"```json blocks : they are shown, never run.\n"
+				"   If you need something that is NOT in the context (another file, a value), write a python script whose "
+				"first line is `# lynxie: read` and that prints it (lynx.project_files.read(path), lynx.assets.read(path), "
+				"actor.details()...) : its output is sent back to you, then you answer. Never guess the content of a file.\n"
+				"B. An ACTION on the open level (move, place, spawn, delete, rename, paint voxels, change a property, "
+				"save, play...) -> one or two sentences saying what will change, then EXACTLY one ```python block. "
+				"It runs at once (the user does not review it) and can be undone with Ctrl+Z.\n"
+				"D. A CHANGE IN A FILE of the project (add a method, change code, create a JS class or a file...) -> "
+				"one sentence, then SEARCH / REPLACE blocks (see EDITING FILES). Never a python script for that.\n"
+				"C. Not sure, or the target is unclear -> ask ONE short question, no code. Better ask than guess.\n"
+				"Questions that start with \"how do I...\" are type A (explain), unless the user asks you to do it "
+				"(\"do it\", \"can you...\", an imperative verb). Never run a script for a question.\n\n"
+				"RULES FOR SCRIPTS (type B):\n"
+				"1. Take actor ids, positions, classes and voxel types from the LIVE SCENE STATE. Never invent an id ; copy it exactly.\n"
+				"2. Find the target with TARGET RESOLUTION ('the player', 'le perso'... = the best-ranked actor).\n"
+				"3. Directions and distances : see COORDINATES (right = +x, left = -x, up = +y, down = -y, default 1 cell). "
+				"To move an actor use actor.set_transform with relative=true and a location offset.\n"
 				"4. Use only the commands of the COMMAND REFERENCE and the functions of the PYTHON API REFERENCE. "
-				"Property names come from the DETAILS blocks (or actor.get) : never guess them. "
-				"Start with `import lynx_editor as lynx`, wrap changes in `with lynx.undo_group(...)`, check the target exists, print the result.\n"
-				"5. Answer format : one or two French sentences saying what will change (actor, old -> new position), "
-				"then exactly one ```python block. Comments with #. No JavaScript, no pseudocode.\n"
-				"6. A question about the scene (\"où est...\", \"combien...\") is answered directly from the LIVE SCENE STATE, without code.\n"
-				"7. If a script fails, you receive its output : fix the cause and send the COMPLETE corrected script again.\n\n") +
-				SafeSceneContext(prompt) + "\n" +
+				"Property names come from the DETAILS blocks (or actor.get) : never guess them.\n"
+				"5. Start with `import lynx_editor as lynx`, wrap changes in `with lynx.undo_group(...)`, check the target "
+				"exists, print the result. Comments with #. No JavaScript, no pseudocode in the python block. "
+				"Never wrap the script in try/except to hide an error : let it fail, the editor undoes it and sends you the error.\n"
+				"6. Change C++ files (src/) only when the user explicitly asks for it.\n"
+				"7. If a script fails, you receive its output : fix the cause and send the COMPLETE corrected script.\n\n"
+				"EDITING FILES (type D) : the editor applies these blocks itself, checks the result (a broken .js is "
+				"refused) and the user can revert. Format :\n"
+				"FILE: <path from the project root>\n"
+				"<<<<<<< SEARCH\n"
+				"<lines copied EXACTLY from the current file : same spaces, complete lines>\n"
+				"=======\n"
+				"<the new version of these lines>\n"
+				">>>>>>> REPLACE\n"
+				"- The file must be in RELEVANT FILES (else first read it with a `# lynxie: read` script). "
+				"Copy the SEARCH lines from it, never from memory.\n"
+				"- SEARCH must be found ONCE : take 2 to 5 lines that exist only once (the end of a method, a signature). "
+				"Never search a lone `}` or `{`.\n"
+				"- REPLACE contains the SEARCH lines again plus your change (to insert code, keep the original lines and add yours).\n"
+				"- In a JS class, a new method goes in the class body, at the same level as BeginPlay() / Update(dt), "
+				"NEVER inside `static properties` (that is for values only).\n"
+				"- Several blocks are allowed (several places, several files). Empty SEARCH = new file.\n"
+				"- Never edit a file with a python script (text.replace, write) : it breaks the code.\n\n") +
+				SafeSceneContext(prompt) +
+				SafeFilesContext(prompt) + "\n" +
 				WorkedExample(call_syntax) + "\n" +
-				"=== PYTHON API REFERENCE (lynx_editor module) ===\n" +
+				"=== ENGINE GUIDE (how Lynx works : use it to answer questions) ===\n" +
+				(knowledge.empty() ? std::string("(LYNXIE_KNOWLEDGE.md not found next to the editor.)\n") : knowledge) +
+				"\n\n=== PYTHON API REFERENCE (lynx_editor module) ===\n" +
 				(python_reference.empty()
 					? std::string("(AI_API_REFERENCE.md not found : only use lynx.info(), lynx.actors() [a.id, a.cls, a.location] and lynx.undo_group(name).)\n")
 					: python_reference) +
@@ -793,13 +1078,33 @@ namespace lynx::editor::commands_window
 		// Message sent to the model when its script failed (auto-fix, evaluation).
 		std::string BuildFixMessage(int exit_code, const std::string& output)
 		{
+			// The user's request is repeated : the model answers in its language,
+			// not in the language of this (English) report.
+			const std::string request = g_local_ai.last_request.empty()
+				? std::string()
+				: "The user's request was : \"" + Truncate(g_local_ai.last_request, 400) + "\"\n";
+
 			return
-				"The script failed (exit code " + std::to_string(exit_code) + "). Its changes were undone : "
-				"the LIVE SCENE STATE is up to date.\n"
+				"[Editor report, not written by the user] The script failed (exit code " + std::to_string(exit_code) +
+				"). Its changes were undone : the LIVE SCENE STATE is up to date.\n" + request +
 				"Output (last lines):\n```\n" + output + "\n```\n"
 				"Find the cause (wrong command, parameter, id, property name, Python error...) and answer with "
-				"ONE complete corrected ```python script (not a diff), with one French sentence before it. "
-				"If the request cannot be done with the documented API, say so in French and write no code.";
+				"ONE complete corrected ```python script (not a diff), with one sentence before it in the language "
+				"of the user's request. If the request cannot be done with the documented API, say so (same language) "
+				"and write no code.";
+		}
+
+		std::string BuildEditFixMessage(const std::string& reason, const std::string& details)
+		{
+			const std::string request = g_local_ai.last_request.empty()
+				? std::string()
+				: "The user's request was : \"" + Truncate(g_local_ai.last_request, 400) + "\"\n";
+			return
+				"[Editor report, not written by the user] Your file edit was refused, NO file was changed :\n" + reason +
+				"\n" + request + details +
+				"Answer again with corrected SEARCH / REPLACE blocks. The SEARCH text must be copied EXACTLY from the "
+				"current content above (same lines, same spaces) and be unique ; methods go in the class body, not in "
+				"`static properties`. One sentence before the blocks, in the language of the user's request.";
 		}
 
 		// Ollama context size for a prompt of `characters` characters.
@@ -815,8 +1120,10 @@ namespace lynx::editor::commands_window
 		// `display` : text shown in the chat instead of `prompt` (auto-fix).
 		// `context_request` : request used to build the scene context (target
 		// resolution...) : the user's request, not the text of an error.
+		// `speaker` : how the message appears in the chat ("You", or "Lynx" for the
+		// reports the editor sends by itself : script errors, script outputs).
 		void StartChatRequest(const std::string& model, const std::string& prompt, const std::string& display = {},
-		                      const std::string& context_request = {})
+		                      const std::string& context_request = {}, const char* speaker = "You")
 		{
 			if (g_local_ai.busy || model.empty() || prompt.empty())
 				return;
@@ -827,7 +1134,7 @@ namespace lynx::editor::commands_window
 			if (context_request.empty())
 				g_local_ai.last_request = prompt;
 			g_local_ai.messages.push_back({ {"role", "user"}, {"content", prompt} });
-			g_local_ai.conversation.emplace_back("You", display.empty() ? prompt : display);
+			g_local_ai.conversation.emplace_back(speaker, display.empty() ? prompt : display);
 
 			const std::string system = BuildSystemPrompt(context_request.empty() ? prompt : context_request);
 
@@ -878,7 +1185,7 @@ namespace lynx::editor::commands_window
 						answer = content.is_string() ? content.get<std::string>() : std::string();
 						if (answer.empty())
 							throw std::runtime_error("empty answer (the model returned no text)");
-						status = "Lynxie answered. Review the generated script before running it.";
+						status = "Lynxie answered.";
 					}
 					catch (const std::exception& e) { status = std::string("Invalid Ollama response: ") + e.what(); }
 				}
@@ -888,11 +1195,12 @@ namespace lynx::editor::commands_window
 				std::lock_guard<std::mutex> lock(g_local_ai.mutex);
 				g_local_ai.status = std::move(status);
 				g_local_ai.answer_has_code = !answer.empty() && !ExtractPython(answer).empty();
+				g_local_ai.edits = answer.empty() ? std::vector<file_edits::Block>{} : file_edits::Parse(answer);
 				if (!answer.empty())
 				{
 					// The chat shows the explanation only ; the code goes to the
 					// generated script editor below (the history keeps everything).
-					g_local_ai.conversation.emplace_back("Lynxie", StripCodeBlocks(answer));
+					g_local_ai.conversation.emplace_back("Lynxie", StripCodeBlocks(file_edits::StripBlocks(answer)));
 					g_local_ai.messages.push_back({ {"role", "assistant"}, {"content", answer} });
 					// A plain answer (question, explanation) keeps the previous script.
 					if (std::string code = ExtractPython(answer); !code.empty())
@@ -919,6 +1227,8 @@ namespace lynx::editor::commands_window
 
 			bool script_running = false;   // ai_output.py launched by Lynxie
 			bool waiting_fix = false;      // a fix was asked : run the answer
+			bool waiting_result = false;   // the output of a script was sent back : Lynxie answers with it
+			int follow_ups = 0;            // outputs sent back for the current user message
 			int attempt = 0;               // current attempt (1 = first run)
 			long long undo_before = -1;    // editor undo steps before the run
 		};
@@ -999,9 +1309,16 @@ namespace lynx::editor::commands_window
 			return true;
 		}
 
+		std::string TailLines(const std::string& text, size_t count);
+		std::string BuildEditFixMessage(const std::string& reason, const std::string& details);
+
 		// A run failed (`reason` : script output, or why it was not run).
-		void HandleAttemptFailure(int exit_code, const std::string& reason)
+		// `edit` : a file edit was refused (`details` : current content of the
+		// files, for the model only).
+		void HandleAttemptFailure(int exit_code, const std::string& reason, bool edit = false,
+		                          const std::string& details = {})
 		{
+			const char* what = edit ? "The file edit was refused" : "The script failed";
 			const int attempt = g_ai_run.attempt;
 			const bool retry = g_ai_run.auto_fix && attempt < g_ai_run.max_attempts && !g_local_ai.model.empty();
 
@@ -1010,62 +1327,263 @@ namespace lynx::editor::commands_window
 				std::string tail = reason;
 				if (tail.size() > 600)
 					tail = "..." + tail.substr(tail.size() - 600);
-				ChatNote("[Erreur] Le script a échoué" +
-				         std::string(attempt > 1 ? " après " + std::to_string(attempt) + " essais" : "") +
-				         " ; ses changements ont été annulés.\n" + tail);
+				ChatNote("[Error] " + std::string(what) +
+				         std::string(attempt > 1 ? " after " + std::to_string(attempt) + " attempts" : "") +
+				         (edit ? " ; no file was changed.\n" : " ; its changes were undone.\n") + tail);
 				g_local_ai.status = "The script failed. See Commands > Scripts for the full output.";
 				return;
 			}
 
-			ChatNote("[Erreur] Le script a échoué (essai " + std::to_string(attempt) + "/" +
-			         std::to_string(g_ai_run.max_attempts) + "), changements annulés. Lynxie corrige...");
+			ChatNote("[Error] " + std::string(what) + " (attempt " + std::to_string(attempt) + "/" +
+			         std::to_string(g_ai_run.max_attempts) + "), " + (edit ? "nothing written" : "changes undone") +
+			         ". Lynxie is fixing it...\n" + TailLines(reason, 4));
 
 			g_ai_run.waiting_fix = true;
 			g_ai_run.attempt = attempt + 1;
-			StartChatRequest(g_local_ai.model, BuildFixMessage(exit_code, reason),
-			                 "(sortie d'erreur du script envoyée à Lynxie)",
-			                 g_local_ai.last_request.empty() ? std::string("(script fix)") : g_local_ai.last_request);
+			StartChatRequest(g_local_ai.model, edit ? BuildEditFixMessage(reason, details) : BuildFixMessage(exit_code, reason),
+			                 edit ? "(refused edit sent to Lynxie)" : "(script error output sent to Lynxie)",
+			                 g_local_ai.last_request.empty() ? std::string("(script fix)") : g_local_ai.last_request,
+			                 "Lynx");
 
 			if (!g_local_ai.busy)   // could not start the request
 				g_ai_run.waiting_fix = false;
 		}
 
 		// script_runner said ai_output.py ended.
+		//
+		// The exit code is not enough : a script can catch an exception and
+		// print it, or lynx_editor can print a command error, and still exit 0.
+		// The output is checked too.
+		bool OutputShowsError(const std::string& output)
+		{
+			size_t start = 0;
+			while (start < output.size())
+			{
+				const size_t end = output.find('\n', start);
+				const std::string line = output.substr(start, end == std::string::npos ? std::string::npos : end - start);
+				const size_t first = line.find_first_not_of(" \t");
+				if (first != std::string::npos)
+				{
+					const std::string trimmed = line.substr(first);
+					if (trimmed.rfind("Traceback (most recent call last)", 0) == 0 ||
+					    trimmed.find("LynxError") != std::string::npos ||
+					    trimmed.rfind("ERROR", 0) == 0)
+						return true;
+
+					// Python exception line : "NameError: ...", "lynx_editor.LynxError: ..."
+					const size_t colon = trimmed.find(':');
+					if (colon != std::string::npos && colon > 0 && trimmed.find(' ') > colon)
+					{
+						const std::string name = trimmed.substr(0, colon);
+						if ((name.size() >= 5 && name.compare(name.size() - 5, 5, "Error") == 0) ||
+						    (name.size() >= 9 && name.compare(name.size() - 9, 9, "Exception") == 0))
+							return true;
+					}
+				}
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			return false;
+		}
+
+		std::string TailLines(const std::string& text, size_t count)
+		{
+			if (text.empty() || text == "(no output)")
+				return {};
+			size_t position = text.size();
+			while (position > 0 && (text[position - 1] == '\n' || text[position - 1] == '\r'))
+				--position;
+			const size_t end = position;
+			for (size_t lines = 0; position > 0; --position)
+				if (text[position - 1] == '\n' && ++lines >= count)
+					break;
+			std::string tail = text.substr(position, end - position);
+			if (tail.size() > 400)
+				tail = "..." + tail.substr(tail.size() - 400);
+			return tail;
+		}
+
+		// "Tu peux me dire ce que fait...", "what is...", "comment...?" : the user
+		// wants an answer, so the output of a script goes back to Lynxie.
+		bool RequestLooksLikeQuestion(const std::string& request)
+		{
+			const std::string text = Lower(request);
+			if (text.find('?') != std::string::npos)
+				return true;
+			static const char* const kStarts[] = {
+				"what", "how", "why", "where", "which", "who", "when", "explain", "tell me", "describe", "show me",
+				"can you tell", "is there", "are there", "do i", "does", "list",
+				"que ", "qu'", "quoi", "comment", "pourquoi", "où", "ou est", "quel", "quelle", "qui ", "combien",
+				"est-ce", "explique", "dis-moi", "dis moi", "tu peux me dire", "décris", "decris", "montre", "liste",
+				"qué", "que ", "cómo", "como", "por qué", "dónde", "cuál", "was ", "wie ", "warum", "wo ",
+			};
+			const size_t first = text.find_first_not_of(" \t\n");
+			const std::string start = first == std::string::npos ? std::string() : text.substr(first);
+			for (const char* word : kStarts)
+				if (start.rfind(word, 0) == 0)
+					return true;
+			return false;
+		}
+
+		constexpr int kMaxFollowUps = 2;   // outputs sent back per user message
+
+		std::string BuildResultMessage(const std::string& output)
+		{
+			std::string text = output;
+			if (text.size() > 8000)
+				text = text.substr(0, 8000) + "\n... (truncated)";
+			const std::string request = g_local_ai.last_request.empty()
+				? std::string()
+				: "The user's request was : \"" + Truncate(g_local_ai.last_request, 400) + "\"\n";
+			return
+				"[Editor report, not written by the user] Your script ran without errors. Its output :\n```\n" + text +
+				"\n```\n" + request +
+				"Now answer the user with this output, in the language of their request : explain, summarize or "
+				"confirm what was done. Do NOT write a python block, unless the request still needs an action or "
+				"information you do not have yet.";
+		}
+
 		void OnAiScriptFinished(int exit_code)
 		{
 			g_ai_run.script_running = false;
 
-			if (exit_code == 0)
+			const std::string output = LastScriptOutput();
+
+			if (exit_code != 0 || OutputShowsError(output))
 			{
-				ChatNote("[OK] Script exécuté sans erreur" +
-				         std::string(g_ai_run.attempt > 1 ? " (essai " + std::to_string(g_ai_run.attempt) + ")." : "."));
-				g_local_ai.status = "Script done. Ctrl+Z undoes it.";
+				UndoSince(g_ai_run.undo_before);
+				HandleAttemptFailure(exit_code != 0 ? exit_code : 1, output);
 				return;
 			}
 
-			const std::string output = LastScriptOutput();
-			UndoSince(g_ai_run.undo_before);
-			HandleAttemptFailure(exit_code, output);
+			const std::string tail = TailLines(output, 6);
+			ChatNote("[OK] Script ran without errors" +
+			         std::string(g_ai_run.attempt > 1 ? " (attempt " + std::to_string(g_ai_run.attempt) + ")." : ".") +
+			         (tail.empty() ? std::string() : "\n" + tail));
+			g_local_ai.status = "Script done. Ctrl+Z undoes it.";
+
+			// The script looked something up (marker "# lynxie: read"), or the user
+			// asked a question : Lynxie gets the output and answers with it.
+			const bool read_script = g_local_ai.generated_code.find("lynxie: read") != std::string::npos;
+			if ((read_script || RequestLooksLikeQuestion(g_local_ai.last_request)) &&
+			    output != "(no output)" && g_ai_run.follow_ups < kMaxFollowUps && !g_local_ai.model.empty())
+			{
+				++g_ai_run.follow_ups;
+				g_ai_run.waiting_result = true;
+				StartChatRequest(g_local_ai.model, BuildResultMessage(output), "(script output sent to Lynxie)",
+				                 g_local_ai.last_request.empty() ? std::string("(script output)") : g_local_ai.last_request,
+				                 "Lynx");
+				if (!g_local_ai.busy)
+					g_ai_run.waiting_result = false;
+			}
 		}
 
-		// The model answered a fix request : run its new script.
-		void OnFixAnswer()
+		// A python script that edits a source file by text replacement : the
+		// cause of broken files (text.replace("}", ...) changes every brace).
+		bool ScriptEditsFilesByText(const std::string& code)
 		{
-			g_ai_run.waiting_fix = false;
+			const bool writes = code.find(".write(") != std::string::npos || code.find(".write_text(") != std::string::npos;
+			const bool replaces = code.find(".replace(") != std::string::npos || code.find("re.sub(") != std::string::npos;
+			return writes && replaces;
+		}
 
-			if (!g_local_ai.answer_has_code)
+		std::string ReadProjectFile(const std::string& relative, size_t max_size)
+		{
+			const fs::path path = script_runner::ScriptsFolder().parent_path() / fs::path(relative);
+			std::ifstream file(path, std::ios::binary);
+			if (!file)
+				return {};
+			std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			if (text.size() > max_size)
+				text = text.substr(0, max_size) + "\n... (truncated)";
+			return text;
+		}
+
+		// SEARCH / REPLACE blocks of the answer, applied by the editor.
+		bool ApplyAnswerEdits()
+		{
+			const fs::path root = script_runner::ScriptsFolder().parent_path();
+			const file_edits::Result result = file_edits::Apply(g_local_ai.edits, root);
+
+			if (!result.ok)
 			{
-				ChatNote("Lynxie n'a pas proposé de script corrigé.");
-				return;
+				std::string details;
+				for (const std::string& file : result.failed_files)
+				{
+					const std::string text = ReadProjectFile(file, 12000);
+					if (!text.empty())
+						details += "Current content of " + file + " :\n```\n" + text + (text.back() == '\n' ? "" : "\n") + "```\n";
+				}
+				HandleAttemptFailure(1, result.message, true, details);
+				return false;
 			}
 
-			if (!LooksLikePython(g_local_ai.generated_code))
+			bool scripts = false;
+			for (const std::string& file : result.files)
+				scripts = scripts || (file.size() > 3 && file.compare(file.size() - 3, 3, ".js") == 0);
+			if (scripts)
+				lynx::ReloadScripts();
+
+			ChatNote("[OK] " + result.message +
+			         (result.cpp_changed ? "\nC++ changed : press Compile (or ask Lynxie to compile)." : "") +
+			         "\n(\"Revert file edit\" below restores the previous version.)");
+			g_local_ai.status = "File edited.";
+			return true;
+		}
+
+		enum class AnswerKind { New, Fix, Result };
+
+		// What an answer asks for : file edits first (applied by the editor),
+		// then its python script (run at once).
+		void HandleAnswer(AnswerKind kind)
+		{
+			if (kind == AnswerKind::Fix)
+				g_ai_run.waiting_fix = false;          // attempt already counted
+			else
+			{
+				g_ai_run.waiting_result = false;
+				g_ai_run.attempt = 1;
+			}
+
+			const bool has_edits = !g_local_ai.edits.empty();
+			if (!has_edits && !g_local_ai.answer_has_code)
+			{
+				if (kind == AnswerKind::Fix)
+					ChatNote("Lynxie did not send a correction.");
+				return;   // plain answer (question, explanation)
+			}
+
+			if (has_edits && !ApplyAnswerEdits())
+				return;
+
+			if (!g_local_ai.answer_has_code)
+				return;
+
+			const std::string& code = g_local_ai.generated_code;
+
+			if (!LooksLikePython(code))
 			{
 				HandleAttemptFailure(1, "The answer is not Python (JavaScript syntax : // comments or let/const/var/function).");
 				return;
 			}
 
-			RunAiScript(g_local_ai.generated_code, g_ai_run.attempt);
+			if (ScriptEditsFilesByText(code))
+			{
+				HandleAttemptFailure(1, "Refused before running : this script changes a file with text replacement "
+				                        "(.replace + write), which breaks code. To change a file, answer with "
+				                        "SEARCH / REPLACE blocks (see EDITING FILES), without a python script.");
+				return;
+			}
+
+			if (script_runner::IsRunning())
+			{
+				ChatNote("[Error] Another script is already running ; this one was not started.");
+				return;
+			}
+
+			if (!RunAiScript(code, g_ai_run.attempt))
+				ChatNote("[Error] " + g_local_ai.status);
 		}
 
 		// Commands used by tools/lynxie_eval (same prompt as the chat).
@@ -1710,16 +2228,76 @@ namespace lynx::editor::commands_window
 			ImGui::EndGroup();
 		}
 
+		// A chat message : text wrapped, ``` code blocks (examples Lynxie gives
+		// in her answers) drawn indented, in the "disabled" color, not wrapped.
+		void DrawMessage(const std::string& text)
+		{
+			bool in_code = false;
+			size_t start = 0;
+			std::string paragraph;
+
+			auto flush_paragraph = [&]()
+			{
+				if (paragraph.empty())
+					return;
+				ImGui::PushTextWrapPos(0.f);
+				ImGui::TextUnformatted(paragraph.c_str());
+				ImGui::PopTextWrapPos();
+				paragraph.clear();
+			};
+
+			while (start <= text.size())
+			{
+				const size_t end = text.find('\n', start);
+				const std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+				const size_t first = line.find_first_not_of(" \t");
+
+				if (first != std::string::npos && line.compare(first, 3, "```") == 0)
+				{
+					flush_paragraph();
+					in_code = !in_code;
+				}
+				else if (in_code)
+				{
+					ImGui::Indent();
+					ImGui::TextDisabled("%s", line.empty() ? " " : line.c_str());
+					ImGui::Unindent();
+				}
+				else
+				{
+					paragraph += (paragraph.empty() ? "" : "\n") + line;
+				}
+
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			flush_paragraph();
+		}
+
 		void DrawLocalAI()
 		{
 			std::lock_guard<std::mutex> ai_lock(g_local_ai.mutex);
 			if (!g_local_ai.refresh_started)
 				StartModelRefresh();
 
+			// Header : Lynxie, then the model.
+			{
+				const float icon_height = ImGui::GetFrameHeight() * 1.6f;
+				lynxie_icon::Draw(icon_height);
+				ImGui::SameLine();
+				ImGui::BeginGroup();
+				ImGui::TextUnformatted("Lynxie");
+				ImGui::TextDisabled("Local AI assistant (Ollama)");
+				ImGui::EndGroup();
+				ImGui::SameLine();
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (icon_height - ImGui::GetFrameHeight()) * 0.5f);
+			}
 			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted("Local model");
+			ImGui::TextUnformatted("Model");
 			ImGui::SameLine();
-			ImGui::SetNextItemWidth(280.f);
+			ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 10.f,
+			                                 std::min(ImGui::GetFontSize() * 16.f, ImGui::GetContentRegionAvail().x * 0.5f)));
 			const char* preview = g_local_ai.selected_model >= 0 &&
 			                      g_local_ai.selected_model < static_cast<int>(g_local_ai.models.size())
 				? g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)].c_str()
@@ -1740,7 +2318,6 @@ namespace lynx::editor::commands_window
 			if (ImGui::Button("Refresh models"))
 				StartModelRefresh();
 			ImGui::EndDisabled();
-			ImGui::TextDisabled("Ollama on this computer · models already installed locally");
 			ImGui::TextWrapped("%s", g_local_ai.status.c_str());
 
 			// What the model really received (scene state, rules, references).
@@ -1759,81 +2336,112 @@ namespace lynx::editor::commands_window
 				                          ImVec2(-1.f, ImGui::GetTextLineHeight() * 12.f), ImGuiInputTextFlags_ReadOnly);
 			}
 
-			ImGui::BeginChild("##LocalAIConversation", ImVec2(0.f, ImGui::GetContentRegionAvail().y * 0.40f), true,
-			                  ImGuiWindowFlags_HorizontalScrollbar);
+			// The conversation takes all the room left above the message box.
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float bottom_height = ImGui::GetFrameHeightWithSpacing() * 2.f + ImGui::GetTextLineHeightWithSpacing();
+			ImGui::BeginChild("##LocalAIConversation", ImVec2(0.f, -bottom_height), true);
+			// Colors readable on the light pixel theme and on a dark one.
+			const ImVec4 window_bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+			const bool light_theme = window_bg.x * 0.3f + window_bg.y * 0.59f + window_bg.z * 0.11f > 0.5f;
+			const ImVec4 you_color = light_theme ? ImVec4(0.12f, 0.33f, 0.62f, 1.f) : ImVec4(0.55f, 0.75f, 1.f, 1.f);
+			const ImVec4 lynxie_color = light_theme ? ImVec4(0.10f, 0.45f, 0.22f, 1.f) : ImVec4(0.60f, 0.90f, 0.68f, 1.f);
+			const float line_height = ImGui::GetTextLineHeight();
+
+			int message_index = 0;
 			for (const auto& [speaker, text] : g_local_ai.conversation)
 			{
+				ImGui::PushID(message_index++);
+				// Speaker : "You", "Lynxie" (with her icon), "Lynx" = script receipts, title in grey.
+				if (speaker == "Lynxie")
+				{
+					lynxie_icon::Draw(line_height, lynxie_color);
+					ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
+				}
 				ImGui::PushStyleColor(ImGuiCol_Text,
-					speaker == "You"  ? ImVec4(0.55f, 0.75f, 1.f, 1.f) :
-					speaker == "Lynx" ? ImVec4(0.75f, 0.75f, 0.75f, 1.f) :
-					                    ImVec4(0.60f, 0.90f, 0.68f, 1.f));
+					speaker == "You"    ? you_color :
+					speaker == "Lynxie" ? lynxie_color :
+					                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 				ImGui::TextUnformatted(speaker.c_str());
 				ImGui::PopStyleColor();
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::TextUnformatted(text.c_str());
-				ImGui::PopTextWrapPos();
+				// Lynxie writes Markdown (**bold**, lists, `code`, tables...) ;
+				// the user's messages and the script receipts stay plain text.
+				// Lynxie's and the user's messages : OpenDyslexic (fonts/) ; the
+				// script receipts keep the editor's mono font (code, output).
+				if (speaker == "Lynxie")
+				{
+					fonts::PushLynxie();
+					markdown::Render(text);
+					fonts::PopLynxie();
+				}
+				else if (speaker == "You")
+				{
+					fonts::PushLynxie();
+					DrawMessage(text);
+					fonts::PopLynxie();
+				}
+				else
+					DrawMessage(text);
 				ImGui::Spacing();
+				ImGui::PopID();
 			}
 			if (g_local_ai.conversation.empty())
-				ImGui::TextDisabled("Ask Lynxie something about the scene, or what it should do.");
+			{
+				// Welcome : Lynxie in the middle of the empty conversation.
+				const float icon_height = std::min(ImGui::GetContentRegionAvail().y * 0.45f, ImGui::GetFontSize() * 6.f);
+				const char* hello = "Hi, I'm Lynxie !";
+				const char* hint = "Ask me how the engine works, or tell me what to change in the level.";
+				const float available = ImGui::GetContentRegionAvail().x;
+				ImGui::Dummy(ImVec2(0.f, std::max(0.f, (ImGui::GetContentRegionAvail().y - icon_height) * 0.3f)));
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - lynxie_icon::WidthFor(icon_height)) * 0.5f));
+				lynxie_icon::Draw(icon_height);
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - ImGui::CalcTextSize(hello).x) * 0.5f));
+				ImGui::TextUnformatted(hello);
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - ImGui::CalcTextSize(hint).x) * 0.5f));
+				ImGui::PushTextWrapPos(0.f);
+				ImGui::TextDisabled("%s", hint);
+				ImGui::PopTextWrapPos();
+			}
+			if (g_local_ai.busy)
+			{
+				lynxie_icon::Draw(line_height, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+				ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
+				static const char* const kDots[] = { "", ".", "..", "..." };
+				ImGui::TextDisabled("Lynxie is thinking%s", kDots[static_cast<int>(ImGui::GetTime() * 3.0) % 4]);
+			}
+			else if (g_ai_run.script_running)
+				ImGui::TextDisabled("Running the script...");
+
+			// Follow the conversation when something new arrives.
+			const size_t entries = g_local_ai.conversation.size() + (g_local_ai.busy ? 1 : 0) + (g_ai_run.script_running ? 1 : 0);
+			if (entries != g_ai_chat_entries)
+			{
+				g_ai_chat_entries = entries;
+				ImGui::SetScrollHereY(1.f);
+			}
 			ImGui::EndChild();
 
-			ImGui::TextUnformatted("Message");
-			ImGui::BeginDisabled(g_local_ai.busy || g_local_ai.selected_model < 0);
-			const float send_width = ImGui::CalcTextSize("Send").x + ImGui::GetStyle().FramePadding.x * 2.f;
-			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - send_width - ImGui::GetStyle().ItemSpacing.x);
-			const bool enter = ImGui::InputTextWithHint("##LocalAIMessage", "Describe what the script should do...",
+			const bool can_send = !g_local_ai.busy && g_local_ai.selected_model >= 0 &&
+			                      !g_ai_run.waiting_fix && !g_ai_run.waiting_result && !g_ai_run.script_running;
+			ImGui::BeginDisabled(!can_send);
+			const float send_width = ImGui::CalcTextSize("Send").x + style.FramePadding.x * 2.f;
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - send_width - style.ItemSpacing.x);
+			const bool enter = ImGui::InputTextWithHint("##LocalAIMessage", "Describe what Lynxie should do...",
 			                                          g_ai_prompt, sizeof(g_ai_prompt),
 			                                          ImGuiInputTextFlags_EnterReturnsTrue);
 			ImGui::SameLine();
-			if (ImGui::Button("Send") || enter)
+			if ((ImGui::Button("Send") || enter) && can_send)
 			{
 				const std::string prompt = g_ai_prompt;
 				const std::string model = g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)];
 				if (!prompt.empty())
 				{
 					g_ai_prompt[0] = '\0';
+					g_ai_run.follow_ups = 0;
 					StartChatRequest(model, prompt);
 				}
 			}
 			ImGui::EndDisabled();
-			if (g_local_ai.busy)
-				ImGui::TextDisabled("Lynxie is thinking...");
 
-			ImGui::Separator();
-			ImGui::TextUnformatted("Generated script : commands/ai_output.py");
-			ImGui::TextDisabled("Review or edit the Python code before running it.");
-			if (!g_local_ai.generated_code.empty())
-			{
-				if (!g_ai_code_loaded)
-				{
-					const size_t count = std::min(g_local_ai.generated_code.size(), g_ai_code_buffer.size() - 1);
-					std::memcpy(g_ai_code_buffer.data(), g_local_ai.generated_code.data(), count);
-					g_ai_code_buffer[count] = '\0';
-					g_ai_code_loaded = true;
-				}
-				if (ImGui::InputTextMultiline("##GeneratedPython", g_ai_code_buffer.data(), g_ai_code_buffer.size(),
-				                              ImVec2(-1.f, -ImGui::GetFrameHeightWithSpacing() * 2.f),
-				                              ImGuiInputTextFlags_AllowTabInput))
-					g_local_ai.generated_code = g_ai_code_buffer.data();
-				if (!LooksLikePython(g_local_ai.generated_code))
-					ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f),
-					                   "This looks like JavaScript, not Python (for example // comments or let/const). Ask the model to regenerate it.");
-			}
-			else
-			{
-				ImGui::BeginChild("##NoGeneratedPython", ImVec2(0.f, -ImGui::GetFrameHeightWithSpacing() * 2.f), true);
-				ImGui::TextDisabled("The model's response will appear here. Ask it to generate a script in the chat above.");
-				ImGui::EndChild();
-			}
-
-			const bool can_run = !g_local_ai.generated_code.empty() && LooksLikePython(g_local_ai.generated_code) &&
-			                     !script_runner::IsRunning() && !g_local_ai.busy && !g_ai_run.waiting_fix;
-			ImGui::BeginDisabled(!can_run);
-			if (ImGui::Button("Save and run Python output"))
-				RunAiScript(g_local_ai.generated_code, 1);
-			ImGui::EndDisabled();
-			ImGui::SameLine();
 			ImGui::Checkbox("Auto-fix errors", &g_ai_run.auto_fix);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("If the script fails : its changes are undone, the error goes back to Lynxie, "
@@ -1841,10 +2449,31 @@ namespace lynx::editor::commands_window
 			if (g_ai_run.auto_fix)
 			{
 				ImGui::SameLine();
-				ImGui::SetNextItemWidth(90.f);
+				ImGui::SetNextItemWidth(ImGui::CalcTextSize("0 tries").x + ImGui::GetFrameHeight() * 2.f);
 				ImGui::SliderInt("##AiAttempts", &g_ai_run.max_attempts, 2, 5, "%d tries");
 			}
 			ImGui::SameLine();
+			ImGui::TextDisabled("Scripts run automatically");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Each script is still saved in commands/ai_output.py (Scripts tab).\n"
+				                  "Its output goes to the Console window.");
+			if (file_edits::CanRevert())
+			{
+				ImGui::SameLine();
+				ImGui::BeginDisabled(g_local_ai.busy || g_ai_run.script_running);
+				if (ImGui::Button("Revert file edit"))
+				{
+					const std::string reverted = file_edits::Revert();
+					lynx::ReloadScripts();
+					g_local_ai.conversation.emplace_back("Lynx", "[Reverted] " + reverted);
+				}
+				ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Restores the files of Lynxie's last edit : %s", file_edits::RevertDescription().c_str());
+			}
+			ImGui::SameLine();
+			const float clear_width = ImGui::CalcTextSize("Clear chat").x + style.FramePadding.x * 2.f;
+			ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - clear_width));
 			if (ImGui::Button("Clear chat"))
 			{
 				g_local_ai.messages.clear();
@@ -2038,7 +2667,11 @@ namespace lynx::editor::commands_window
 				g_ai_code_loaded = false;
 
 				if (g_ai_run.waiting_fix)
-					OnFixAnswer();
+					HandleAnswer(AnswerKind::Fix);
+				else if (g_ai_run.waiting_result)
+					HandleAnswer(AnswerKind::Result);
+				else
+					HandleAnswer(AnswerKind::New);
 			}
 		}
 	}
@@ -2050,12 +2683,25 @@ namespace lynx::editor::commands_window
 	}
 
 
+	namespace
+	{
+		bool g_show_lynxie = false;
+	}
+
+	void ShowLynxie()
+	{
+		g_show_lynxie = true;
+	}
+
+
 	void Draw(bool* open)
 	{
 		if (open && !*open)
 			return;
 
 		ImGui::SetNextWindowSize(ImVec2(900.f, 480.f), ImGuiCond_FirstUseEver);
+		if (g_show_lynxie)
+			ImGui::SetNextWindowFocus();
 
 		if (!ImGui::Begin("Commands", open))
 		{
@@ -2071,7 +2717,7 @@ namespace lynx::editor::commands_window
 				ImGui::EndTabItem();
 			}
 
-			if (ImGui::BeginTabItem("Lynxie"))
+			if (ImGui::BeginTabItem("Lynxie", nullptr, g_show_lynxie ? ImGuiTabItemFlags_SetSelected : 0))
 			{
 				DrawLocalAI();
 				ImGui::EndTabItem();
@@ -2098,6 +2744,7 @@ namespace lynx::editor::commands_window
 			ImGui::EndTabBar();
 		}
 
+		g_show_lynxie = false;
 		ImGui::End();
 	}
 }

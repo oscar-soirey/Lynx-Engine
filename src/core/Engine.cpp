@@ -6,8 +6,10 @@
 #include <hrl/hrl_gl.h>
 
 #include "Filesystem.h"
+#include "Profiler.h"
 #include "Level.h"
 #include "../gameplay/Actor.h"
+#include "../gameplay/EngineActors.h"
 #include "../gameplay/Private/InputManager.h"
 #include "audio/AudioCommon.h"
 #include "audio/AudioListener.h"
@@ -28,6 +30,9 @@ namespace lynx
 		fs::Init(asset_src);
 		InitializeAudio();
 		scripting::Init();
+
+		// Actor, lights, SpriteActor, SoundActor : always available.
+		RegisterEngineActors(factory_);
 	}
 
 	Engine::~Engine()
@@ -45,6 +50,8 @@ namespace lynx
 
 	void Engine::ProgressOneFrame(float dt)
 	{
+		LYNX_PROFILE_SCOPE("Engine::ProgressOneFrame");
+
 		// ========================================================
 		// Time dilation timer
 		// ========================================================
@@ -69,13 +76,17 @@ namespace lynx
 		// Physics & gameplay
 		// ========================================================
 
-		for (const auto& a : current_level_->GetActors())
 		{
-			a->Update(game_dt);
+			LYNX_PROFILE_SCOPE("Actors Update");
+			for (const auto& a : current_level_->GetActors())
+			{
+				a->Update(game_dt);
+			}
 		}
 
 		if (current_level_)
 		{
+			LYNX_PROFILE_SCOPE("Components Update");
 			// Les spawns faits par les composants sont differes jusqu'a
 			// Level::Update (voir Level::IterationScope).
 			Level::IterationScope scope(*current_level_);
@@ -85,15 +96,19 @@ namespace lynx
 
 		if (game_tick_enabled_)
 		{
-			for (const auto& a : current_level_->GetActors())
 			{
-				if (a->input_enabled_)
-					a->ProcessInput();
-				a->Tick(game_dt);
+				LYNX_PROFILE_SCOPE("Actors Tick");
+				for (const auto& a : current_level_->GetActors())
+				{
+					if (a->input_enabled_)
+						a->ProcessInput();
+					a->Tick(game_dt);
+				}
 			}
 
 			if (current_level_)
 			{
+				LYNX_PROFILE_SCOPE("Components Tick");
 				// Les spawns faits par les scripts / systemes sont differes
 				// jusqu'a Level::Update (voir Level::IterationScope).
 				Level::IterationScope scope(*current_level_);
@@ -108,15 +123,21 @@ namespace lynx
 
 		if (current_level_)
 		{
+			LYNX_PROFILE_SCOPE("Level::Update");
 			current_level_->Update();
 		}
+
+		LYNX_PROFILE_PLOT("Actors", static_cast<int64_t>(current_level_ ? current_level_->GetActors().size() : 0));
 
 		// Le listener suit l'acteur attache (AttachAudioListener) : sans cet appel,
 		// il reste a (0,0,0) et il n'y a aucune attenuation.
 		UpdateAudioListener();
 
-		HRL_BeginFrame();
-		HRL_EndFrame();
+		{
+			LYNX_PROFILE_SCOPE("Render (HRL)");
+			HRL_BeginFrame();
+			HRL_EndFrame();
+		}
 	}
 
 	void Engine::SetGlobalTimeDilatation(float dilation)
@@ -256,6 +277,11 @@ namespace lynx
 		if (!scene_created_)
 		{
 			scene_ = HRL_CreateScene(false);
+
+			// One unit in the whole engine : 1 world unit = 1 voxel (positions,
+			// sizes, speeds, cameras, lights... are all in voxels).
+			if (scene_ != HRL_INVALID_ID)
+				HRL_SetVoxelPhysicalSize(scene_, 1.f);
 			scene_created_ = true;
 		}
 		return scene_;

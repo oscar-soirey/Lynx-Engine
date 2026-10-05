@@ -1,0 +1,5 @@
+{
+    "name": "Top-down (JavaScript)",
+    "description": "Vue de dessus, tout le gameplay en JavaScript : un héros qui se déplace dans les 4 directions et des gemmes à ramasser. Le C++ ne fait que la caméra. ZQSD / WASD ou flèches.",
+    "order": 3
+}

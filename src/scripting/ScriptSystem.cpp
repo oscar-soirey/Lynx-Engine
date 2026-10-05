@@ -1,6 +1,7 @@
 #include "Private/ScriptSystem.h"
 #include "Private/ScriptInternal.h"
 #include "Scripting.h"
+#include "../core/Profiler.h"
 
 #include "../core/Engine.h"
 #include "../core/Filesystem.h"
@@ -1248,6 +1249,7 @@ namespace lynx
 				if (!g)
 					return;
 
+				LYNX_PROFILE_SCOPE("JS class Update");
 				JSValue arg = JS_NewFloat64(g->ctx, dt);
 				CallClassMethod(GetOwner(), "Update", 1, &arg);
 				RunPendingJobs();
@@ -1714,7 +1716,8 @@ namespace lynx
 
 			for (const auto& [name, constructor] : *engine->GetFactory().GetInternalFactory())
 			{
-				if (g->classes.count(name) || g->native_ctors.count(name) || !IsIdentifier(name.c_str()))
+				// "Actor" is the JavaScript base class itself.
+				if (name == "Actor" || g->classes.count(name) || g->native_ctors.count(name) || !IsIdentifier(name.c_str()))
 					continue;
 
 				JSValue proto = JS_NewObjectProto(ctx, g->actor_proto);
@@ -2326,6 +2329,8 @@ namespace lynx
 		if (!g)
 			return;
 
+		LYNX_PROFILE_SCOPE("JS script Update");
+
 		JSValue arg = JS_NewFloat64(g->ctx, dt);
 		impl_->ForEachInstance([&](ScriptInstance& inst)
 		{
@@ -2596,6 +2601,171 @@ namespace lynx
 		RunPendingJobs();
 		return ok;
 	}
+
+	namespace
+	{
+		std::string ExceptionText(JSContext* ctx)
+		{
+			std::string text;
+			JSValue exception = JS_GetException(ctx);
+			if (const char* message = JS_ToCString(ctx, exception))
+			{
+				text = message;
+				JS_FreeCString(ctx, message);
+			}
+			JSValue stack = JS_GetPropertyStr(ctx, exception, "stack");
+			if (!JS_IsUndefined(stack))
+				if (const char* trace = JS_ToCString(ctx, stack))
+				{
+					if (*trace)
+						text += std::string("\n") + trace;   // "at Wanderer.js:12:5"
+					JS_FreeCString(ctx, trace);
+				}
+			JS_FreeValue(ctx, stack);
+			JS_FreeValue(ctx, exception);
+			return text.empty() ? std::string("error") : text;
+		}
+
+		// Stops a check that runs too long (a loop at the top level of a file).
+		int CheckInterrupt(JSRuntime*, void* opaque)
+		{
+			int* budget = static_cast<int*>(opaque);
+			return --*budget <= 0 ? 1 : 0;
+		}
+
+		// Names after "class " and after "extends " in a file.
+		std::vector<std::string> WordsAfter(const std::string& code, const char* keyword)
+		{
+			std::vector<std::string> names;
+			const std::string key = keyword;
+			for (size_t at = code.find(key); at != std::string::npos; at = code.find(key, at + 1))
+			{
+				if (at > 0 && (std::isalnum(static_cast<unsigned char>(code[at - 1])) || code[at - 1] == '_'))
+					continue;
+				size_t begin = at + key.size();
+				while (begin < code.size() && code[begin] == ' ')
+					++begin;
+				size_t end = begin;
+				while (end < code.size() && (std::isalnum(static_cast<unsigned char>(code[end])) || code[end] == '_' || code[end] == '$'))
+					++end;
+				if (end > begin)
+					names.push_back(code.substr(begin, end - begin));
+			}
+			return names;
+		}
+	}
+
+	bool CheckScriptSyntax(const std::string& code, const char* name, std::string& error)
+	{
+		// Throwaway runtime : the game scripts and their state are not touched.
+		JSRuntime* rt = JS_NewRuntime();
+		if (!rt)
+		{
+			error = "could not create a JavaScript runtime";
+			return false;
+		}
+		JSContext* ctx = JS_NewContext(rt);
+		if (!ctx)
+		{
+			JS_FreeRuntime(rt);
+			error = "could not create a JavaScript context";
+			return false;
+		}
+		int budget = 20000;
+		JS_SetInterruptHandler(rt, CheckInterrupt, &budget);
+		JS_SetMemoryLimit(rt, 64 * 1024 * 1024);
+
+		const std::string file_name = name ? name : "<check>";
+		bool ok = true;
+
+		// 1. Syntax.
+		JSValue compiled = JS_Eval(ctx, code.c_str(), code.size(), file_name.c_str(),
+		                           JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+		if (JS_IsException(compiled))
+		{
+			error = ExceptionText(ctx);
+			ok = false;
+		}
+		JS_FreeValue(ctx, compiled);
+
+		// 2. Structure of the classes : the file runs against stubs (base
+		//    classes, Level, Input...), then each class is inspected. A
+		//    function inside `static properties` is a method put in the wrong
+		//    place : valid JavaScript, but never called by the engine.
+		const std::vector<std::string> classes = WordsAfter(code, "class");
+		if (ok && !classes.empty())
+		{
+			std::string prelude =
+				"const __stub = new Proxy(function(){}, { get: (t, k) => k === Symbol.toPrimitive ? (() => 0) : __stub,"
+				" apply: () => __stub, construct: () => __stub });\n"
+				"for (const n of ['print','console','Level','Input','Engine','vec3','vec2','parent','Actor']) globalThis[n] = __stub;\n"
+				"globalThis.Actor = class Actor {};\n";
+			for (const std::string& base : WordsAfter(code, "extends"))
+				prelude += "if (typeof globalThis['" + base + "'] !== 'function' || globalThis['" + base + "'] === __stub) "
+				           "globalThis['" + base + "'] = class " + base + " {};\n";
+
+			JSValue stubs = JS_Eval(ctx, prelude.c_str(), prelude.size(), "<stubs>", JS_EVAL_TYPE_GLOBAL);
+			JS_FreeValue(ctx, stubs);
+
+			JSValue run = JS_Eval(ctx, code.c_str(), code.size(), file_name.c_str(), JS_EVAL_TYPE_GLOBAL);
+			if (!JS_IsException(run))
+			{
+				std::string list;
+				for (const std::string& cls : classes)
+					list += (list.empty() ? "'" : ", '") + cls + "'";
+				const std::string inspect =
+					"(() => { const bad = [];\n"
+					"  for (const n of [" + list + "]) {\n"
+					"    let C; try { C = eval(n); } catch (e) { continue; }\n"
+					"    if (typeof C !== 'function') continue;\n"
+					"    const p = C.properties;\n"
+					"    if (p && typeof p === 'object')\n"
+					"      for (const k of Object.keys(p))\n"
+					"        if (typeof p[k] === 'function')\n"
+					"          bad.push(n + ': \"' + k + '\" is a function inside `static properties` - a method must be '\n"
+					"                   + 'written in the class body, next to BeginPlay() / Update(dt), not in properties');\n"
+					"  }\n"
+					"  return bad.join('\\n'); })()";
+				JSValue result = JS_Eval(ctx, inspect.c_str(), inspect.size(), "<inspect>", JS_EVAL_TYPE_GLOBAL);
+				if (!JS_IsException(result))
+				{
+					if (const char* text = JS_ToCString(ctx, result))
+					{
+						if (*text)
+						{
+							error = text;
+							ok = false;
+						}
+						JS_FreeCString(ctx, text);
+					}
+				}
+				else
+				{
+					JS_FreeValue(ctx, JS_GetException(ctx));
+				}
+				JS_FreeValue(ctx, result);
+			}
+			else if (budget <= 0)
+			{
+				JS_FreeValue(ctx, JS_GetException(ctx));
+				error = "the code at the top level of the file never ends (infinite loop ?) : "
+				        "put it in a function (BeginPlay, Update...)";
+				ok = false;
+			}
+			else
+			{
+				// Top-level code that needs the real engine : the syntax is fine,
+				// nothing more can be checked without it.
+				JS_FreeValue(ctx, JS_GetException(ctx));
+			}
+			JS_FreeValue(ctx, run);
+		}
+
+		JS_FreeContext(ctx);
+		JS_FreeRuntime(rt);
+		return ok;
+	}
+
 
 	bool EvaluateScript(const char* code, std::string& result_json, std::string& error, const char* name)
 	{

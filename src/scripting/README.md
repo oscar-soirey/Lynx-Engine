@@ -187,7 +187,7 @@ Composants fournis : `TagsComponent`, `VelocityComponent`, `LifetimeComponent`,
 | `CameraComponent` | `"Camera"` | `gameplay/CameraComponent.h` |
 | `BoxColliderComponent` | `"BoxCollider"` | `gameplay/BoxColliderComponent.h` |
 | `SoundSourceComponent` | `"SoundSource"` | `gameplay/SoundSourceComponent.h` |
-| `LightComponent` | `"Light"` | `gameplay/LightComponent.h` |
+| `LightComponent` (`PointLightComponent`, `SpotLightComponent`, `DirectionalLightComponent`, `SkyLightComponent`) | `"Light"` (`type: "point" / "spot" / "directional" / "sky"`) | `gameplay/LightComponent.h` |
 | `VelocityComponent`, `LifetimeComponent` | `"Velocity"`, `"Lifetime"` | `gameplay/Components.h` |
 
 En C++, ce sont des champs publics et des méthodes ; les champs sont appliqués à la
@@ -328,3 +328,10 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 ### Light
 
 `type` (`"point"` / `"sky"`), `color`, `intensity`, `offset`, `enabled`.
+
+## Acteurs du moteur
+
+`Actor`, `PointLightActor`, `SpotLightActor`, `DirectionalLightActor`, `SkyLightActor`,
+`SpriteActor` et `SoundActor` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
+`Level.spawn("PointLightActor")`, et une classe JS peut en hériter
+(`class Torch extends PointLightActor { ... }`).

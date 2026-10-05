@@ -9,6 +9,7 @@
 #include "core/RessourceManager.h"
 #include "core/Utils.h"
 #include "core/Voxels.h"
+#include "core/Profiler.h"
 
 #include "core/data/DataEnum.h"
 #include "core/data/EventDispatcher.h"
@@ -26,6 +27,7 @@
 #include "gameplay/BoxColliderComponent.h"
 #include "gameplay/SoundSourceComponent.h"
 #include "gameplay/LightComponent.h"
+#include "gameplay/EngineActors.h"
 #include "gameplay/Input.h"
 #include "gameplay/CameraShake.h"
 #include "gameplay/AnimationSystem.h"
