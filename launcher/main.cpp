@@ -34,8 +34,8 @@ namespace
 		// sont chargés à la demande, plus besoin de plages.
 		ImGuiIO& io = ImGui::GetIO();
 		const fs::path candidates[] = {
-			ExecutableDirectory() / "normal-font.ttf",
-			fs::path("normal-font.ttf"),
+			ExecutableDirectory() / "VCR-OSD-MONO-launcher.ttf",
+			fs::path("VCR-OSD-MONO-launcher.ttf"),
 			fs::path("C:/Windows/Fonts/segoeui.ttf"),
 		};
 		for (const fs::path& font : candidates)
