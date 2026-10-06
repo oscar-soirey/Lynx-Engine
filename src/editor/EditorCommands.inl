@@ -821,10 +821,12 @@ static void RegisterEditorCommands()
                 { "project_root", currentProject.root.generic_string() },
                 { "assets_dir", currentProject.assets_dir.generic_string() },
                 { "game_module", currentProject.module_path.filename().string() },
-                { "level_file", "world.xml" },
+                { "level_file", current_level_file },
+                { "voxel_world", world_file_path_string },
                 { "level_loaded", editor_level != nullptr },
                 { "actor_count", editor_level ? editor_level->GetActors().size() : 0 },
                 { "playing", isPlaying },
+                { "simulating", isSimulating },
                 { "unsaved_changes", editor_dirty },
                 { "selected_actor", editing_actor ? CmdJson(editing_actor->object_id_) : CmdJson(nullptr) },
                 { "camera", { camX, camY, camZ } },
@@ -834,8 +836,26 @@ static void RegisterEditorCommands()
             };
         });
 
+    cmd::Register("editor.open_level",
+        "Opens another level (.level, relative to assets/) with its linked voxel world. "
+        "The open level is saved first if it changed.",
+        { { "path", "string", "Level file, e.g. \"levels/Cave.level\".", true } },
+        [](const CmdJson& params, const cmd::CommandContext&) -> CmdJson
+        {
+            if (isPlaying)
+                throw cmd::CommandError("cannot open a level while playing (editor.stop first)");
+
+            const std::string path = cmd::GetString(params, "path", "");
+            if (!lynx::Level::IsLevelFile(path) || !lynx::fs::Exists(path))
+                throw cmd::CommandError("not a .level of assets/ : " + path);
+
+            editor::RequestOpenLevel(path);
+            lynx::editor::command_server::YieldFrame();
+            return { { "level_file", current_level_file } };
+        });
+
     cmd::Register("editor.save",
-        "Saves the level (world.xml) and the voxel world, like Ctrl+S.",
+        "Saves the open level (.level) and its linked voxel world (.hrlv), like Ctrl+S.",
         {},
         [](const CmdJson&, const cmd::CommandContext&) -> CmdJson
         {
@@ -874,6 +894,19 @@ static void RegisterEditorCommands()
 
             lynx::editor::command_server::YieldFrame();
             return { { "playing", isPlaying } };
+        });
+
+    cmd::Register("editor.simulate",
+        "Starts Simulate mode : the game runs without possessing any actor, the editor camera stays. "
+        "editor.stop ends it (the level is restored).",
+        {},
+        [](const CmdJson&, const cmd::CommandContext&) -> CmdJson
+        {
+            if (!isPlaying)
+                TogglePlayMode(true);
+
+            lynx::editor::command_server::YieldFrame();
+            return { { "playing", isPlaying }, { "simulating", isSimulating } };
         });
 
     cmd::Register("editor.stop",

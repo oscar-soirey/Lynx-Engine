@@ -2,7 +2,7 @@
 
 /**
  * Actors of the engine itself : always in Place Actors (no game code needed),
- * saved in world.xml like the game's classes, spawnable from C++ / JS /
+ * saved in the .level like the game's classes, spawnable from C++ / JS /
  * Python (Level.spawn("PointLightActor")), and usable as a base class
  * (C++ : class Torch : public lynx::PointLightActor ; JS : class Torch
  * extends PointLightActor).
@@ -16,8 +16,10 @@
  *   SoundActor             a sound (ambience, music...) played at Play
  *   ColliderActor          a collision box : wall / platform (blocks) or zone
  *                          (trigger) ; OnBeginOverlap / OnHit in C++ and JS
+ *   Humanoid               a character that walks, jumps and falls (collider,
+ *                          gravity, steps) ; no input : see Humanoid.h
  *
- * Their settings are properties (Details, world.xml, getProperty /
+ * Their settings are properties (Details, the .level, getProperty /
  * setProperty). In the editor, an icon shows the actors that have no image
  * (lights, sounds, empty actors) so they can be clicked in the viewport ;
  * spot and directional lights also draw their direction. Icons and lines are

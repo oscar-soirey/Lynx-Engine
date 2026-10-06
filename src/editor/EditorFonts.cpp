@@ -30,9 +30,8 @@ namespace lynx::editor::fonts
 		// the pixel font : a bit smaller.
 		constexpr float kCodeScale = 0.78f;
 
-		// OpenDyslexic draws small letters for its pixel size : 2.5x the
-		// editor font to look as big.
-		constexpr float kLynxieScale = 2.f;
+		// Lynxie uses the editor font at its normal size (OpenDyslexic dropped).
+		constexpr float kLynxieScale = 1.f;
 
 		// fonts/<name> next to the editor, then in the current folder.
 		fs::path Find(const char* name)
@@ -109,15 +108,10 @@ namespace lynx::editor::fonts
 		if (!g_editor)
 			g_editor = io.Fonts->AddFontDefault();
 
-		const float lynxie_size = size * kLynxieScale;
-		g_lynxie = AddFont(Find("OpenDyslexic-Regular.otf"), lynxie_size, false);
-		g_lynxie_bold = AddFont(Find("OpenDyslexic-Bold.otf"), lynxie_size, false);
-		g_lynxie_italic = AddFont(Find("OpenDyslexic-Italic.otf"), lynxie_size, false);
-		g_lynxie_bold_italic = AddFont(Find("OpenDyslexic-BoldItalic.otf"), lynxie_size, false);
-
-		// Bold / italic without the regular font : not used (one family only).
-		if (!g_lynxie)
-			g_lynxie_bold = g_lynxie_italic = g_lynxie_bold_italic = nullptr;
+		// Lynxie : no font of its own any more (OpenDyslexic dropped). Her
+		// messages use the editor font at the normal size ; PushLynxie does
+		// nothing and Markdown draws bold / italic itself.
+		g_lynxie = g_lynxie_bold = g_lynxie_italic = g_lynxie_bold_italic = nullptr;
 
 		// Code editors : JetBrains Mono (the 4 styles have the same width).
 		const float code_size = std::floor(size * kCodeScale);

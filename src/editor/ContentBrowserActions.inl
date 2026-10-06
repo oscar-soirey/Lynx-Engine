@@ -48,7 +48,7 @@ namespace content_browser_actions
         { "Text file (.txt)",                    "NewFile",   ".txt"  },
         { "JavaScript class (actor)",            "NewActor",  ".js"   },
         { "JavaScript script (attached)",        "NewScript", ".js"   },
-        { "Level (.xml)",                        "NewLevel",  ".xml"  },
+        { "Level (.level + voxel world)",        "NewLevel",  ".level" },
         { "JSON (.json)",                        "NewData",   ".json" },
         { "Widget (.widget, UI)",                "NewWidget", ".widget" },
         { "Anim Graph (.animgraph, sprites)",    "NewAnimGraph", ".animgraph" },
@@ -183,6 +183,125 @@ namespace content_browser_actions
         return LowerExtension(path) == ".js";
     }
 
+    // -------------------------------------------------------------------------
+    // Levels : a .level and its voxel world (.hrlv) go together
+    // -------------------------------------------------------------------------
+
+    static void ShowError(const std::string& message);
+
+    static bool IsLevel(const stdfs::path& path)
+    {
+        return LowerExtension(path) == ".level";
+    }
+
+    // Path relative to assets/ ("" if outside).
+    static std::string AssetsRelative(const stdfs::path& path)
+    {
+        if (!IsPathInside(path, content_browser_root))
+            return {};
+        std::error_code error;
+        const stdfs::path relative = stdfs::relative(path, content_browser_root, error);
+        return error ? std::string() : relative.generic_string();
+    }
+
+    // Voxel world linked to a .level on the disk (may not exist yet).
+    static stdfs::path LinkedVoxelWorld(const stdfs::path& level)
+    {
+        std::string link = lynx::Level::ReadVoxelLinkOnDisk(level.string());
+        if (link.empty())
+            link = level.stem().string() + ".hrlv";
+        return (level.parent_path() / link).lexically_normal();
+    }
+
+    // The voxel world "belongs" to the level (same name) : it follows it when
+    // the level is renamed, duplicated, moved or deleted. A voxel world shared
+    // under another name is left alone.
+    static stdfs::path CompanionVoxelWorld(const stdfs::path& level)
+    {
+        if (!IsLevel(level))
+            return {};
+        const stdfs::path voxels = LinkedVoxelWorld(level);
+        std::error_code error;
+        if (voxels.stem() != level.stem() || !stdfs::exists(voxels, error))
+            return {};
+        return voxels;
+    }
+
+    // `level` (after a copy / rename) : its voxel world gets its name and the
+    // link is written. `old_voxels` : the companion of the source.
+    static void FollowLevel(const stdfs::path& level, const stdfs::path& old_voxels, bool move)
+    {
+        if (old_voxels.empty())
+            return;
+
+        std::error_code error;
+        const stdfs::path voxels = level.parent_path() / (level.stem().string() + old_voxels.extension().string());
+
+        if (voxels != old_voxels)
+        {
+            if (stdfs::exists(voxels, error))
+            {
+                ShowError("The voxel world " + voxels.filename().string() + " already exists : the level keeps "
+                          "the link to " + old_voxels.filename().string() + ".");
+                return;
+            }
+            if (move)
+                stdfs::rename(old_voxels, voxels, error);
+            else
+                stdfs::copy_file(old_voxels, voxels, error);
+            if (error)
+            {
+                ShowError("Could not " + std::string(move ? "move " : "copy ") + old_voxels.generic_string() +
+                          " :\n" + error.message());
+                return;
+            }
+        }
+
+        lynx::Level::SetLinkedVoxelWorldOnDisk(level.string(), voxels.filename().string());
+    }
+
+    // The open level was renamed / moved : the editor follows it.
+    static void LevelMoved(const stdfs::path& from, const stdfs::path& to)
+    {
+        if (AssetsRelative(from) != current_level_file)
+            return;
+        current_level_file = AssetsRelative(to);
+        world_file_path_string = (stdfs::path("assets") / lynx::Level::GetLinkedVoxelWorld(current_level_file)).string();
+        RememberLastLevel(current_level_file);
+    }
+
+    static void OpenLevel(const stdfs::path& path)
+    {
+        const std::string relative = AssetsRelative(path);
+        if (!relative.empty() && relative != current_level_file)
+            editor::RequestOpenLevel(relative);
+    }
+
+    // assets/save_file.txt : the level the game starts with.
+    static void SetStartupLevel(const stdfs::path& path)
+    {
+        const std::string relative = AssetsRelative(path);
+        std::ofstream out(content_browser_root / "save_file.txt", std::ios::binary | std::ios::trunc);
+        if (!out || relative.empty())
+        {
+            ShowError("Could not write assets/save_file.txt");
+            return;
+        }
+        out << relative;
+        std::cout << "[CONTENT BROWSER] Startup level : " << relative << "\n";
+    }
+
+    static std::string StartupLevel()
+    {
+        std::ifstream in(content_browser_root / "save_file.txt", std::ios::binary);
+        std::string line;
+        if (in)
+            std::getline(in, line);
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+            line.pop_back();
+        return line;
+    }
+
     static void ShowError(const std::string& message)
     {
         state.error = message;
@@ -278,9 +397,10 @@ namespace content_browser_actions
                 "}\n";
 
         case NewFileKind::Level:
+            // Linked to <name>.hrlv next to it (created empty when opened).
             return
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<Level>\n"
+                "<Level voxels=\"" + stem + ".hrlv\">\n"
                 "</Level>\n";
 
         case NewFileKind::Json:
@@ -382,6 +502,8 @@ namespace content_browser_actions
 
         if (stdfs::is_directory(path, error))
             content_browser_current_path = path;
+        else if (IsLevel(path))
+            OpenLevel(path);
         else if (lynx::editor::widget_editor::CanOpen(path))
             lynx::editor::widget_editor::Open(path);
         else if (lynx::editor::graph_editors::CanOpen(path))
@@ -453,6 +575,8 @@ namespace content_browser_actions
                 return false;
             }
 
+            const stdfs::path old_voxels = CompanionVoxelWorld(state.rename_target);
+
             stdfs::rename(state.rename_target, destination, error);
 
             if (error)
@@ -460,6 +584,11 @@ namespace content_browser_actions
                 state.name_error = "Could not rename : " + error.message();
                 return false;
             }
+
+            // Level : its voxel world takes the new name, the editor follows.
+            if (IsLevel(destination))
+                FollowLevel(destination, old_voxels, true);
+            LevelMoved(state.rename_target, destination);
 
             lynx::editor::script_editors::PathMoved(state.rename_target, destination);
             lynx::editor::widget_editor::PathMoved(state.rename_target, destination);
@@ -540,6 +669,10 @@ namespace content_browser_actions
                 continue;
             }
 
+            // Level : a copy of its voxel world, linked to the copy.
+            if (IsLevel(destination))
+                FollowLevel(destination, CompanionVoxelWorld(source), false);
+
             if (IsJs(destination))
                 RenameJsClassInCopy(destination, source.stem().string(), ToIdentifier(destination.stem().string()));
 
@@ -554,9 +687,25 @@ namespace content_browser_actions
     }
 
     // Moves the entries to .lynx/trash/<date>/<path relative to the project>.
-    static void Delete(const std::vector<stdfs::path>& targets)
+    static void Delete(const std::vector<stdfs::path>& requested)
     {
         std::vector<stdfs::path> deleted;
+
+        // A level goes with its voxel world ; the open level stays.
+        std::vector<stdfs::path> targets;
+        for (const stdfs::path& target : requested)
+        {
+            if (IsLevel(target) && AssetsRelative(target) == current_level_file)
+            {
+                ShowError(target.filename().string() + " is the open level : open another level before deleting it.");
+                continue;
+            }
+            targets.push_back(target);
+            const stdfs::path voxels = CompanionVoxelWorld(target);
+            if (!voxels.empty() && std::find(targets.begin(), targets.end(), voxels) == targets.end() &&
+                std::find(requested.begin(), requested.end(), voxels) == requested.end())
+                targets.push_back(voxels);
+        }
 
         for (const stdfs::path& target : targets)
         {
@@ -650,9 +799,17 @@ namespace content_browser_actions
 
             destination = MakeUniqueDestinationPath(destination);
 
+            const stdfs::path old_voxels = CompanionVoxelWorld(source);
+
             if (state.clipboard_cut)
             {
                 stdfs::rename(source, destination, error);
+
+                if (!error && IsLevel(destination))
+                {
+                    FollowLevel(destination, old_voxels, true);
+                    LevelMoved(source, destination);
+                }
 
                 if (!error)
                 {
@@ -664,6 +821,9 @@ namespace content_browser_actions
             else
             {
                 stdfs::copy(source, destination, stdfs::copy_options::recursive, error);
+
+                if (!error && IsLevel(destination))
+                    FollowLevel(destination, old_voxels, false);
 
                 if (!error && IsJs(destination) && destination.stem() != source.stem())
                     RenameJsClassInCopy(destination, source.stem().string(), ToIdentifier(destination.stem().string()));
@@ -731,8 +891,19 @@ namespace content_browser_actions
         if (std::find(targets.begin(), targets.end(), path) == targets.end())
             targets = { path };
 
-        if (ImGui::MenuItem(is_directory ? "Open folder" : "Open"))
+        if (ImGui::MenuItem(is_directory ? "Open folder" : IsLevel(path) ? "Open level" : "Open",
+                            nullptr, false, !(IsLevel(path) && AssetsRelative(path) == current_level_file)))
             OpenEntry(path);
+
+        if (IsLevel(path))
+        {
+            const bool startup = AssetsRelative(path) == StartupLevel();
+            if (ImGui::MenuItem("Startup level of the game", nullptr, startup, !startup))
+                SetStartupLevel(path);
+
+            const stdfs::path voxels = LinkedVoxelWorld(path);
+            ImGui::TextDisabled("Voxel world : %s", voxels.filename().string().c_str());
+        }
 
         ImGui::Separator();
 

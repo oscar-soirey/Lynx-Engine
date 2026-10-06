@@ -424,7 +424,9 @@ namespace lynx
 		  engine_internal_(other.engine_internal_),
 		  entity_(other.entity_),
 		  controller_(other.controller_),
-		  auto_possess_done_(other.auto_possess_done_)
+		  auto_possess_done_(other.auto_possess_done_),
+		  interfaces_(std::move(other.interfaces_)),
+		  interface_handlers_(std::move(other.interface_handlers_))
 	{
 		object_id_ = other.object_id_;
 		outliner_folder = other.outliner_folder;
@@ -457,6 +459,8 @@ namespace lynx
 		input_enabled_ = other.input_enabled_;
 		engine_internal_ = other.engine_internal_;
 		auto_possess_done_ = other.auto_possess_done_;
+		interfaces_ = std::move(other.interfaces_);
+		interface_handlers_ = std::move(other.interface_handlers_);
 
 		// Possession : `this` prend celle de `other` (l'ancienne est relachee).
 		if (controller_ && controller_ != other.controller_)

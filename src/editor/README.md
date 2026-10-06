@@ -11,7 +11,7 @@ LynxEditor.exe "C:/chemin/MonJeu"   -> ouvre ce projet directement
 
 ```
 MonJeu/
-  assets/     <- assets du jeu (world.xml, save_file.txt, input.json, cur/, ...)
+  assets/     <- assets du jeu (*.level + *.hrlv, save_file.txt = niveau de départ, input.json, cur/, ...)
   build/      <- la DLL du jeu (ex : Blocky.dll), ou build/<config>/
 ```
 

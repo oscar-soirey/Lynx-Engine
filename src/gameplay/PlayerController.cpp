@@ -164,8 +164,20 @@ namespace lynx
 
 		view_camera_ = camera;
 
-		if (viewport_ != HRL_INVALID_ID && camera != HRL_INVALID_ID)
-			HRL_SetViewportCamera(viewport_, camera);
+		// Simulation (Engine::SetSimulating) : the default player keeps the
+		// host's camera ; the asked camera is remembered (IsActive...) only.
+		uint32_t shown = camera;
+		if (Engine* engine = Engine::Get())
+		{
+			if (engine->IsSimulating() && engine->GetDefaultPlayer() == this &&
+			    engine->GetSimulationCamera() != HRL_INVALID_ID)
+			{
+				shown = engine->GetSimulationCamera();
+			}
+		}
+
+		if (viewport_ != HRL_INVALID_ID && shown != HRL_INVALID_ID)
+			HRL_SetViewportCamera(viewport_, shown);
 	}
 
 

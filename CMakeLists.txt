@@ -38,6 +38,7 @@ add_library(Lynx SHARED
 		src/core/Engine.cpp
 		src/core/Filesystem.cpp
 		src/core/Level.cpp
+		src/core/PostProcess.cpp
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
 		src/core/Profiler.cpp
@@ -60,6 +61,8 @@ add_library(Lynx SHARED
 		src/gameplay/SoundSourceComponent.cpp
 		src/gameplay/LightComponent.cpp
 		src/gameplay/EngineActors.cpp
+		src/gameplay/Humanoid.cpp
+		src/gameplay/Interface.cpp
 		src/gameplay/AnimGraph.cpp
 		src/gameplay/BehaviorTree.cpp
 		src/scripting/AIBindings.cpp
@@ -149,6 +152,7 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/OutputConsole.cpp
 		src/editor/EditorOptions.cpp
 		src/editor/ExternalIde.cpp
+		src/editor/ShellIntegration.cpp
 		src/editor/ProjectTemplates.cpp
 		src/editor/LynxieIcon.cpp
 		src/editor/EditorIcons.cpp
@@ -191,6 +195,8 @@ target_link_libraries(LynxEditor PRIVATE
 		winhttp     # local Ollama chat API
 		shell32
 		ole32       # Ship Game : folder picker
+		user32 gdi32  # Open with : icons of the code editors
+		advapi32      # registry : "Open with Lynx" in the Explorer menu
 )
 
 # No Windows console : stdout / stderr are shown in the editor "Console" window
@@ -205,8 +211,8 @@ add_custom_command(TARGET LynxEditor POST_BUILD
 		COMMENT "Copying the Python tools (lynx_editor, lynx_mcp.py)"
 )
 
-# Fonts next to the editor : fonts/VCR-OSD-MONO.ttf (editor), fonts/OpenDyslexic-*.otf
-# (Lynxie's messages). See src/editor/EditorFonts.h.
+# Fonts next to the editor : fonts/VCR-OSD-MONO.ttf (editor and Lynxie),
+# JetBrainsMono (code). See src/editor/EditorFonts.h.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fonts")
 	add_custom_command(TARGET LynxEditor POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_directory

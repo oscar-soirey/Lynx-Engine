@@ -175,6 +175,16 @@ namespace lynx
 		return VoxelBoxBlocked(cx, cy, w, h, voxel_flags ? voxel_flags : SolidVoxelFlags());
 	}
 
+	bool ColliderComponent::IsBlockedAt(const vec3& delta) const
+	{
+		if (!GetOwner())
+			return false;
+
+		float cx, cy, w, h;
+		GetWorldBox(cx, cy, w, h);
+		return BlockedAt(cx + delta.x, cy + delta.y, w, h);
+	}
+
 	bool ColliderComponent::BlockedAt(float cx, float cy, float w, float h, ColliderComponent** by, bool* voxel) const
 	{
 		if (by)

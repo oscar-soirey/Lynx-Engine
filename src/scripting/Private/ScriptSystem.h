@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "../../core/Common.h"   // vec3
+#include "../../gameplay/Interface.h"
 
 namespace lynx
 {
@@ -54,6 +55,25 @@ namespace lynx::scripting
 	 * bloquant d'un ColliderComponent). `other` : nullptr pour un voxel.
 	 */
 	bool CallActorHitEvent(Actor* self, Actor* other, const vec3& normal);
+
+
+	// ---- Interfaces (voir gameplay/Interface.h) ---------------------------
+
+	/**
+	 * La classe JS de `actor` (static interfaces = [...]) ou un de ses
+	 * scripts attaches (const interfaces = [...]) implemente `name`.
+	 */
+	bool ScriptImplements(const Actor* actor, const std::string& name);
+
+	/**
+	 * Message d'interface cote JS : methode de la classe JS, fonctions des
+	 * scripts attaches ; `use_default` : implementation par defaut de
+	 * l'interface JS si personne ne la definit. `skip_native` : ne pas
+	 * rappeler une HFUNCTION deja appelee par le C++.
+	 * @return true si une fonction JS a ete appelee.
+	 */
+	bool CallScriptInterface(Actor* actor, const std::string& name, const std::string& function,
+	                         const InterfaceArgs& args, InterfaceArg* result, bool skip_native, bool use_default);
 
 
 	// ---- Joueurs et widgets (GameplayBindings.cpp) -------------------------

@@ -10,7 +10,9 @@
 #include <xml/tinyxml2.h>
 #include <thread>
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 #include "data/Typename.h"
@@ -57,6 +59,9 @@ namespace lynx
 			std::cout << "no <level> tag" << std::endl;
 			return;
 		}
+
+		file_path_ = _path ? _path : "";
+		voxel_world = root->Attribute("voxels") ? root->Attribute("voxels") : "";
 
 		outliner_folders.clear();
 		if (const char* folders = root->Attribute("outliner_folders"))
@@ -213,6 +218,10 @@ namespace lynx
 		XMLElement* root = doc.NewElement("Level");
 		doc.InsertFirstChild(root);
 
+		// Monde voxel lie (relatif au dossier du niveau).
+		if (!voxel_world.empty())
+			root->SetAttribute("voxels", voxel_world.c_str());
+
 		// Folders of the Outliner (editor), "a|a/b|c".
 		if (!outliner_folders.empty())
 		{
@@ -292,5 +301,112 @@ namespace lynx
 			}
 		}
 		destroy_queue_.clear();
+	}
+
+
+	// ========================================================================
+	// Fichiers de niveau
+	// ========================================================================
+
+	namespace
+	{
+		std::string Trimmed(std::string s)
+		{
+			while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
+				s.pop_back();
+			size_t i = 0;
+			while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\xEF' || s[i] == '\xBB' || s[i] == '\xBF'))
+				++i;
+			return s.substr(i);
+		}
+
+		std::string LowerExt(const std::string& path)
+		{
+			std::string ext = std::filesystem::path(path).extension().string();
+			std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return ext;
+		}
+
+		std::string ReadText(const std::string& path)
+		{
+			const auto data = fs::ReadBinary(path);
+			return std::string(reinterpret_cast<const char*>(data.data()), data.size());
+		}
+	}
+
+	const char* Level::GetExtension()
+	{
+		return ".level";
+	}
+
+	bool Level::IsLevelFile(const std::string& path)
+	{
+		return LowerExt(path) == ".level";
+	}
+
+	std::string Level::GetLinkedVoxelWorld(const std::string& level_path)
+	{
+		namespace sfs = std::filesystem;
+		const sfs::path level(level_path);
+
+		std::string link;
+		{
+			const std::string text = ReadText(level_path);
+			tinyxml2::XMLDocument doc;
+			if (!text.empty() && doc.Parse(text.c_str(), text.size()) == tinyxml2::XML_SUCCESS && doc.RootElement())
+				if (const char* v = doc.RootElement()->Attribute("voxels"))
+					link = v;
+		}
+
+		if (link.empty())
+			link = level.stem().string() + ".hrlv";
+
+		return (level.parent_path() / link).lexically_normal().generic_string();
+	}
+
+	std::string Level::ResolveStartupLevel(std::string* legacy_voxel_world)
+	{
+		if (legacy_voxel_world)
+			legacy_voxel_world->clear();
+
+		const std::string saved = Trimmed(ReadText("save_file.txt"));
+
+		if (LowerExt(saved) == ".level")
+			return saved;
+
+		// Ancien format : save_file.txt = monde voxel, acteurs dans world.xml.
+		if (legacy_voxel_world)
+			*legacy_voxel_world = saved.empty() ? std::string("world.vox") : saved;
+
+		if (fs::Exists("world.level"))
+			return "world.level";
+		return "world.xml";
+	}
+
+	bool Level::SetLinkedVoxelWorldOnDisk(const std::string& level_disk_path, const std::string& voxels_relative)
+	{
+		tinyxml2::XMLDocument doc;
+		if (doc.LoadFile(level_disk_path.c_str()) != tinyxml2::XML_SUCCESS)
+			return false;
+
+		tinyxml2::XMLElement* root = doc.RootElement();
+		if (!root)
+			return false;
+
+		if (voxels_relative.empty())
+			root->DeleteAttribute("voxels");
+		else
+			root->SetAttribute("voxels", voxels_relative.c_str());
+
+		return doc.SaveFile(level_disk_path.c_str()) == tinyxml2::XML_SUCCESS;
+	}
+
+	std::string Level::ReadVoxelLinkOnDisk(const std::string& level_disk_path)
+	{
+		tinyxml2::XMLDocument doc;
+		if (doc.LoadFile(level_disk_path.c_str()) != tinyxml2::XML_SUCCESS || !doc.RootElement())
+			return {};
+		const char* v = doc.RootElement()->Attribute("voxels");
+		return v ? v : "";
 	}
 }

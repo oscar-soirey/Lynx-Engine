@@ -68,9 +68,24 @@ namespace lynx
 		scene_created_ = false;
 	}
 
+	void Engine::RequestRenderRefresh(int frames)
+	{
+		render_refresh_frames_ = std::max(render_refresh_frames_, frames);
+	}
+
 	void Engine::ProgressOneFrame(float dt)
 	{
 		LYNX_PROFILE_SCOPE("Engine::ProgressOneFrame");
+
+		// A mesh deletion makes HRL rebuild its draw lists (see
+		// RequestRenderRefresh) : a temporary sprite, created and deleted.
+		if (render_refresh_frames_ > 0 && scene_created_ && HRL_IsValidScene(scene_))
+		{
+			--render_refresh_frames_;
+			const HRL_id temp = HRL_CreateMeshSprite(scene_);
+			if (temp != HRL_INVALID_ID)
+				HRL_DeleteMesh(temp);
+		}
 
 		// ========================================================
 		// Time dilation timer
@@ -123,9 +138,13 @@ namespace lynx
 			// input to the actor it possesses, then the actors tick.
 			{
 				LYNX_PROFILE_SCOPE("Players Input");
-				const std::vector<PlayerController*> players = players_;
-				for (PlayerController* player : players)
-					player->ProcessInput();
+				// Simulation : nobody is possessed, nobody gets input.
+				if (!simulating_)
+				{
+					const std::vector<PlayerController*> players = players_;
+					for (PlayerController* player : players)
+						player->ProcessInput();
+				}
 			}
 
 			{
@@ -392,9 +411,25 @@ namespace lynx
 		}
 	}
 
+	void Engine::SetSimulating(bool simulating, uint32_t camera)
+	{
+		simulating_ = simulating;
+		simulation_camera_ = simulating ? camera : 0xFFFFFFFFu;
+
+		if (simulating)
+			UnpossessAll();
+
+		// The default player shows the right camera at once : the forced one,
+		// or again the camera it was asked for.
+		if (PlayerController* player = GetDefaultPlayer())
+			player->SetViewCamera(player->GetViewCamera());
+	}
+
 	void Engine::ProcessAutoPossess()
 	{
-		if (!current_level_)
+		// Simulation : auto_possess_player is ignored (and stays pending for
+		// the next real Play : auto_possess_done_ is not set).
+		if (!current_level_ || simulating_)
 			return;
 
 		// OnPossessed may spawn actors : they wait for Level::Update.
@@ -456,6 +491,9 @@ namespace lynx
 
 		current_level_ = new Level();
 		current_level_->LoadFromFile(file_name, this);
+
+		// The sprites of the loaded actors must be drawn at once.
+		RequestRenderRefresh();
 		return current_level_;
 	}
 

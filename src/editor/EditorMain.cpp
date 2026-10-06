@@ -9,7 +9,7 @@
 //
 // A project is a folder with assets/ and the game DLL in build/ (see
 // host/GameProject.h). Once a project is opened, the working directory becomes
-// the project root : "assets/...", world.xml, settings.cfg, editor_camera.txt,
+// the project root : "assets/...", *.level, settings.cfg, editor_camera.txt,
 // imgui.ini... are the project's files.
 //
 // Everything specific to a game (voxel types, gameplay camera, collision debug)
@@ -55,6 +55,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #include "../audio/AudioCommon.h"
@@ -75,6 +76,7 @@
 #include "OutputConsole.h"
 #include "EditorOptions.h"
 #include "ExternalIde.h"
+#include "ShellIntegration.h"
 #include "ProjectTemplates.h"
 #include "LynxieIcon.h"
 #include "EditorIcons.h"
@@ -97,6 +99,11 @@
 #include <ctime>
 
 bool isPlaying = false;
+
+// Simulate mode (like Unreal's Simulate) : the game runs (isPlaying is true
+// too) but nobody is possessed, the game gets no input and the viewport keeps
+// the editor camera and its movements (Engine::SetSimulating).
+bool isSimulating = false;
 
 HRL_id scene;
 
@@ -124,6 +131,7 @@ struct EditorWindowVisibility
     bool console = true;
     bool profiler = true;        // records only while its tab is visible
     bool nodeGraphTest = false;  // (removed window : kept for the format of editor_windows.txt)
+    bool postProcess = false;
 };
 
 static EditorWindowVisibility editorWindows;
@@ -174,6 +182,10 @@ static void LoadEditorWindowVisibility()
     int nodeGraphTest = 0;
     if (file >> nodeGraphTest)
         editorWindows.nodeGraphTest = nodeGraphTest != 0;
+
+    int postProcess = 0;
+    if (file >> postProcess)
+        editorWindows.postProcess = postProcess != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -194,8 +206,13 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.git ? 1 : 0) << ' '
          << (editorWindows.console ? 1 : 0) << ' '
          << (editorWindows.profiler ? 1 : 0) << ' '
-         << (editorWindows.nodeGraphTest ? 1 : 0) << '\n';
+         << (editorWindows.nodeGraphTest ? 1 : 0) << ' '
+         << (editorWindows.postProcess ? 1 : 0) << '\n';
 }
+
+// Post Process window : the settings of the current post process
+// (lynx::postprocess, HRL default shader), saved in assets/postprocess.json.
+static void DrawPostProcessWindow();
 
 static bool EditorWindowCheckbox(const char* label, bool* value,
                                  lynx::editor::icons::Icon icon = lynx::editor::icons::Icon::Windows)
@@ -324,6 +341,80 @@ static void SetPlaying(
 
 static std::string world_file_path_string;
 
+// Level being edited (relative to assets/, ".level"). Its voxel world
+// (world_file_path_string) is the one linked to it (Level::GetLinkedVoxelWorld).
+static std::string current_level_file = "world.level";
+
+namespace editor
+{
+    // Opens another level between two frames (defined below).
+    void RequestOpenLevel(const std::string& level);
+}
+
+// Last level opened in the editor, reopened at the next start.
+static const char* const kLastLevelFile = ".lynx/last_level.txt";
+
+static void RememberLastLevel(const std::string& level)
+{
+    std::error_code error;
+    std::filesystem::create_directories(".lynx", error);
+    std::ofstream out(kLastLevelFile, std::ios::binary | std::ios::trunc);
+    if (out)
+        out << level;
+}
+
+static std::string ReadLastLevel()
+{
+    std::ifstream in(kLastLevelFile, std::ios::binary);
+    std::string level;
+    if (in)
+        std::getline(in, level);
+    while (!level.empty() && (level.back() == '\r' || level.back() == ' ' || level.back() == '\t'))
+        level.pop_back();
+    return level;
+}
+
+// Old projects : save_file.txt = voxel world, actors in world.xml. Turned
+// into world.level (linked to that voxel world) ; world.xml is kept as
+// world.xml.bak. save_file.txt then names world.level (startup level).
+static std::string MigrateLegacyLevel(const std::string& legacy_level, const std::string& legacy_voxels)
+{
+    namespace sfs = std::filesystem;
+    const sfs::path assets = "assets";
+    const sfs::path level_disk = assets / "world.level";
+    std::error_code error;
+
+    if (!sfs::exists(level_disk, error))
+    {
+        const sfs::path old_disk = assets / legacy_level;
+
+        if (legacy_level != "world.level" && sfs::exists(old_disk, error))
+        {
+            sfs::copy_file(old_disk, level_disk, error);
+            if (!error)
+            {
+                std::error_code e2;
+                sfs::rename(old_disk, sfs::path(old_disk.string() + ".bak"), e2);
+            }
+        }
+        else
+        {
+            std::ofstream out(level_disk, std::ios::binary);
+            out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Level>\n</Level>\n";
+        }
+    }
+
+    lynx::Level::SetLinkedVoxelWorldOnDisk(level_disk.string(), legacy_voxels);
+
+    std::ofstream save((assets / "save_file.txt"), std::ios::binary | std::ios::trunc);
+    if (save)
+        save << "world.level";
+
+    std::cout << "[WORLD] Old level format converted : " << legacy_level << " + " << legacy_voxels
+              << " -> world.level (startup level in assets/save_file.txt)\n";
+    return "world.level";
+}
+
 
 
 // =============================================================================
@@ -351,8 +442,7 @@ void InitImGui(GLFWwindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
 
-    // Fonts : fonts/VCR-OSD-MONO.ttf for the editor, fonts/OpenDyslexic-*.otf
-    // for Lynxie (see EditorFonts.h).
+    // Fonts : fonts/VCR-OSD-MONO.ttf for the editor and Lynxie (see EditorFonts.h).
     lynx::editor::fonts::Load(24.0f);
 
     // Theme and UI scale : the user's options (Options window).
@@ -527,6 +617,15 @@ void ShutdownImGui()
 float camX;
 float camY;
 float camZ = 600.f;   // voxel units (1 = 1 voxel)
+
+// Editor camera mode (buttons at the top right of the viewport) :
+//   2D : looks straight at the level, WASD pans, the wheel changes the height ;
+//   3D : free camera like Unreal : hold the right mouse button to look around,
+//        WASD to fly, Q / E down / up, Shift faster, the wheel moves forward.
+enum class EditorCameraMode { Mode2D = 0, Mode3D = 1 };
+static EditorCameraMode cameraMode = EditorCameraMode::Mode2D;
+static float camYaw = -90.f;   // degrees, -90 = looking into the level (2D view)
+static float camPitch = 0.f;
 
 bool dragging_object = false;
 
@@ -1867,7 +1966,11 @@ static void SaveEditor()
         world_file_path_string.c_str()
     );
 
-    editor_level->SaveToFile("world.xml");
+    editor_level->SaveToFile(current_level_file.c_str());
+
+    // Post process settings (Post Process window), with the level.
+    if (lynx::postprocess::IsDirty())
+        lynx::postprocess::Save();
 
     editor_dirty = false;
 
@@ -2982,8 +3085,11 @@ static void DrawContentBrowser(lynx::Level* level)
             hovered &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
+            // .level : opens the level (and its linked voxel world).
+            if (cba::IsLevel(entry.path()))
+                cba::OpenLevel(entry.path());
             // .widget : Widget Editor (UMG-like designer).
-            if (lynx::editor::widget_editor::CanOpen(entry.path()))
+            else if (lynx::editor::widget_editor::CanOpen(entry.path()))
                 lynx::editor::widget_editor::Open(entry.path());
             // .animgraph / .bt : node editors.
             else if (lynx::editor::graph_editors::CanOpen(entry.path()))
@@ -4230,7 +4336,10 @@ static void SavePlaySnapshot()
 
 
 // Editor <-> Game. Used by the F3 shortcut and by the toolbar Play/Stop button.
-static void TogglePlayMode()
+// `simulate` (Simulate button, Alt+S) : the game runs without possessing any
+// actor, the editor camera and its movements stay (see isSimulating). While
+// the game runs, any call stops it (Play or Simulate).
+static void TogglePlayMode(bool simulate = false)
 {
     if (!editor_engine)
         return;
@@ -4251,14 +4360,27 @@ static void TogglePlayMode()
             HRL_FALSE
         );
 
-        SetPlaying(editor_engine, editor_viewport, editor_gameplay_cam, true);
+        // Before StartGame : no auto possess, the default player keeps the
+        // editor camera whatever the CameraComponents ask.
+        isSimulating = simulate;
+        editor_engine->SetSimulating(simulate, editor_camera);
 
-        std::cout << "[PLAY] Switched to GAME mode\n";
+        SetPlaying(
+            editor_engine,
+            editor_viewport,
+            simulate ? editor_camera : editor_gameplay_cam,
+            true
+        );
+
+        std::cout << (simulate ? "[PLAY] Switched to SIMULATE mode\n" : "[PLAY] Switched to GAME mode\n");
     }
     else
     {
         // GAME -> EDITOR
         SetPlaying(editor_engine, editor_viewport, editor_camera, false);
+
+        isSimulating = false;
+        editor_engine->SetSimulating(false);
 
         // The level is rebuilt by main() between two frames (the panels still
         // hold actor pointers during the current ImGui frame).
@@ -4558,7 +4680,30 @@ static void DrawToolbar()
                 isPlaying ? ImVec4(0.82f, 0.22f, 0.20f, 1.f) : ImVec4(0.22f, 0.62f, 0.26f, 1.f)))
             TogglePlayMode();
 
-        tooltip(isPlaying ? "Stop the game, back to the editor (F3)" : "Play the game in the editor (F3)");
+        tooltip(isPlaying
+            ? (isSimulating ? "Stop the simulation, back to the editor (F3 / Alt+S)"
+                            : "Stop the game, back to the editor (F3)")
+            : "Play the game in the editor (F3)");
+
+        // Simulate : the game runs, nobody is possessed, the editor camera
+        // (and its movements) stays. Hidden while the game runs (Stop above).
+        if (!isPlaying)
+        {
+            ImGui::SameLine();
+            if (lynx::editor::icons::ButtonWithLabel(
+                    "Simulate##Simulate",
+                    lynx::editor::icons::Icon::Camera,
+                    ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
+                TogglePlayMode(true);
+
+            tooltip("Simulate : run the game without possessing any actor,\n"
+                    "keep the editor camera and its movements (Alt+S)");
+        }
+        else if (isSimulating)
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.25f, 0.55f, 0.85f, 1.f), "Simulating");
+        }
 
         // Reload the game DLL. Only a REQUEST is raised here : the actual reload
         // happens in main(), between two frames, never in the middle of the ImGui
@@ -4614,36 +4759,138 @@ static void DrawToolbar()
             );
         }
 
-        // Open with : the game folder (project root, not src/) in a code editor.
+        // Open with : split button. The main part opens the game folder
+        // (project root, not src/) in the last code editor used ; the arrow
+        // chooses another one (with the icons of the installed programs).
         ImGui::SameLine();
-
-        if (lynx::editor::icons::ButtonWithLabel("Open with", lynx::editor::icons::Icon::FileCode))
-            ImGui::OpenPopup("OpenWithPopup");
-        tooltip("Open the game folder in Visual Studio, VS Code or CLion");
-
-        if (ImGui::BeginPopup("OpenWithPopup"))
         {
             namespace ide = lynx::editor::external_ide;
             const std::filesystem::path game_folder =
                 currentProject.root.empty() ? std::filesystem::current_path() : currentProject.root;
 
-            ImGui::TextDisabled("Open the game folder with");
-            ImGui::Separator();
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float icon_size = ImGui::GetTextLineHeight();
+            const float frame_h = ImGui::GetFrameHeight();
 
-            for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+            // Icon of a code editor : the real one, else the generic code icon.
+            auto draw_ide_icon = [&](ImDrawList* dl, ide::Ide which, ImVec2 at, float size, bool disabled)
             {
-                const auto which = static_cast<ide::Ide>(i);
-                if (ImGui::Selectable(ide::Name(which)))
-                {
-                    std::string error;
-                    if (!ide::Open(which, game_folder, error))
-                        ShowEditorWarning(error);
-                }
-            }
+                const unsigned int tex = ide::IconTexture(which);
+                const ImU32 tint = ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, disabled ? 0.4f : 1.f));
+                if (tex != 0)
+                    dl->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(tex))),
+                                 at, ImVec2(at.x + size, at.y + size), ImVec2(0.f, 1.f), ImVec2(1.f, 0.f), tint);
+                else
+                    lynx::editor::icons::DrawAt(dl, lynx::editor::icons::Icon::FileCode, at, size,
+                                                ImGui::GetColorU32(ImGuiCol_Text, disabled ? 0.4f : 1.f));
+            };
 
-            ImGui::Separator();
-            ImGui::TextDisabled("%s", game_folder.string().c_str());
-            ImGui::EndPopup();
+            auto open_in = [&](ide::Ide which)
+            {
+                std::string error;
+                if (ide::Open(which, game_folder, error))
+                    ide::SetLastUsed(which);
+                else
+                    ShowEditorWarning(error);
+            };
+
+            const ide::Ide last = ide::LastUsed();
+            const char* last_name = ide::Name(last);
+
+            // Main part : [icon] Open with <last>
+            const std::string label = std::string("Open with ") + last_name;
+            const ImVec2 text_size = ImGui::CalcTextSize(label.c_str());
+            const ImVec2 main_size(style.FramePadding.x * 2.f + icon_size + style.ItemInnerSpacing.x + text_size.x, frame_h);
+            const float arrow_w = frame_h * 0.9f;
+
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.f, style.ItemSpacing.y));
+
+            const bool open_main = ImGui::Button("##OpenWithMain", main_size);
+            {
+                const ImVec2 min = ImGui::GetItemRectMin();
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                draw_ide_icon(dl, last, ImVec2(min.x + style.FramePadding.x, min.y + (frame_h - icon_size) * 0.5f), icon_size, false);
+                dl->AddText(ImVec2(min.x + style.FramePadding.x + icon_size + style.ItemInnerSpacing.x,
+                                   min.y + (frame_h - text_size.y) * 0.5f),
+                            ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+            }
+            if (open_main)
+                open_in(last);
+            tooltip(("Open the game folder in " + std::string(last_name) + "\n(the arrow : another code editor)").c_str());
+
+            // Arrow part : chooses the code editor.
+            ImGui::SameLine();
+            const bool open_menu = ImGui::Button("##OpenWithArrow", ImVec2(arrow_w, frame_h));
+            {
+                const ImVec2 min = ImGui::GetItemRectMin();
+                const ImVec2 max = ImGui::GetItemRectMax();
+                const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f + 1.f);
+                const float r = frame_h * 0.16f;
+                const ImVec2 chevron[3] = { ImVec2(c.x - r, c.y - r * 0.5f), ImVec2(c.x, c.y + r * 0.5f), ImVec2(c.x + r, c.y - r * 0.5f) };
+                ImGui::GetWindowDrawList()->AddPolyline(chevron, 3, ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_None, 1.5f);
+            }
+            if (open_menu)
+                ImGui::OpenPopup("OpenWithPopup");
+            tooltip("Choose the code editor");
+
+            ImGui::PopStyleVar();
+
+            // The menu opens under the arrow, right-aligned with it.
+            ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMax().y + 4.f),
+                                    ImGuiCond_Appearing, ImVec2(1.f, 0.f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
+            if (ImGui::BeginPopup("OpenWithPopup"))
+            {
+                const bool searching = !ide::DetectionDone();
+                const float row_icon = ImGui::GetTextLineHeight() * 1.25f;
+
+                for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+                {
+                    const auto which = static_cast<ide::Ide>(i);
+                    const bool installed = ide::IsInstalled(which);
+                    const bool missing = !searching && !installed;
+
+                    ImGui::PushID(i);
+                    const ImVec2 row_pos = ImGui::GetCursorScreenPos();
+                    const std::string text = std::string(ide::Name(which)) + (missing ? "  (not found)" : "");
+                    const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
+                    const float row_w = std::max(220.f, ImGui::CalcTextSize(text.c_str()).x + row_icon + 40.f);
+
+                    if (ImGui::Selectable("##ide", which == last, 0, ImVec2(row_w, row_h)))
+                        open_in(which);
+
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    draw_ide_icon(dl, which, ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon, missing);
+                    dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
+                                ImGui::GetColorU32(missing ? ImGuiCol_TextDisabled : ImGuiCol_Text), text.c_str());
+                    ImGui::PopID();
+                }
+
+                ImGui::Separator();
+
+                {
+                    const ImVec2 row_pos = ImGui::GetCursorScreenPos();
+                    const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
+                    if (ImGui::Selectable("##explorer", false, 0, ImVec2(220.f, row_h)))
+                    {
+#ifdef _WIN32
+                        ShellExecuteW(nullptr, L"open", game_folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+                    }
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    lynx::editor::icons::DrawAt(dl, lynx::editor::icons::Icon::Folder,
+                                                ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon,
+                                                ImGui::GetColorU32(ImGuiCol_Text));
+                    dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
+                                ImGui::GetColorU32(ImGuiCol_Text), "Show in Explorer");
+                }
+
+                if (searching)
+                    ImGui::TextDisabled("Searching the code editors...");
+                ImGui::TextDisabled("%s", game_folder.string().c_str());
+                ImGui::EndPopup();
+            }
+            ImGui::PopStyleVar();
         }
 
         // Build state / DLL rebuilt outside the editor.
@@ -4716,6 +4963,7 @@ static void DrawToolbar()
             EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, lynx::editor::icons::Icon::ColorPick);
             EditorWindowCheckbox("Paint", &editorWindows.config, lynx::editor::icons::Icon::Paint);
             EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, lynx::editor::icons::Icon::Camera);
+            EditorWindowCheckbox("Post Process", &editorWindows.postProcess, lynx::editor::icons::Icon::Settings);
             EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, lynx::editor::icons::Icon::Input);
             EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, lynx::editor::icons::Icon::Commands);
             EditorWindowCheckbox("Git", &editorWindows.git, lynx::editor::icons::Icon::Git);
@@ -4831,6 +5079,18 @@ static void LoadEditorCamera()
     camX = x;
     camY = y;
     camZ = ClampCameraZ(z);
+
+    // Added later (optional) : mode, yaw, pitch.
+    int mode = 0;
+    float yaw = -90.f, pitch = 0.f;
+    if (file >> mode >> yaw >> pitch && std::isfinite(yaw) && std::isfinite(pitch))
+    {
+        cameraMode = mode == 1 ? EditorCameraMode::Mode3D : EditorCameraMode::Mode2D;
+        camYaw = yaw;
+        camPitch = std::clamp(pitch, -89.f, 89.f);
+        if (cameraMode == EditorCameraMode::Mode3D)
+            camZ = z;
+    }
 }
 
 
@@ -4880,7 +5140,7 @@ static void MigrateToVoxelUnits()
     for (std::filesystem::recursive_directory_iterator it(assets, error), end; !error && it != end; it.increment(error))
     {
         std::error_code e;
-        if (!it->is_regular_file(e) || it->path().extension() != ".xml")
+        if (!it->is_regular_file(e) || (it->path().extension() != ".xml" && it->path().extension() != ".level"))
             continue;
 
         std::ifstream in(it->path(), std::ios::binary);
@@ -4976,7 +5236,65 @@ static void SaveEditorCamera()
     }
 
     // 9 digits : enough to round-trip a float (world coordinates can be large).
-    file << std::setprecision(9) << camX << " " << camY << " " << camZ << "\n";
+    file << std::setprecision(9) << camX << " " << camY << " " << camZ << " "
+         << static_cast<int>(cameraMode) << " " << camYaw << " " << camPitch << "\n";
+}
+
+// Rotation of the editor camera for the current mode.
+static void ApplyEditorCameraRotation()
+{
+    if (editor_camera == HRL_INVALID_ID)
+        return;
+
+    if (cameraMode == EditorCameraMode::Mode3D)
+        HRL_SetCameraRotation(editor_camera, camPitch, camYaw, 0.f);
+    else
+        HRL_SetCameraRotation(editor_camera, 0.f, -90.f, 0.f);
+}
+
+static void SetEditorCameraMode(EditorCameraMode mode)
+{
+    if (mode == cameraMode)
+        return;
+
+    cameraMode = mode;
+
+    // Back to 2D : the height must be a valid 2D height again.
+    if (mode == EditorCameraMode::Mode2D)
+        camZ = ClampCameraZ(camZ);
+    else
+    {
+        // Starts from the 2D view : same place, same direction.
+        camYaw = -90.f;
+        camPitch = 0.f;
+    }
+
+    ApplyEditorCameraRotation();
+    if (editor_camera != HRL_INVALID_ID)
+        HRL_SetCameraLocation(editor_camera, camX, camY, camZ);
+    SaveEditorCamera();
+}
+
+// Direction the 3D camera looks at (pitch / yaw in degrees, -90 yaw = -Z).
+static void EditorCameraAxes(float front[3], float right[3])
+{
+    const float yaw = camYaw * 3.14159265f / 180.f;
+    const float pitch = camPitch * 3.14159265f / 180.f;
+
+    front[0] = std::cos(yaw) * std::cos(pitch);
+    front[1] = std::sin(pitch);
+    front[2] = std::sin(yaw) * std::cos(pitch);
+
+    // right = normalize(cross(front, up)) with up = +Y
+    right[0] = -front[2];
+    right[1] = 0.f;
+    right[2] = front[0];
+    const float len = std::sqrt(right[0] * right[0] + right[2] * right[2]);
+    if (len > 1e-5f)
+    {
+        right[0] /= len;
+        right[2] /= len;
+    }
 }
 
 
@@ -5051,12 +5369,8 @@ namespace editor
         );
 
 
-        HRL_SetCameraRotation(
-            editor_camera,
-            0.f,
-            -90.f,
-            0.f
-        );
+        // 2D : (0, -90, 0) ; 3D : the saved direction.
+        ApplyEditorCameraRotation();
 
 
 
@@ -5107,6 +5421,11 @@ namespace editor
 
         InitImGui(win);
         LoadEditorWindowVisibility();
+
+        // At every start : Commands is shown, on the Lynxie tab (whatever
+        // was open / focused when the editor was closed).
+        editorWindows.commands = true;
+        lynx::editor::commands_window::ShowLynxie(5);
 
         // Widget Editor : textures / fonts / nested widgets with the asset picker.
         lynx::editor::widget_editor::SetAssetFieldDrawer([](std::string& value)
@@ -5187,6 +5506,99 @@ namespace editor
         SaveEditorWindowVisibility();
 
         ShutdownImGui();
+    }
+
+
+    // ------------------------------------------------------------------
+    // Open another level (double-click on a .level in the Content Browser)
+    // ------------------------------------------------------------------
+
+    static std::string open_level_requested;
+
+    // `level` : relative to assets/. Done by main() between two frames.
+    void RequestOpenLevel(const std::string& level)
+    {
+        if (isPlaying)
+        {
+            ShowEditorWarning("Stop the game before opening another level.");
+            return;
+        }
+        open_level_requested = level;
+    }
+
+    bool ConsumeOpenLevelRequest(std::string& level)
+    {
+        if (open_level_requested.empty())
+            return false;
+        level = open_level_requested;
+        open_level_requested.clear();
+        return true;
+    }
+
+    // Before the level is deleted : saves the current one (if it changed)
+    // and forgets every actor pointer.
+    void BeginOpenLevel()
+    {
+        if (editor_dirty)
+            SaveEditor();
+
+        editing_actor = nullptr;
+        editing_object = HRL_INVALID_ID;
+        dragging_object = false;
+        HRL_SetGizmoVisible(gizmo, HRL_FALSE);
+        gizmoUndoActive = false;
+        gizmoUndoActorId.clear();
+
+        // Undo entries name actors of the old level.
+        editorUndoHistory.clear();
+        play_snapshot_valid = false;
+
+        editor_level = nullptr;
+    }
+
+    // After the old level is deleted, before the new one : its voxel world
+    // (created empty when the linked .hrlv does not exist yet).
+    void LoadVoxelWorldOfLevel(const std::string& level)
+    {
+        current_level_file = level;
+
+        const std::string voxels = lynx::Level::GetLinkedVoxelWorld(level);
+        world_file_path_string = (std::filesystem::path("assets") / voxels).string();
+
+        const auto data = lynx::fs::ReadBinary(voxels);
+        if (!data.empty())
+        {
+            HRL_LoadVoxelWorldBuffer(scene, data.data(), data.size());
+        }
+        else
+        {
+            std::cout << "[WORLD] Creating new voxel world : " << world_file_path_string << "\n";
+            // Exactly like a new project at startup : HRL_SetVoxelSize keeps
+            // the world sparse (HRL_CreateVoxelWorld of this size fails, and
+            // without a valid world nothing can be painted).
+            HRL_SetVoxelSize(scene, 131072, 131072);
+            HRL_SetVoxelChunkSize(scene, 16);
+            HRL_SaveVoxelWorldAllFile(scene, world_file_path_string.c_str());
+        }
+
+        // Same settings as after the startup load : voxel types, render
+        // mode, units, then an empty edit to (re)build the world.
+        editor_save_data = voxels;
+        lynx::voxels::ApplyToScene(scene);
+        HRL_SetVoxelRenderMode(scene, appSettings.voxelRenderMode);
+        HRL_SetVoxelPhysicalSize(scene, 1.f);
+        HRL_BeginVoxelEdit(scene);
+        HRL_EndVoxelEdit(scene);
+
+        RememberLastLevel(level);
+        std::cout << "[WORLD] Level " << level << " (voxels : " << voxels << ")\n";
+    }
+
+    void EndOpenLevel(lynx::Level* level)
+    {
+        editor_level = level;
+        editor_dirty = false;
+        ApplyCollisionDebugToGame();
     }
 
 
@@ -5287,9 +5699,12 @@ namespace editor
                 editor_camera,
                 false
             );
+
+            isSimulating = false;
+            editor_engine->SetSimulating(false);
         }
 
-        // 2. The level is about to be rebuilt from world.xml : write the pending
+        // 2. The level is about to be rebuilt from its .level : write the pending
         //    edits first (this needs the actors to still be alive).
         if (editor_dirty)
             SaveEditor();
@@ -5328,9 +5743,10 @@ namespace editor
 
 
     // Shift lets the user interact with the editor without feeding the game.
+    // Simulate : the game never gets the input (the editor camera moves).
     bool BlockGameInput()
     {
-        return ImGui::GetIO().KeyShift;
+        return isSimulating || ImGui::GetIO().KeyShift;
     }
 
 
@@ -5409,6 +5825,18 @@ namespace editor
                     );
             }
 
+            return;
+        }
+
+        // 3D : the wheel moves the camera forward / backward.
+        if (cameraMode == EditorCameraMode::Mode3D)
+        {
+            float front[3], right[3];
+            EditorCameraAxes(front, right);
+            const float step = static_cast<float>(yoffset) * cameraSpeed * 0.25f;
+            camX += front[0] * step;
+            camY += front[1] * step;
+            camZ += front[2] * step;
             return;
         }
 
@@ -5587,9 +6015,54 @@ namespace editor
         // Camera movement
         // --------------------------------------------------------
         // Editor camera movement is independent from the voxel brush.
+        // Simulate mode keeps it (the game runs under the editor camera).
 
-        if (!isPlaying &&
+        // 3D : free camera while the right mouse button is held over the
+        // viewport (like Unreal).
+        static bool flying = false;
+        const bool rmb = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+        if (!rmb)
+            flying = false;
+        else if (!flying && sceneViewport.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+            flying = true;
+
+        if (cameraMode == EditorCameraMode::Mode3D &&
+            (!isPlaying || isSimulating))
+        {
+            if (flying && !io.WantTextInput)
+            {
+                camYaw += io.MouseDelta.x * 0.15f;
+                camPitch = std::clamp(camPitch - io.MouseDelta.y * 0.15f, -89.f, 89.f);
+
+                float front[3], right[3];
+                EditorCameraAxes(front, right);
+
+                float move[3] = { 0.f, 0.f, 0.f };
+                auto add = [&](const float* axis, float k)
+                {
+                    move[0] += axis[0] * k; move[1] += axis[1] * k; move[2] += axis[2] * k;
+                };
+                const float up[3] = { 0.f, 1.f, 0.f };
+
+                if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) add(front, 1.f);
+                if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) add(front, -1.f);
+                if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) add(right, 1.f);
+                if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) add(right, -1.f);
+                if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) add(up, 1.f);
+                if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) add(up, -1.f);
+
+                const float speed = cameraSpeed * 2.f * (io.KeyShift ? 3.f : 1.f) * dt;
+                camX += move[0] * speed;
+                camY += move[1] * speed;
+                camZ += move[2] * speed;
+            }
+
+            ApplyEditorCameraRotation();
+            HRL_SetCameraLocation(camera, camX, camY, camZ);
+        }
+        else if ((!isPlaying || isSimulating) &&
             !io.KeyCtrl &&
+            !io.KeyAlt &&
             !io.WantTextInput)
         {
             // Speed depends on the camera height : slow when close, fast when far.
@@ -6094,6 +6567,28 @@ namespace editor
 
         f3_was_down =
             f3_down;
+
+
+        // ------------------------------------------------------------
+        // Alt + S : Simulate (or stop the game / the simulation)
+        // ------------------------------------------------------------
+
+        static bool alt_s_was_down = false;
+
+        const bool alt_down =
+            glfwGetKey(win, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+            glfwGetKey(win, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+
+        const bool alt_s_down =
+            alt_down &&
+            glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS &&
+            !io.WantTextInput;
+
+        if (alt_s_down && !alt_s_was_down)
+            TogglePlayMode(true);
+
+        alt_s_was_down =
+            alt_s_down;
     }
 
 
@@ -6156,6 +6651,8 @@ namespace editor
                 // the scene while a brush stroke goes outside the window.
                 ImGui::SetCursorScreenPos(pos);
 
+                // The 2D / 3D buttons are drawn over it afterwards.
+                ImGui::SetNextItemAllowOverlap();
                 ImGui::InvisibleButton(
                     "##scene_viewport",
                     size,
@@ -6182,6 +6679,45 @@ namespace editor
                     viewportMax,
                     false
                 );
+
+                // Camera mode : 2D / 3D buttons at the top right (editor
+                // camera : hidden while playing, shown while simulating).
+                if (!isPlaying || isSimulating)
+                {
+                    const ImGuiStyle& style = ImGui::GetStyle();
+                    const float button_w = ImGui::CalcTextSize("3D").x + style.FramePadding.x * 2.f + 6.f;
+                    const float bar_w = button_w * 2.f + style.ItemSpacing.x;
+                    const float bar_h = ImGui::GetFrameHeight();
+                    const ImVec2 bar_pos(pos.x + size.x - bar_w - 8.f, pos.y + 8.f);
+
+                    ImGui::SetCursorScreenPos(bar_pos);
+                    ImGui::BeginGroup();
+
+                    auto mode_button = [&](const char* label, EditorCameraMode mode, const char* help)
+                    {
+                        const bool active = cameraMode == mode;
+                        ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.25f, 0.45f, 0.75f, 0.95f)
+                                                                     : ImVec4(0.12f, 0.12f, 0.14f, 0.80f));
+                        if (ImGui::Button(label, ImVec2(button_w, bar_h)))
+                            SetEditorCameraMode(mode);
+                        ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", help);
+                    };
+
+                    mode_button("2D##CamMode", EditorCameraMode::Mode2D,
+                                "2D camera : WASD to move, the wheel for the height");
+                    ImGui::SameLine();
+                    mode_button("3D##CamMode", EditorCameraMode::Mode3D,
+                                "3D camera : hold the right mouse button to look around,\n"
+                                "WASD to fly, Q / E down / up, Shift faster, wheel forward");
+
+                    ImGui::EndGroup();
+
+                    // The buttons take the mouse, not the scene (brush, picking).
+                    if (ImGui::IsMouseHoveringRect(bar_pos, ImVec2(bar_pos.x + bar_w, bar_pos.y + bar_h), false))
+                        sceneViewport.hovered = false;
+                }
 
                 // ImGui sizes are logical pixels; HRL renders into a physical
                 // framebuffer. Resize the scene to exactly match the image.
@@ -7630,6 +8166,9 @@ namespace editor
             ImGui::End();
         }
 
+        if (editorWindows.postProcess)
+            DrawPostProcessWindow();
+
         // --------------------------------------------------------
         // Camera Shake
         // --------------------------------------------------------
@@ -8095,6 +8634,9 @@ static bool ChooseProject(
     char** argv,
     lynx::host::GameProject& project)
 {
+    // "Open with Lynx" in the right-click menu of the folders (Explorer).
+    lynx::editor::shell_integration::Register();
+
     std::string message;
     std::filesystem::path initial_path;
 
@@ -8629,42 +9171,33 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
     // Load world
     // ------------------------------------------------------------
-    // assets/save_file.txt holds the path (relative to assets/) of the voxel
-    // world. A new project without it gets "world.vox".
+    // The level (.level, relative to assets/) is linked to its voxel world
+    // (.hrlv). Startup : the last level opened in the editor, otherwise the
+    // startup level of the game (assets/save_file.txt). Old projects
+    // (save_file.txt = voxel world, actors in world.xml) are converted once.
 
     lynx::editor::splash::SetStep("Loading the voxel world", 0.48f);
 
-    auto save_file =
-        lynx::fs::ReadBinary(
-            "save_file.txt"
-        );
-
-    std::string save_data(
-        reinterpret_cast<const char*>(
-            save_file.data()
-        ),
-        save_file.size()
-    );
-
-
-    while (!save_data.empty() &&
-           (save_data.back() == '\n' ||
-            save_data.back() == '\r' ||
-            save_data.back() == ' ' ||
-            save_data.back() == '\t'))
     {
-        save_data.pop_back();
+        std::string legacy_voxels;
+        std::string level_file = lynx::Level::ResolveStartupLevel(&legacy_voxels);
+
+        if (!legacy_voxels.empty())
+            level_file = MigrateLegacyLevel(level_file, legacy_voxels);
+
+        const std::string last = ReadLastLevel();
+        if (!last.empty() && std::filesystem::exists(std::filesystem::path("assets") / last))
+            level_file = last;
+
+        current_level_file = level_file;
     }
 
-    if (save_data.empty())
-    {
-        save_data = "world.vox";
+    std::string save_data =
+        lynx::Level::GetLinkedVoxelWorld(current_level_file);
 
-        std::cout
-            << "[WORLD] assets/save_file.txt missing or empty, using "
-            << save_data
-            << "\n";
-    }
+    std::cout
+        << "[WORLD] Level : " << current_level_file
+        << ", voxel world : " << save_data << "\n";
 
 
     std::filesystem::path world_path =
@@ -8773,7 +9306,7 @@ int main(int argc, char** argv)
     lynx::editor::splash::SetStep("Loading the level", 0.72f);
 
     auto* level = engine->CreateLevel(
-        "world.xml"
+        current_level_file.c_str()
     );
 
     auto font_data =
@@ -8889,30 +9422,9 @@ int main(int argc, char** argv)
     );
 
 
-    HRL_id post_mat =
-        HRL_CreateMaterial(
-            HRL_DEFAULT_POST_PROCESS_SHADER
-        );
-
-
-    HRL_MaterialSetFloat(
-        post_mat,
-        "vignetteStrength",
-        0.4f
-    );
-
-    // Same post process on the viewport of every player, also the ones the
-    // game creates while playing (Engine::CreatePlayer).
-    auto add_post_process = [post_mat](lynx::PlayerController* player)
-    {
-        if (player && player->GetViewportBackend() != HRL_INVALID_ID)
-            HRL_CreatePostProcess(player->GetViewportBackend(), post_mat, 1);
-    };
-
-    for (lynx::PlayerController* player : engine->GetPlayers())
-        add_post_process(player);
-
-    engine->ED_player_created.Subscribe(add_post_process);
+    // Post process of every player (HRL default shader). Its settings come
+    // from assets/postprocess.json (editor : Windows > Post Process).
+    lynx::postprocess::Install();
 
 
     // ------------------------------------------------------------
@@ -9024,10 +9536,10 @@ int main(int argc, char** argv)
         if (gameHooks.setup_scene)
             gameHooks.setup_scene(scene);
 
-        // 4. Rebuild the level (world.xml was saved in step 1 if it was dirty).
+        // 4. Rebuild the level (saved in step 1 if it was dirty).
         level =
             engine->CreateLevel(
-                "world.xml"
+                current_level_file.c_str()
             );
 
         if (!level)
@@ -9135,6 +9647,46 @@ int main(int argc, char** argv)
             }
 
             // Do not count the reload time as a frame.
+            lastFrameTime =
+                glfwGetTime();
+        }
+
+
+        // --------------------------------------------------------
+        // Open another level (Content Browser) : same idea as the restore
+        // below, with the voxel world linked to the new level.
+        // --------------------------------------------------------
+
+        if (std::string next_level; editor::ConsumeOpenLevelRequest(next_level))
+        {
+            editor::BeginOpenLevel();
+
+            engine->DeleteCurrentLevel();
+
+            editor::LoadVoxelWorldOfLevel(next_level);
+
+            level =
+                engine->CreateLevel(
+                    next_level.c_str()
+                );
+
+            if (!level)
+            {
+                std::cerr << "[WORLD] ERROR: could not open " << next_level << "\n";
+
+                glfwSetWindowShouldClose(
+                    win,
+                    GLFW_TRUE
+                );
+
+                continue;
+            }
+
+            if (gameHooks.on_level_loaded)
+                gameHooks.on_level_loaded(gameplay_cam);
+
+            editor::EndOpenLevel(level);
+
             lastFrameTime =
                 glfwGetTime();
         }
@@ -9365,4 +9917,95 @@ int main(int argc, char** argv)
 
 
     return 0;
+}
+
+
+// =============================================================================
+// Post Process window
+// =============================================================================
+
+static void DrawPostProcessWindow()
+{
+    namespace pp = lynx::postprocess;
+
+    bool open = true;
+    if (!ImGui::Begin("Post Process", &open))
+    {
+        ImGui::End();
+        if (!open) { editorWindows.postProcess = false; SaveEditorWindowVisibility(); }
+        return;
+    }
+
+    if (ImGui::Button("Save"))
+        pp::Save();
+    ImGui::SameLine();
+    if (ImGui::Button("Revert"))
+        pp::Load();
+    ImGui::SameLine();
+    if (ImGui::Button("Reset all"))
+        pp::Reset();
+    ImGui::SameLine();
+    ImGui::TextDisabled(pp::IsDirty() ? "assets/postprocess.json (not saved)" : "assets/postprocess.json");
+
+    ImGui::Separator();
+
+    std::string group;
+    bool group_open = false;
+
+    for (const pp::ParamInfo& p : pp::GetParams())
+    {
+        if (group != p.group)
+        {
+            group = p.group;
+            group_open = ImGui::CollapsingHeader(p.group, ImGuiTreeNodeFlags_DefaultOpen);
+        }
+        if (!group_open)
+            continue;
+
+        ImGui::PushID(p.name);
+
+        float v[3] = {};
+        pp::GetValue(p.name, v);
+        bool changed = false;
+
+        switch (p.type)
+        {
+        case pp::ParamType::Float:
+            changed = ImGui::SliderFloat(p.label, &v[0], p.min, p.max, "%.3f");
+            break;
+        case pp::ParamType::Toggle:
+        {
+            bool b = v[0] != 0.f;
+            if (ImGui::Checkbox(p.label, &b)) { v[0] = b ? 1.f : 0.f; changed = true; }
+            break;
+        }
+        case pp::ParamType::Color:
+            changed = ImGui::ColorEdit3(p.label, v, ImGuiColorEditFlags_Float);
+            break;
+        }
+
+        if (changed)
+            pp::SetValue(p.name, v, 3);
+
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s%s%s", p.name, p.tooltip[0] ? "\n" : "", p.tooltip);
+
+        // Back to the default value.
+        if (pp::IsModified(p.name))
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset"))
+                pp::Reset(p.name);
+        }
+
+        ImGui::PopID();
+    }
+
+    ImGui::End();
+
+    if (!open)
+    {
+        editorWindows.postProcess = false;
+        SaveEditorWindowVisibility();
+    }
 }

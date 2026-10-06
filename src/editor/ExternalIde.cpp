@@ -1,7 +1,20 @@
 #include "ExternalIde.h"
 
+#include "../host/GameProject.h"
+#include "../core/Engine.h"
+
+#include <hrl/hrl.h>
+#include <hrl/hrl_gl.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
+#include <mutex>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -11,6 +24,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <cstdio>
+#include <cstring>
 #include <cwctype>
 #endif
 
@@ -247,6 +261,84 @@ namespace lynx::editor::external_ide
 		}
 	}
 
+	namespace
+	{
+		fs::path FindExe(Ide ide)
+		{
+			switch (ide)
+			{
+			case Ide::VisualStudio: return FindVisualStudio();
+			case Ide::VsCode:       return FindVsCode();
+			case Ide::CLion:        return FindCLion();
+			default:                return {};
+			}
+		}
+
+		const wchar_t* PathCommand(Ide ide)
+		{
+			switch (ide)
+			{
+			case Ide::VisualStudio: return L"devenv";
+			case Ide::VsCode:       return L"code";
+			case Ide::CLion:        return L"clion";
+			default:                return nullptr;
+			}
+		}
+
+		// Icon of an .exe as RGBA pixels (top-down). false : no icon.
+		bool ExtractIconRgba(const fs::path& exe, int size, std::vector<uint8_t>& rgba)
+		{
+			HICON icon = nullptr;
+			if (PrivateExtractIconsW(exe.wstring().c_str(), 0, size, size, &icon, nullptr, 1, 0) == 0 || !icon)
+				return false;
+
+			BITMAPINFO info = {};
+			info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+			info.bmiHeader.biWidth = size;
+			info.bmiHeader.biHeight = -size;   // top-down
+			info.bmiHeader.biPlanes = 1;
+			info.bmiHeader.biBitCount = 32;
+			info.bmiHeader.biCompression = BI_RGB;
+
+			void* bits = nullptr;
+			HDC screen = GetDC(nullptr);
+			HDC dc = CreateCompatibleDC(screen);
+			HBITMAP dib = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+			bool ok = false;
+
+			if (dib && bits)
+			{
+				HGDIOBJ old = SelectObject(dc, dib);
+				std::memset(bits, 0, static_cast<size_t>(size) * size * 4);
+				DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+				SelectObject(dc, old);
+
+				const uint8_t* bgra = static_cast<const uint8_t*>(bits);
+				rgba.resize(static_cast<size_t>(size) * size * 4);
+				bool any_alpha = false;
+				for (int i = 0; i < size * size; ++i)
+				{
+					rgba[i * 4 + 0] = bgra[i * 4 + 2];
+					rgba[i * 4 + 1] = bgra[i * 4 + 1];
+					rgba[i * 4 + 2] = bgra[i * 4 + 0];
+					rgba[i * 4 + 3] = bgra[i * 4 + 3];
+					any_alpha = any_alpha || bgra[i * 4 + 3] != 0;
+				}
+				// Old icons without alpha : opaque where something was drawn.
+				if (!any_alpha)
+					for (int i = 0; i < size * size; ++i)
+						rgba[i * 4 + 3] = (rgba[i * 4] | rgba[i * 4 + 1] | rgba[i * 4 + 2]) ? 255 : 0;
+				ok = true;
+			}
+
+			if (dib) DeleteObject(dib);
+			DeleteDC(dc);
+			ReleaseDC(nullptr, screen);
+			DestroyIcon(icon);
+			return ok;
+		}
+	}
+
 	bool Open(Ide ide, const fs::path& folder, std::string& error)
 	{
 		std::error_code ec;
@@ -290,5 +382,206 @@ namespace lynx::editor::external_ide
 		error = std::string("Open with ") + Name(ide) + " : Windows only.";
 		return false;
 	}
+
+	namespace
+	{
+		fs::path FindExe(Ide) { return {}; }
+		bool ExtractIconRgba(const fs::path&, int, std::vector<uint8_t>&) { return false; }
+	}
 #endif
+
+	// =========================================================================
+	// Split button support : last used, detection, icons
+	// =========================================================================
+
+	namespace
+	{
+		constexpr int kCount = static_cast<int>(Ide::Count);
+		constexpr int kIconSize = 48;
+
+		struct Detected
+		{
+			bool installed = false;
+			std::vector<uint8_t> rgba;   // kIconSize x kIconSize, empty : no icon
+		};
+
+		std::mutex g_mutex;
+		std::array<Detected, kCount> g_detected;
+		std::atomic<bool> g_done{ false };
+		bool g_started = false;
+
+		std::array<HRL_id, kCount> g_textures = [] { std::array<HRL_id, kCount> a; a.fill(HRL_INVALID_ID); return a; }();
+		std::array<bool, kCount> g_texture_made = {};
+
+		bool g_last_loaded = false;
+		Ide g_last = Ide::VsCode;
+
+		fs::path LastUsedFile()
+		{
+			return host::GetEditorDirectory() / "open_with.txt";
+		}
+
+		void StartDetection()
+		{
+			if (g_started)
+				return;
+			g_started = true;
+
+			std::thread([]
+			{
+				for (int i = 0; i < kCount; ++i)
+				{
+					Detected d;
+					const fs::path exe = FindExe(static_cast<Ide>(i));
+#ifdef _WIN32
+					d.installed = !exe.empty() || OnPath(PathCommand(static_cast<Ide>(i)));
+#endif
+					// The JetBrains Toolbox script (.cmd) has no icon.
+					if (!exe.empty() && exe.extension() == ".exe")
+						ExtractIconRgba(exe, kIconSize, d.rgba);
+
+					std::lock_guard<std::mutex> lock(g_mutex);
+					g_detected[i] = std::move(d);
+				}
+				g_done = true;
+			}).detach();
+		}
+
+		// --- Minimal PNG writer (stored deflate) : HRL_CreateTexture takes an
+		//     encoded image. -----------------------------------------------
+
+		uint32_t Crc(const uint8_t* data, size_t len, uint32_t crc = 0xFFFFFFFFu)
+		{
+			for (size_t i = 0; i < len; ++i)
+			{
+				crc ^= data[i];
+				for (int k = 0; k < 8; ++k)
+					crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+			}
+			return crc;
+		}
+
+		void Put32(std::vector<uint8_t>& out, uint32_t v)
+		{
+			out.push_back(static_cast<uint8_t>(v >> 24));
+			out.push_back(static_cast<uint8_t>(v >> 16));
+			out.push_back(static_cast<uint8_t>(v >> 8));
+			out.push_back(static_cast<uint8_t>(v));
+		}
+
+		void Chunk(std::vector<uint8_t>& out, const char* type, const std::vector<uint8_t>& data)
+		{
+			Put32(out, static_cast<uint32_t>(data.size()));
+			const size_t start = out.size();
+			out.insert(out.end(), type, type + 4);
+			out.insert(out.end(), data.begin(), data.end());
+			Put32(out, Crc(out.data() + start, out.size() - start) ^ 0xFFFFFFFFu);
+		}
+
+		std::vector<uint8_t> EncodePng(const std::vector<uint8_t>& rgba, int w, int h)
+		{
+			std::vector<uint8_t> raw;
+			raw.reserve(static_cast<size_t>(h) * (w * 4 + 1));
+			for (int y = 0; y < h; ++y)
+			{
+				raw.push_back(0);   // filter : none
+				raw.insert(raw.end(), rgba.begin() + static_cast<size_t>(y) * w * 4,
+				           rgba.begin() + static_cast<size_t>(y + 1) * w * 4);
+			}
+
+			// zlib : stored blocks (no compression), then Adler-32.
+			std::vector<uint8_t> z = { 0x78, 0x01 };
+			for (size_t pos = 0; pos < raw.size() || pos == 0;)
+			{
+				const size_t n = std::min<size_t>(65535, raw.size() - pos);
+				const bool last = pos + n >= raw.size();
+				z.push_back(last ? 1 : 0);
+				z.push_back(static_cast<uint8_t>(n));
+				z.push_back(static_cast<uint8_t>(n >> 8));
+				z.push_back(static_cast<uint8_t>(~n));
+				z.push_back(static_cast<uint8_t>(~n >> 8));
+				z.insert(z.end(), raw.begin() + pos, raw.begin() + pos + n);
+				pos += n;
+				if (last)
+					break;
+			}
+			uint32_t a = 1, b = 0;
+			for (uint8_t c : raw) { a = (a + c) % 65521; b = (b + a) % 65521; }
+			Put32(z, (b << 16) | a);
+
+			std::vector<uint8_t> png = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+			std::vector<uint8_t> ihdr;
+			Put32(ihdr, static_cast<uint32_t>(w));
+			Put32(ihdr, static_cast<uint32_t>(h));
+			ihdr.insert(ihdr.end(), { 8, 6, 0, 0, 0 });   // 8 bits, RGBA
+			Chunk(png, "IHDR", ihdr);
+			Chunk(png, "IDAT", z);
+			Chunk(png, "IEND", {});
+			return png;
+		}
+	}
+
+	Ide LastUsed()
+	{
+		if (!g_last_loaded)
+		{
+			g_last_loaded = true;
+			std::ifstream in(LastUsedFile());
+			int v = -1;
+			if (in >> v && v >= 0 && v < kCount)
+				g_last = static_cast<Ide>(v);
+		}
+		return g_last;
+	}
+
+	void SetLastUsed(Ide ide)
+	{
+		g_last_loaded = true;
+		g_last = ide;
+		std::ofstream out(LastUsedFile(), std::ios::trunc);
+		if (out)
+			out << static_cast<int>(ide) << "\n";
+	}
+
+	bool DetectionDone()
+	{
+		StartDetection();
+		return g_done;
+	}
+
+	bool IsInstalled(Ide ide)
+	{
+		if (!DetectionDone())
+			return false;
+		std::lock_guard<std::mutex> lock(g_mutex);
+		return g_detected[static_cast<int>(ide)].installed;
+	}
+
+	unsigned int IconTexture(Ide ide)
+	{
+		const int i = static_cast<int>(ide);
+		if (i < 0 || i >= kCount || !DetectionDone())
+			return 0;
+
+		// The texture is made on the main thread (HRL / OpenGL).
+		if (!g_texture_made[i])
+		{
+			g_texture_made[i] = true;
+			std::vector<uint8_t> rgba;
+			{
+				std::lock_guard<std::mutex> lock(g_mutex);
+				rgba = g_detected[i].rgba;
+			}
+			if (!rgba.empty())
+			{
+				const std::vector<uint8_t> png = EncodePng(rgba, kIconSize, kIconSize);
+				g_textures[i] = HRL_CreateTexture(reinterpret_cast<const char*>(png.data()), png.size());
+				// A new texture : the sprites are drawn again (see RequestRenderRefresh).
+				if (Engine* engine = Engine::Get())
+					engine->RequestRenderRefresh();
+			}
+		}
+
+		return g_textures[i] != HRL_INVALID_ID ? HRL_GL_GetTextureGL_ID(g_textures[i]) : 0;
+	}
 }

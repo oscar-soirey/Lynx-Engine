@@ -7,7 +7,9 @@
 
 #include <hrl/hrl.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
 namespace lynx
@@ -111,6 +113,10 @@ namespace lynx
 		current_ = owner->transform.location + offset;
 		has_current_ = true;
 
+		// Plus de retard a rattraper : la camera repart de la position actuelle.
+		history_.clear();
+		history_time_ = 0.f;
+
 		ApplyTransform(current_.x, current_.y, current_.z, 0.f);
 	}
 
@@ -207,7 +213,7 @@ namespace lynx
 		if (!owner || !EnsureCamera())
 			return;
 
-		const vec3 target = owner->transform.location + offset;
+		const vec3 target = DelayedTarget(owner->transform.location + offset, dt);
 
 		if (!has_current_ || follow_speed <= 0.f)
 		{
@@ -228,5 +234,40 @@ namespace lynx
 			GetCameraShake().Update(dt, x, y, roll);
 
 		ApplyTransform(x, y, current_.z, roll);
+	}
+
+	vec3 CameraComponent::DelayedTarget(const vec3& target, float dt)
+	{
+		if (follow_delay <= 0.f)
+		{
+			history_.clear();
+			history_time_ = 0.f;
+			return target;
+		}
+
+		history_time_ += std::max(dt, 0.f);
+		history_.push_back({ history_time_, target });
+
+		const float wanted = history_time_ - follow_delay;
+
+		// Pas encore assez d'historique : la plus ancienne position connue.
+		if (history_.front().time >= wanted)
+			return history_.front().target;
+
+		// Garde un echantillon avant `wanted` (pour interpoler), oublie le reste.
+		size_t first = 0;
+		while (first + 1 < history_.size() && history_[first + 1].time <= wanted)
+			++first;
+		if (first > 0)
+			history_.erase(history_.begin(), history_.begin() + static_cast<std::ptrdiff_t>(first));
+
+		if (history_.size() < 2)
+			return history_.front().target;
+
+		const TargetSample& a = history_[0];
+		const TargetSample& b = history_[1];
+		const float span = b.time - a.time;
+		const float t = span > 1e-6f ? std::clamp((wanted - a.time) / span, 0.f, 1.f) : 1.f;
+		return a.target + (b.target - a.target) * t;
 	}
 }

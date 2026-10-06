@@ -105,7 +105,7 @@ namespace lynx::editor::file_icons
 			return Kind::Cpp;
 		if (extension == ".json")
 			return Kind::Data;
-		if (extension == ".xml" || extension == ".hrlv")
+		if (extension == ".level" || extension == ".xml" || extension == ".hrlv")
 			return Kind::Level;
 		if (Is(extension, { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif", ".psd", ".hdr" }))
 			return Kind::Image;

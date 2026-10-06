@@ -2366,7 +2366,7 @@ namespace lynx::editor::commands_window
 				ImGui::PopStyleColor();
 				// Lynxie writes Markdown (**bold**, lists, `code`, tables...) ;
 				// the user's messages and the script receipts stay plain text.
-				// Lynxie's and the user's messages : OpenDyslexic (fonts/) ; the
+				// Lynxie's and the user's messages : editor font, normal size ; the
 				// script receipts keep the editor's mono font (code, output).
 				if (speaker == "Lynxie")
 				{
@@ -2682,12 +2682,14 @@ namespace lynx::editor::commands_window
 
 	namespace
 	{
-		bool g_show_lynxie = false;
+		// Frames during which the Lynxie tab is forced to the front (a few at
+		// startup : the dock layout and the other windows settle first).
+		int g_show_lynxie = 0;
 	}
 
-	void ShowLynxie()
+	void ShowLynxie(int frames)
 	{
-		g_show_lynxie = true;
+		g_show_lynxie = std::max(g_show_lynxie, frames);
 	}
 
 
@@ -2697,7 +2699,7 @@ namespace lynx::editor::commands_window
 			return;
 
 		ImGui::SetNextWindowSize(ImVec2(900.f, 480.f), ImGuiCond_FirstUseEver);
-		if (g_show_lynxie)
+		if (g_show_lynxie > 0)
 			ImGui::SetNextWindowFocus();
 
 		if (!ImGui::Begin("Commands", open))
@@ -2714,7 +2716,7 @@ namespace lynx::editor::commands_window
 				ImGui::EndTabItem();
 			}
 
-			if (ImGui::BeginTabItem("Lynxie", nullptr, g_show_lynxie ? ImGuiTabItemFlags_SetSelected : 0))
+			if (ImGui::BeginTabItem("Lynxie", nullptr, g_show_lynxie > 0 ? ImGuiTabItemFlags_SetSelected : 0))
 			{
 				DrawLocalAI();
 				ImGui::EndTabItem();
@@ -2741,7 +2743,8 @@ namespace lynx::editor::commands_window
 			ImGui::EndTabBar();
 		}
 
-		g_show_lynxie = false;
+		if (g_show_lynxie > 0)
+			--g_show_lynxie;
 		ImGui::End();
 	}
 }

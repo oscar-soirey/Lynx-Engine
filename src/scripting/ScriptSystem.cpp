@@ -6,6 +6,7 @@
 #include "../core/Engine.h"
 #include "../core/Filesystem.h"
 #include "../core/Level.h"
+#include "../core/PostProcess.h"
 #include "../core/data/Typename.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/Components.h"
@@ -14,6 +15,7 @@
 
 #include <quickjs-ng/quickjs.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -65,6 +67,9 @@ namespace lynx
 			JSValue lookup = JS_UNDEFINED;
 			// cache des fonctions deja cherchees (undefined si absente)
 			std::unordered_map<std::string, JSValue> functions;
+
+			// const interfaces = ["Collectible"] du script (lu au chargement)
+			std::vector<std::string> interfaces;
 
 			bool loaded = false; // false : fichier absent ou erreur JS
 			bool begun = false;  // BeginPlay deja appele
@@ -128,6 +133,15 @@ namespace lynx
 			// Fonctions JS utilitaires (compilees a l'init)
 			JSValue fn_is_actor_class = JS_UNDEFINED;
 			JSValue fn_static_properties = JS_UNDEFINED;
+
+			// ---- Interfaces (class X extends Interface) ----
+			JSValue interface_ctor = JS_UNDEFINED;          // global Interface
+			JSValue fn_is_interface_class = JS_UNDEFINED;
+			JSValue fn_interface_info = JS_UNDEFINED;       // c -> [functions, parent]
+			JSValue fn_static_interfaces = JS_UNDEFINED;    // c -> [noms]
+			std::unordered_map<std::string, JSValue> interface_classes;
+			// classe JS d'acteur -> interfaces (static interfaces, parents compris)
+			std::unordered_map<std::string, std::vector<std::string>> class_interfaces;
 		};
 
 		State* g = nullptr;
@@ -140,9 +154,10 @@ namespace lynx
 		// Le "\n" protege d'un commentaire // sur la derniere ligne du fichier.
 		// eval direct : voit les fonctions/variables declarees dans le script.
 		const char* const kWrapperEnd =
-			"\n;return function(__lynx_name__) {"
+			"\n;return function(__lynx_name__, __lynx_raw__) {"
 			" var __lynx_f__;"
 			" try { __lynx_f__ = eval(__lynx_name__); } catch (__lynx_e__) { return undefined; }"
+			" if (__lynx_raw__) return __lynx_f__;"
 			" return typeof __lynx_f__ === 'function' ? __lynx_f__ : undefined;"
 			" };\n})";
 
@@ -1027,6 +1042,12 @@ namespace lynx
 			return JS_NewBool(ctx, ecs::IsPlaying());
 		}
 
+		JSValue EngineIsSimulating(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			Engine* engine = Engine::Get();
+			return JS_NewBool(ctx, engine && engine->IsSimulating());
+		}
+
 
 		// ====================================================================
 		// Enregistrement
@@ -1049,6 +1070,69 @@ namespace lynx
 		void DefFuncMagic(JSContext* ctx, JSValueConst obj, const char* name, JSCFunctionMagic* fn, int length, int magic)
 		{
 			JS_SetPropertyStr(ctx, obj, name, JS_NewCFunctionMagic(ctx, fn, name, length, JS_CFUNC_generic_magic, magic));
+		}
+
+		// Interfaces (definies plus bas)
+		JSValue ActorImplements(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+		JSValue ActorSend(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+		JSValue LevelFindImplementing(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv);
+		void RegisterInterfaceGlobals(JSContext* ctx);
+
+		// ---- PostProcess.get / set / reset / params ----------------------
+
+		JSValue PostProcessGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 1)
+				return JS_UNDEFINED;
+			const std::string name = ToStdString(ctx, argv[0]);
+			const postprocess::ParamInfo* p = postprocess::FindParam(name);
+			if (!p)
+				return JS_UNDEFINED;
+			float v[3] = {};
+			postprocess::GetValue(name, v);
+			if (p->type == postprocess::ParamType::Color)
+				return NewPlainVec3(ctx, vec3(v[0], v[1], v[2]));
+			if (p->type == postprocess::ParamType::Toggle)
+				return JS_NewBool(ctx, v[0] != 0.f);
+			return JS_NewFloat64(ctx, v[0]);
+		}
+
+		// PostProcess.set("exposure", 1) / set("tintColor", {x,y,z} | [r,g,b]) / set("bloom...", true)
+		JSValue PostProcessSet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 2)
+				return JS_ThrowTypeError(ctx, "PostProcess.set(name, value)");
+			const std::string name = ToStdString(ctx, argv[0]);
+			float v[3] = {};
+			int n = 1;
+			if (JS_IsBool(argv[1]))
+				v[0] = JS_ToBool(ctx, argv[1]) > 0 ? 1.f : 0.f;
+			else if (JS_IsNumber(argv[1]))
+			{
+				double d = 0;
+				JS_ToFloat64(ctx, &d, argv[1]);
+				v[0] = static_cast<float>(d);
+			}
+			else if (ReadFloats(ctx, argv[1], v, 3))
+				n = 3;
+			else
+				return JS_ThrowTypeError(ctx, "PostProcess.set : number, bool or color expected");
+			return JS_NewBool(ctx, postprocess::SetValue(name, v, n));
+		}
+
+		JSValue PostProcessReset(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			postprocess::Reset(argc > 0 ? ToStdString(ctx, argv[0]) : std::string());
+			return JS_UNDEFINED;
+		}
+
+		JSValue PostProcessParams(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			JSValue arr = JS_NewArray(ctx);
+			uint32_t i = 0;
+			for (const postprocess::ParamInfo& p : postprocess::GetParams())
+				JS_SetPropertyUint32(ctx, arr, i++, JS_NewString(ctx, p.name));
+			return arr;
 		}
 
 		void RegisterClasses(JSContext* ctx)
@@ -1121,6 +1205,8 @@ namespace lynx
 			DefFuncMagic(ctx, actor_proto, "removeScript", ActorScriptOp, 1, kRemoveScript);
 			DefFuncMagic(ctx, actor_proto, "hasScript", ActorScriptOp, 1, kHasScript);
 			DefFunc(ctx, actor_proto, "call", ActorCall, 1);
+			DefFunc(ctx, actor_proto, "implements", ActorImplements, 1);
+			DefFunc(ctx, actor_proto, "send", ActorSend, 2);
 			DefFunc(ctx, actor_proto, "toString", ActorToString, 0);
 
 			// addComponent / getComponent... et les classes des composants
@@ -1151,6 +1237,7 @@ namespace lynx
 			DefFunc(ctx, level, "spawn", LevelSpawn, 2);
 			DefFunc(ctx, level, "find", LevelFind, 1);
 			DefFunc(ctx, level, "findWithTag", LevelFindWithTag, 1);
+			DefFunc(ctx, level, "findImplementing", LevelFindImplementing, 1);
 			DefFunc(ctx, level, "all", LevelAll, 0);
 			DefFunc(ctx, level, "count", LevelCount, 1);
 			DefFunc(ctx, level, "destroy", LevelDestroy, 1);
@@ -1163,10 +1250,18 @@ namespace lynx
 			DefFunc(ctx, input, "axis", InputAxis, 1);
 			JS_SetPropertyStr(ctx, global, "Input", input);
 
+			JSValue post = JS_NewObject(ctx);
+			DefFunc(ctx, post, "get", PostProcessGet, 1);
+			DefFunc(ctx, post, "set", PostProcessSet, 2);
+			DefFunc(ctx, post, "reset", PostProcessReset, 0);
+			DefFunc(ctx, post, "params", PostProcessParams, 0);
+			JS_SetPropertyStr(ctx, global, "PostProcess", post);
+
 			JSValue engine = JS_NewObject(ctx);
 			DefFunc(ctx, engine, "getTimeDilation", EngineGetTimeDilation, 0);
 			DefFunc(ctx, engine, "setTimeDilation", EngineSetTimeDilation, 2);
 			DefFunc(ctx, engine, "isPlaying", EngineIsPlaying, 0);
+			DefFunc(ctx, engine, "isSimulating", EngineIsSimulating, 0);
 			JS_SetPropertyStr(ctx, global, "Engine", engine);
 
 			JS_FreeValue(ctx, global);
@@ -1815,6 +1910,277 @@ namespace lynx
 		}
 
 		/** Noms declares par "class Nom extends ..." dans le fichier. */
+		// ====================================================================
+		// Interfaces (voir gameplay/Interface.h) : classes, noms, conversions
+		// ====================================================================
+
+		JSValue InterfaceFunctionsJS(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+		JSValue InterfaceListJS(JSContext* ctx, JSValueConst, int, JSValueConst*);
+
+		/** "Collectible", la classe Collectible, ou un objet avec .name. */
+		std::string InterfaceNameOf(JSContext* ctx, JSValueConst v)
+		{
+			if (JS_IsString(v))
+				return ToStdString(ctx, v);
+			if (JS_IsObject(v))
+			{
+				JSValue n = JS_GetPropertyStr(ctx, v, "name");
+				std::string out = JS_IsString(n) ? ToStdString(ctx, n) : std::string();
+				JS_FreeValue(ctx, n);
+				return out;
+			}
+			return {};
+		}
+
+		/** Tableau (ou valeur seule) d'interfaces -> noms. */
+		std::vector<std::string> InterfaceNamesOf(JSContext* ctx, JSValueConst value)
+		{
+			std::vector<std::string> out;
+			auto add = [&](JSValueConst v)
+			{
+				std::string n = InterfaceNameOf(ctx, v);
+				if (!n.empty() && std::find(out.begin(), out.end(), n) == out.end())
+					out.push_back(std::move(n));
+			};
+
+			if (JS_IsArray(value))
+			{
+				JSValue len_v = JS_GetPropertyStr(ctx, value, "length");
+				int64_t len = 0;
+				JS_ToInt64(ctx, &len, len_v);
+				JS_FreeValue(ctx, len_v);
+				for (int64_t i = 0; i < len; ++i)
+				{
+					JSValue e = JS_GetPropertyInt64(ctx, value, i);
+					add(e);
+					JS_FreeValue(ctx, e);
+				}
+			}
+			else if (!JS_IsUndefined(value) && !JS_IsNull(value))
+			{
+				add(value);
+			}
+			return out;
+		}
+
+		JSValue InterfaceArgToJS(JSContext* ctx, const InterfaceArg& arg)
+		{
+			return std::visit([ctx](const auto& v) -> JSValue
+			{
+				using T = std::decay_t<decltype(v)>;
+				if constexpr (std::is_same_v<T, std::monostate>)
+					return JS_UNDEFINED;
+				else if constexpr (std::is_same_v<T, Actor*>)
+					return ActorToJS(ctx, v);
+				else
+				{
+					PropVariantType p = v;
+					return VariantToJS(ctx, p);
+				}
+			}, arg);
+		}
+
+		InterfaceArg JSToInterfaceArg(JSContext* ctx, JSValueConst v)
+		{
+			if (JS_IsUndefined(v) || JS_IsNull(v))
+				return std::monostate{};
+			if (Actor* a = JSToActor(v))
+				return a;
+
+			const auto p = JSToVariant(ctx, v, "");
+			if (!p)
+				return std::monostate{};
+
+			return std::visit([](const auto& x) -> InterfaceArg
+			{
+				using T = std::decay_t<decltype(x)>;
+				if constexpr (std::is_same_v<T, transform>)
+					return x.location;
+				else
+					return x;
+			}, *p);
+		}
+
+		bool IsInterfaceClass(JSContext* ctx, JSValueConst value)
+		{
+			if (!JS_IsFunction(ctx, g->fn_is_interface_class))
+				return false;
+			JSValue r = JS_Call(ctx, g->fn_is_interface_class, JS_UNDEFINED, 1, &value);
+			const bool ok = JS_ToBool(ctx, r) > 0;
+			JS_FreeValue(ctx, r);
+			return ok;
+		}
+
+		/** class Collectible extends Interface { OnCollected(item, n) {} } */
+		void RegisterInterfaceClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file)
+		{
+			// [fonctions propres, parent ("" = Interface)]
+			JSValue info = JS_Call(ctx, g->fn_interface_info, JS_UNDEFINED, 1, &ctor);
+			if (JS_IsException(info))
+			{
+				LogException(ctx, file);
+				return;
+			}
+
+			JSValue fns = JS_GetPropertyInt64(ctx, info, 0);
+			JSValue parent = JS_GetPropertyInt64(ctx, info, 1);
+			const std::vector<std::string> functions = InterfaceNamesOf(ctx, fns);
+			const std::string parent_name = ToStdString(ctx, parent);
+			JS_FreeValue(ctx, fns);
+			JS_FreeValue(ctx, parent);
+			JS_FreeValue(ctx, info);
+
+			std::vector<std::string> parents;
+			if (!parent_name.empty())
+				parents.push_back(parent_name);
+
+			DefineInterface(name, functions, parents, true);
+
+			auto& slot = g->interface_classes[name];
+			JS_FreeValue(ctx, slot);
+			slot = JS_DupValue(ctx, ctor);
+
+			// Global : les autres fichiers l'utilisent (static interfaces = [Collectible]).
+			JSValue global = JS_GetGlobalObject(ctx);
+			JS_SetPropertyStr(ctx, global, name.c_str(), JS_DupValue(ctx, ctor));
+			JS_FreeValue(ctx, global);
+		}
+
+		/** Avant de relire les fichiers : les interfaces JS sont oubliees. */
+		void ForgetInterfaceClasses(JSContext* ctx)
+		{
+			JSValue global = JS_GetGlobalObject(ctx);
+			for (auto& [name, ctor] : g->interface_classes)
+			{
+				JSAtom atom = JS_NewAtom(ctx, name.c_str());
+				JS_DeleteProperty(ctx, global, atom, 0);
+				JS_FreeAtom(ctx, atom);
+				JS_FreeValue(ctx, ctor);
+			}
+			JS_FreeValue(ctx, global);
+
+			g->interface_classes.clear();
+			g->class_interfaces.clear();
+			ForgetScriptInterfaces();
+		}
+
+		/** Interfaces de la classe JS de `a` (static interfaces, toute la chaine). */
+		const std::vector<std::string>& ClassInterfaces(const Actor* a)
+		{
+			static const std::vector<std::string> none;
+			if (!g || !a || a->script_class_.empty())
+				return none;
+
+			auto cached = g->class_interfaces.find(a->script_class_);
+			if (cached != g->class_interfaces.end())
+				return cached->second;
+
+			std::vector<std::string> names;
+			auto cls = g->classes.find(a->script_class_);
+			if (cls != g->classes.end() && JS_IsFunction(g->ctx, g->fn_static_interfaces))
+			{
+				JSValueConst arg = cls->second.ctor;
+				JSValue list = JS_Call(g->ctx, g->fn_static_interfaces, JS_UNDEFINED, 1, &arg);
+				if (JS_IsException(list))
+					JS_FreeValue(g->ctx, JS_GetException(g->ctx));
+				else
+					names = InterfaceNamesOf(g->ctx, list);
+				JS_FreeValue(g->ctx, list);
+			}
+			return g->class_interfaces.emplace(a->script_class_, std::move(names)).first->second;
+		}
+
+		/** Global Interface (base des interfaces JS) et ses fonctions statiques. */
+		void RegisterInterfaceGlobals(JSContext* ctx)
+		{
+			const char* source =
+				"(function () {"
+				"  class Interface {"
+				"    constructor() { throw new TypeError('an interface can not be created : implement it (static interfaces = [...])'); }"
+				"    static call(...a) {"
+				"      let actor, iface = this, fn, rest;"
+				"      if (this === Interface) [actor, iface, fn, ...rest] = a; else [actor, fn, ...rest] = a;"
+				"      return actor && actor.valid ? actor.send(iface, fn, ...rest) : undefined;"
+				"    }"
+				"    static broadcast(...a) {"
+				"      let iface = this, fn, rest;"
+				"      if (this === Interface) [iface, fn, ...rest] = a; else [fn, ...rest] = a;"
+				"      let n = 0;"
+				"      for (const actor of Level.findImplementing(iface))"
+				"        if (actor.valid) { actor.send(iface, fn, ...rest); ++n; }"
+				"      return n;"
+				"    }"
+				"    static find(iface) { return Level.findImplementing(this === Interface ? iface : this); }"
+				"    static implementedBy(actor, iface) { return !!actor && actor.valid && actor.implements(this === Interface ? iface : this); }"
+				"  }"
+				"  return Interface;"
+				"})()";
+
+			g->interface_ctor = JS_Eval(ctx, source, std::strlen(source), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+			if (JS_IsException(g->interface_ctor))
+			{
+				LogException(ctx, "<lynx> Interface");
+				g->interface_ctor = JS_UNDEFINED;
+				return;
+			}
+
+			DefFunc(ctx, g->interface_ctor, "functions", InterfaceFunctionsJS, 1);
+			DefFunc(ctx, g->interface_ctor, "list", InterfaceListJS, 0);
+
+			JSValue global = JS_GetGlobalObject(ctx);
+			JS_SetPropertyStr(ctx, global, "Interface", JS_DupValue(ctx, g->interface_ctor));
+			JS_FreeValue(ctx, global);
+
+			const char* is_interface =
+				"(function (c) { return typeof c === 'function' && c.prototype instanceof Interface; })";
+
+			// [methodes propres du prototype, nom du parent ("" = Interface)]
+			const char* info =
+				"(function (c) {"
+				"  const fns = Object.getOwnPropertyNames(c.prototype).filter(n =>"
+				"    n !== 'constructor' && typeof Object.getOwnPropertyDescriptor(c.prototype, n).value === 'function');"
+				"  const p = Object.getPrototypeOf(c);"
+				"  return [fns, p && p !== Interface ? p.name : ''];"
+				"})";
+
+			// static interfaces de toute la chaine de classes
+			const char* statics =
+				"(function (c) {"
+				"  const out = [];"
+				"  for (let p = c; p && p !== Function.prototype; p = Object.getPrototypeOf(p))"
+				"    if (Object.prototype.hasOwnProperty.call(p, 'interfaces') && p.interfaces)"
+				"      for (const i of [].concat(p.interfaces)) {"
+				"        const n = typeof i === 'string' ? i : (i && i.name);"
+				"        if (n && !out.includes(n)) out.push(n);"
+				"      }"
+				"  return out;"
+				"})";
+
+			g->fn_is_interface_class = JS_Eval(ctx, is_interface, std::strlen(is_interface), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+			g->fn_interface_info = JS_Eval(ctx, info, std::strlen(info), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+			g->fn_static_interfaces = JS_Eval(ctx, statics, std::strlen(statics), "<lynx>", JS_EVAL_TYPE_GLOBAL);
+		}
+
+		JSValue InterfaceFunctionsJS(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+		{
+			// Interface.functions("X") ou Collectible.functions()
+			const std::string name = InterfaceNameOf(ctx, argc > 0 ? argv[0] : this_val);
+			JSValue arr = JS_NewArray(ctx);
+			uint32_t i = 0;
+			for (const std::string& fn : GetInterfaceFunctions(name))
+				JS_SetPropertyUint32(ctx, arr, i++, JS_NewString(ctx, fn.c_str()));
+			return arr;
+		}
+
+		JSValue InterfaceListJS(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			JSValue arr = JS_NewArray(ctx);
+			uint32_t i = 0;
+			for (const std::string& name : GetInterfaceNames())
+				JS_SetPropertyUint32(ctx, arr, i++, JS_NewString(ctx, name.c_str()));
+			return arr;
+		}
+
 		std::vector<std::string> DeclaredClasses(const std::string& code)
 		{
 			std::vector<std::string> names;
@@ -1857,6 +2223,7 @@ namespace lynx
 			// de l'ancienne version d'Enemy.
 			script_detail::ForgetWidgetClasses(ctx);
 			script_detail::ForgetAIClasses(ctx);
+			ForgetInterfaceClasses(ctx);
 			{
 				JSValue global = JS_GetGlobalObject(ctx);
 
@@ -1953,7 +2320,9 @@ namespace lynx
 					{
 						JSValue cls = JS_GetPropertyStr(ctx, result, n.c_str());
 
-						if (IsActorClass(ctx, cls))
+						if (IsInterfaceClass(ctx, cls))
+							RegisterInterfaceClass(ctx, n, cls, file.path);
+						else if (IsActorClass(ctx, cls))
 							RegisterScriptClass(ctx, n, cls, file.path);
 						else if (script_detail::IsWidgetClassConstructor(ctx, cls))
 							script_detail::RegisterWidgetClass(ctx, n, cls, file.path);
@@ -1996,6 +2365,16 @@ namespace lynx
 
 			g->actor_ctor = g->actor_proto = JS_UNDEFINED;
 			g->fn_is_actor_class = g->fn_static_properties = JS_UNDEFINED;
+
+			for (auto& [name, ctor] : g->interface_classes)
+				JS_FreeValue(ctx, ctor);
+			g->interface_classes.clear();
+			g->class_interfaces.clear();
+			JS_FreeValue(ctx, g->interface_ctor);
+			JS_FreeValue(ctx, g->fn_is_interface_class);
+			JS_FreeValue(ctx, g->fn_interface_info);
+			JS_FreeValue(ctx, g->fn_static_interfaces);
+			g->interface_ctor = g->fn_is_interface_class = g->fn_interface_info = g->fn_static_interfaces = JS_UNDEFINED;
 		}
 
 		void EnsureInit()
@@ -2010,6 +2389,7 @@ namespace lynx
 			RegisterClasses(g->ctx);
 			RegisterGlobals(g->ctx);
 			RegisterActorConstructor(g->ctx);
+			RegisterInterfaceGlobals(g->ctx);
 		}
 
 
@@ -2068,6 +2448,7 @@ namespace lynx
 				JS_FreeValue(g->ctx, inst.lookup);
 			}
 			inst.functions.clear();
+			inst.interfaces.clear();
 			inst.lookup = JS_UNDEFINED;
 			inst.loaded = false;
 		}
@@ -2100,6 +2481,18 @@ namespace lynx
 
 			inst.lookup = lookup;
 			inst.loaded = true;
+
+			// const interfaces = ["Collectible", Damageable] : interfaces du script.
+			{
+				JSValue args[2] = { JS_NewString(g->ctx, "interfaces"), JS_TRUE };
+				JSValue list = JS_Call(g->ctx, inst.lookup, JS_UNDEFINED, 2, args);
+				JS_FreeValue(g->ctx, args[0]);
+				if (JS_IsException(list))
+					JS_FreeValue(g->ctx, JS_GetException(g->ctx));
+				else
+					inst.interfaces = InterfaceNamesOf(g->ctx, list);
+				JS_FreeValue(g->ctx, list);
+			}
 			return true;
 		}
 
@@ -2302,6 +2695,210 @@ namespace lynx
 				}
 			});
 			return last;
+		}
+
+
+		// ====================================================================
+		// Interfaces : messages
+		// ====================================================================
+
+		bool ScriptInstanceImplements(const ScriptInstance& inst, const std::string& name)
+		{
+			if (inst.dead || !inst.loaded)
+				return false;
+			for (const std::string& iface : inst.interfaces)
+				if (InterfaceIsA(iface, name))
+					return true;
+			return false;
+		}
+
+		bool JsImplements(const Actor* a, const std::string& name)
+		{
+			if (!g || !a)
+				return false;
+
+			for (const std::string& iface : ClassInterfaces(a))
+				if (InterfaceIsA(iface, name))
+					return true;
+
+			Impl* impl = ImplOf(const_cast<Actor*>(a));
+			if (!impl)
+				return false;
+
+			for (const auto& inst : impl->instances)
+				if (ScriptInstanceImplements(*inst, name))
+					return true;
+			return false;
+		}
+
+		/**
+		 * Message `fn` cote JS. *last : derniere valeur (a liberer).
+		 * skip_native : la HFUNCTION (propre a l'objet JS) a deja ete appelee.
+		 * use_default : implementation par defaut de l'interface si personne.
+		 */
+		bool CallJsInterface(Actor* a, const std::string& name, const std::string& fn,
+		                     int argc, JSValueConst* argv, JSValue* last, bool skip_native, bool use_default)
+		{
+			*last = JS_UNDEFINED;
+			if (!g || !a || !IsIdentifier(fn.c_str()))
+				return false;
+
+			JSContext* ctx = g->ctx;
+			const uint32_t entity = a->GetEntity();
+			bool found = false;
+
+			// 1. Objet JS de l'acteur : methode de sa classe JS, ou HFUNCTION
+			//    (membre propre de l'objet, voir DefineReflectedMembers).
+			{
+				JSValue obj = GetActorObject(ctx, entity);
+				JSAtom atom = JS_NewAtom(ctx, fn.c_str());
+				const bool own = JS_GetOwnProperty(ctx, nullptr, obj, atom) > 0;
+				JSValue f = JS_GetProperty(ctx, obj, atom);
+				JS_FreeAtom(ctx, atom);
+
+				if (JS_IsFunction(ctx, f) && !(own && skip_native))
+				{
+					++g->call_depth;
+					JSValue r = JS_Call(ctx, f, obj, argc, argv);
+					--g->call_depth;
+
+					if (JS_IsException(r))
+					{
+						LogException(ctx, a->GetTypeName() + "." + fn + " (" + name + ")");
+						r = JS_UNDEFINED;
+					}
+					found = true;
+					*last = r;
+				}
+				JS_FreeValue(ctx, f);
+				JS_FreeValue(ctx, obj);
+			}
+
+			// 2. Scripts attaches qui implementent l'interface (ou n'importe
+			//    lequel si c'est la classe qui l'implemente).
+			if (Impl* impl = ImplOf(ecs::GetActor(entity)))
+			{
+				impl->ForEachInstance([&](ScriptInstance& inst)
+				{
+					JSValue r;
+					if (CallInstance(inst, impl->entity, fn.c_str(), argc, argv, &r))
+					{
+						found = true;
+						if (JS_IsUndefined(r))
+							return;
+						JS_FreeValue(ctx, *last);
+						*last = r;
+					}
+				});
+			}
+
+			// 3. Implementation par defaut (corps de la methode de l'interface JS).
+			if (!found && use_default && ecs::GetActor(entity))
+			{
+				auto it = g->interface_classes.find(name);
+				if (it != g->interface_classes.end())
+				{
+					JSValue proto = JS_GetPropertyStr(ctx, it->second, "prototype");
+					JSValue f = JS_GetPropertyStr(ctx, proto, fn.c_str());
+					JS_FreeValue(ctx, proto);
+
+					if (JS_IsFunction(ctx, f))
+					{
+						JSValue obj = GetActorObject(ctx, entity);
+						++g->call_depth;
+						JSValue r = JS_Call(ctx, f, obj, argc, argv);
+						--g->call_depth;
+						JS_FreeValue(ctx, obj);
+
+						if (JS_IsException(r))
+						{
+							LogException(ctx, name + "." + fn + " (default)");
+							r = JS_UNDEFINED;
+						}
+						found = true;
+						*last = r;
+					}
+					JS_FreeValue(ctx, f);
+				}
+			}
+
+			return found;
+		}
+
+		// actor.implements(Collectible | "Collectible")
+		JSValue ActorImplements(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+		{
+			Actor* a = JSToActor(this_val);
+			if (!a || argc < 1)
+				return JS_FALSE;
+			return JS_NewBool(ctx, a->Implements(InterfaceNameOf(ctx, argv[0])));
+		}
+
+		// actor.send(Collectible, "OnCollected", ...args) : rien si l'acteur
+		// ne l'implemente pas. Retourne la derniere valeur.
+		JSValue ActorSend(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+		{
+			if (argc < 2)
+				return JS_ThrowTypeError(ctx, "send(interface, function, ...args)");
+
+			Actor* a = JSToActor(this_val);
+			if (!a)
+				return JS_UNDEFINED;
+
+			const std::string name = InterfaceNameOf(ctx, argv[0]);
+			const std::string fn = ToStdString(ctx, argv[1]);
+
+			if (name.empty() || !a->Implements(name))
+				return JS_UNDEFINED;
+
+			if (!InterfaceHasFunction(name, fn))
+			{
+				std::cout << kLogPrefix << fn << " is not a function of the interface " << name << std::endl;
+				return JS_UNDEFINED;
+			}
+
+			const uint32_t entity = a->GetEntity();
+			JSValue last = JS_UNDEFINED;
+			bool native = false;
+
+			// Handler C++ (BindInterfaceFunction)
+			if (const InterfaceHandler* handler = a->FindInterfaceHandler(name, fn))
+			{
+				InterfaceArgs args;
+				for (int i = 2; i < argc; ++i)
+					args.push_back(JSToInterfaceArg(ctx, argv[i]));
+
+				const InterfaceHandler copy = *handler;
+				last = InterfaceArgToJS(ctx, copy(args));
+				native = true;
+			}
+
+			Actor* still = ecs::GetActor(entity);
+			JSValue r = JS_UNDEFINED;
+			if (still && CallJsInterface(still, name, fn, argc - 2, argv + 2, &r, native, !native) && !JS_IsUndefined(r))
+			{
+				JS_FreeValue(ctx, last);
+				last = r;
+			}
+			else
+			{
+				JS_FreeValue(ctx, r);
+			}
+
+			RunPendingJobs();
+			return last;
+		}
+
+		// Level.findImplementing(Collectible | "Collectible")
+		JSValue LevelFindImplementing(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			JSValue arr = JS_NewArray(ctx);
+			if (argc < 1)
+				return arr;
+			uint32_t i = 0;
+			for (Actor* a : interfaces::FindImplementing(InterfaceNameOf(ctx, argv[0])))
+				JS_SetPropertyUint32(ctx, arr, i++, ActorToJS(ctx, a));
+			return arr;
 		}
 	}
 
@@ -2569,6 +3166,42 @@ namespace lynx
 			JS_FreeValue(g->ctx, r);
 			JS_FreeValue(g->ctx, args[0]);
 			JS_FreeValue(g->ctx, args[1]);
+			RunPendingJobs();
+			return found;
+		}
+
+		bool ScriptImplements(const Actor* actor, const std::string& name)
+		{
+			return JsImplements(actor, name);
+		}
+
+		bool CallScriptInterface(Actor* actor, const std::string& name, const std::string& function,
+		                         const InterfaceArgs& args, InterfaceArg* result, bool skip_native, bool use_default)
+		{
+			if (result)
+				*result = std::monostate{};
+			if (!actor)
+				return false;
+
+			EnsureInit();
+			JSContext* ctx = g->ctx;
+
+			std::vector<JSValue> js_args;
+			js_args.reserve(args.size());
+			for (const InterfaceArg& a : args)
+				js_args.push_back(InterfaceArgToJS(ctx, a));
+
+			JSValue last = JS_UNDEFINED;
+			const bool found = CallJsInterface(actor, name, function, static_cast<int>(js_args.size()),
+			                                   js_args.empty() ? nullptr : js_args.data(), &last, skip_native, use_default);
+
+			if (result && found)
+				*result = JSToInterfaceArg(ctx, last);
+
+			JS_FreeValue(ctx, last);
+			for (JSValue v : js_args)
+				JS_FreeValue(ctx, v);
+
 			RunPendingJobs();
 			return found;
 		}

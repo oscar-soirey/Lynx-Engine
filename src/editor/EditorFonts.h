@@ -7,10 +7,7 @@
 // current folder :
 //
 //   fonts/VCR-OSD-MONO.ttf              editor (every window, code editors)
-//   fonts/OpenDyslexic-Regular.otf      Lynxie's messages
-//   fonts/OpenDyslexic-Bold.otf         **bold** in Lynxie's messages
-//   fonts/OpenDyslexic-Italic.otf       *italic*
-//   fonts/OpenDyslexic-BoldItalic.otf   ***both***
+//   (Lynxie's messages use the editor font, at the normal size)
 //   fonts/JetBrainsMono-Regular.ttf     code editors (+ -Bold, -Italic,
 //                                       -BoldItalic : keywords, comments)
 //
@@ -37,8 +34,8 @@ namespace lynx::editor::fonts
 	ImFont* LynxieItalic();
 	ImFont* LynxieBoldItalic();
 
-	// Lynxie's regular font at the current size (a bit smaller : OpenDyslexic
-	// is wider than the editor font). Does nothing without the file.
+	// Lynxie's font : none any more (OpenDyslexic dropped), these do nothing
+	// and Lynxie() / LynxieBold()... return nullptr. Kept for the callers.
 	void PushLynxie();
 	void PopLynxie();
 

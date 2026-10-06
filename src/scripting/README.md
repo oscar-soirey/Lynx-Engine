@@ -96,6 +96,57 @@ Si une méthode JS porte le même nom, elle gagne ; la version C++ reste accessi
 `this.callNative("Jump")` (et les propriétés par `getProperty` / `setProperty`).
 Ces membres sont aussi visibles sur tout acteur C++ : `Level.find("Pawn").move_speed_`.
 
+## Interfaces (communication entre classes)
+
+On ne modifie pas directement une variable d'une autre classe (`player.coin += 1` depuis `Coin.js`).
+On lui envoie un **message d'interface**, comme les interfaces d'Unreal : celui qui envoie ne connaît
+pas la classe de celui qui reçoit, et si le receveur n'implémente pas l'interface, il ne se passe rien.
+
+```js
+// Collectible.js : une interface. Les méthodes déclarent les fonctions ;
+// leur corps est l'implémentation par défaut (souvent vide).
+class Collectible extends Interface {
+    OnCollected(item, amount) {}
+}
+
+// Player.js : implémente l'interface.
+class Player extends Humanoid {
+    static interfaces = [Collectible, "Damageable"];   // classe ou nom
+    static properties = { coins: 0 };
+    OnCollected(item, amount) { this.coins += amount; }
+    TakeDamage(amount, instigator) { print("aïe", amount); }
+}
+
+// Coin.js : ne connaît pas Player.
+class Coin extends Actor {
+    OnBeginOverlap(other) {
+        if (!other.implements(Collectible)) return;      // un ennemi, un mur...
+        other.send(Collectible, "OnCollected", this, 1);
+        this.destroy();
+    }
+}
+```
+
+- Un script attaché implémente une interface avec `const interfaces = ["Collectible"];` et une
+  fonction du même nom (`function OnCollected(item, amount) { ... }`).
+- `actor.send(iface, fn, ...args)` : appelle la fonction (C++, classe JS, puis scripts attachés ;
+  sinon l'implémentation par défaut). Retourne la dernière valeur.
+- `actor.implements(iface)`, `Level.findImplementing(iface)`, `Collectible.find()`,
+  `Collectible.broadcast("OnCollected", null, 0)`, `Interface.call(actor, "Collectible", "OnCollected")`,
+  `Interface.list()`, `Collectible.functions()`.
+- Une interface peut hériter d'une autre : `class Pickup extends Collectible { OnPicked() {} }`.
+- Interfaces du moteur : `Damageable` (`TakeDamage(amount, instigator)`) et `Interactable`
+  (`Interact(instigator)`, `CanInteract(instigator)`). C++ : `lynx::ApplyDamage`, `lynx::Interact`.
+- C++ : `ImplementInterface("Collectible")`, `BindInterfaceFunction(...)` ou une `HFUNCTION` du même
+  nom, `lynx::interfaces::Call(actor, "Collectible", "OnCollected", { this, 1 })`
+  (voir `gameplay/Interface.h`).
+
+## Post process
+
+`PostProcess.set("exposure", 0.5)`, `PostProcess.set("tintColor", [1, 0.9, 0.8])`,
+`PostProcess.get("bloomStrength")`, `PostProcess.reset()`, `PostProcess.params()`.
+Les valeurs de départ viennent de `assets/postprocess.json` (fenêtre **Post Process** de l'éditeur).
+
 ## Attacher un script
 
 - Niveau XML : `<Player object_id_="p1" scripts="scripts/Player.js;scripts/Blink.js"/>`
@@ -303,7 +354,7 @@ cam.activate();      // devient la camera de la vue de son joueur
 ```
 
 `offset`, `rotation` (degrés, défaut `(0, -90, 0)`), `fov`, `near`, `far`, `followSpeed`
-(0 = colle à l'acteur), `useCameraShake`, `autoActivate`, `active`, `snap()`.
+(0 = colle à l'acteur), `followDelay` (secondes de retard, 0 = aucun), `useCameraShake`, `autoActivate`, `active`, `snap()`.
 La caméra de l'acteur **possédé** par un `PlayerController` est affichée dans le viewport de
 ce joueur (split-screen : chacun voit par la caméra de son acteur) ; `unpossess` : retour à
 la caméra par défaut du joueur. Un acteur possédé par personne prend la vue du joueur par
@@ -375,7 +426,7 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 ## Acteurs du moteur
 
 `Actor`, `PointLightActor`, `SpotLightActor`, `DirectionalLightActor`, `SkyLightActor`,
-`SpriteActor`, `SoundActor` et `ColliderActor` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
+`SpriteActor`, `SoundActor`, `ColliderActor` et `Humanoid` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
 `Level.spawn("PointLightActor")`, et une classe JS peut en hériter
 (`class Torch extends PointLightActor { ... }`).
 
@@ -387,6 +438,25 @@ bloquant). Mur ou plateforme invisible quand elle bloque, zone quand c'est un tr
 class Checkpoint extends ColliderActor {
     constructor() { super(); this.trigger = true; }
     OnBeginOverlap(other) { if (other.hasTag("player")) print("checkpoint !"); }
+}
+```
+
+`Humanoid` : un personnage qui marche, saute et tombe (collider bloquant, gravité, marches,
+saut variable, double saut). Il ne lit aucun input : c'est sa classe (ou un script, une IA)
+qui appelle `Move(dir)`, `Jump()`, `StopJumping()`, `Launch(x, y)`, `StopMovement()`.
+Requêtes : `IsGrounded()`, `IsFalling()`, `IsFacingRight()`, `GetVelocity()`, `GetJumpCount()`,
+`IsGroundWithinDistance(d)`. Événements : `OnLanded()`, `OnJumped()`. Réglages (propriétés) :
+`collider_size`, `move_speed`, `jump_speed`, `gravity`, `max_fall_speed`, `air_control`,
+`max_jump_count`, `max_step_height`, `face_movement_direction`, `show_collider`...
+
+```js
+class Hero extends Humanoid {
+    ProcessInput(player) {
+        this.Move(Input.axis("MoveRight"));
+        if (Input.pressed("Jump")) this.Jump();
+        if (Input.released("Jump")) this.StopJumping();
+    }
+    OnLanded() { print("boum"); }
 }
 ```
 

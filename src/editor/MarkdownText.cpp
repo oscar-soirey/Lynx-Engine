@@ -36,7 +36,7 @@ namespace lynx::editor::markdown
 		};
 
 		// Fonts : inside Lynxie's font (EditorFonts.h), **bold** / *italic* use
-		// the real OpenDyslexic Bold / Italic files and `code` the editor's mono
+		// Lynxie's Bold / Italic fonts (none since OpenDyslexic was dropped) and `code` the editor's mono
 		// font. Otherwise (or without those files) : the current font, bold
 		// drawn twice with a 1px offset, italic in a dimmer color.
 		ImFont* FontFor(int flags)

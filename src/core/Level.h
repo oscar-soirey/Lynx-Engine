@@ -65,7 +65,55 @@ namespace lynx
 		const std::vector<Actor*>& GetActors() const;
 		int CountActorsOfClass(const char* _className) const;
 
+		/**
+		 * Ecrit le niveau dans assets/<_path> (format XML <Level>). Extension
+		 * normale : ".level" (les anciens .xml se chargent toujours).
+		 */
 		void SaveToFile(const char* _path);
+
+		/**
+		 * Monde voxel lie a ce niveau (.hrlv), relatif au DOSSIER du fichier
+		 * .level (attribut voxels="..." de <Level>). "" : meme nom que le
+		 * niveau avec l'extension .hrlv (voir GetLinkedVoxelWorld).
+		 */
+		std::string voxel_world;
+
+		/** Fichier (relatif a assets/) dont ce niveau a ete charge. */
+		const std::string& GetFilePath() const { return file_path_; }
+
+		// --------------------------------------------------------------------
+		// Fichiers de niveau (.level <-> .hrlv)
+		// --------------------------------------------------------------------
+
+		/** ".level" */
+		static const char* GetExtension();
+
+		/** Extension ".level". */
+		static bool IsLevelFile(const std::string& path);
+
+		/**
+		 * Monde voxel d'un niveau (chemins relatifs a assets/, lu avec lynx::fs) :
+		 * l'attribut voxels du fichier, sinon <meme nom>.hrlv a cote du niveau.
+		 */
+		static std::string GetLinkedVoxelWorld(const std::string& level_path);
+
+		/**
+		 * Niveau de demarrage du jeu : assets/save_file.txt contient le chemin
+		 * d'un .level. Ancien format (save_file.txt = chemin du monde voxel,
+		 * acteurs dans world.xml) : `legacy_voxel_world` recoit ce chemin et le
+		 * niveau retourne est world.level s'il existe, sinon world.xml.
+		 */
+		static std::string ResolveStartupLevel(std::string* legacy_voxel_world = nullptr);
+
+		/**
+		 * Editeur (fichiers sur le disque, chemins reels) : ecrit / remplace
+		 * l'attribut voxels d'un .level. `voxels_relative` : relatif au dossier
+		 * du niveau ("" retire l'attribut).
+		 */
+		static bool SetLinkedVoxelWorldOnDisk(const std::string& level_disk_path, const std::string& voxels_relative);
+
+		/** Editeur : attribut voxels brut d'un .level sur le disque ("" si absent). */
+		static std::string ReadVoxelLinkOnDisk(const std::string& level_disk_path);
 
 		/**
 		 * Folders of the Outliner of the editor (also the empty ones), saved in
@@ -75,6 +123,7 @@ namespace lynx
 
 	private:
 		std::vector<Actor*> actors_;
+		std::string file_path_;
 		std::vector<Actor*> destroy_queue_;
 		std::vector<Actor*> spawn_queue_;
 		int iteration_depth_ = 0;

@@ -2,6 +2,7 @@
 
 #include "core/Engine.h"
 #include "core/Level.h"
+#include "core/PostProcess.h"
 #include "core/Common.h"
 #include "core/Filesystem.h"
 #include "core/Factory.h"
@@ -29,6 +30,8 @@
 #include "gameplay/SoundSourceComponent.h"
 #include "gameplay/LightComponent.h"
 #include "gameplay/EngineActors.h"
+#include "gameplay/Humanoid.h"
+#include "gameplay/Interface.h"
 #include "gameplay/Input.h"
 #include "gameplay/CameraShake.h"
 #include "gameplay/AnimationSystem.h"

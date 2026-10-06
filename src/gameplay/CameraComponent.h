@@ -21,6 +21,7 @@
  */
 
 #include <cstdint>
+#include <vector>
 
 #include "Component.h"
 
@@ -46,6 +47,13 @@ namespace lynx
 
 		/** Lissage du suivi (par seconde). 0 = suit l'acteur exactement. */
 		float follow_speed = 0.f;
+
+		/**
+		 * Retard du suivi (secondes de jeu) : la camera vise la position
+		 * qu'avait l'acteur il y a `follow_delay` secondes (puis follow_speed
+		 * lisse ce mouvement). 0 = aucun retard.
+		 */
+		float follow_delay = 0.f;
 
 		/** Applique lynx::GetCameraShake() (ajoute a la position / au roll). */
 		bool use_camera_shake = true;
@@ -83,8 +91,17 @@ namespace lynx
 		void ApplySettings();
 		void ApplyTransform(float x, float y, float z, float roll);
 
+		/** Position de l'acteur (+ offset) il y a `follow_delay` secondes. */
+		vec3 DelayedTarget(const vec3& target, float dt);
+
 		uint32_t camera_ = 0xFFFFFFFFu;
 		vec3 current_{0.f};
 		bool has_current_ = false;
+
+		// follow_delay : positions passees (temps de jeu, cible), les plus
+		// anciennes d'abord.
+		struct TargetSample { float time; vec3 target; };
+		std::vector<TargetSample> history_;
+		float history_time_ = 0.f;
 	};
 }

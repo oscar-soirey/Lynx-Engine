@@ -977,6 +977,7 @@ namespace lynx::script_detail
 				 .field("near", &CameraComponent::near_plane)
 				 .field("far", &CameraComponent::far_plane)
 				 .field("followSpeed", &CameraComponent::follow_speed)
+				 .field("followDelay", &CameraComponent::follow_delay)
 				 .field("useCameraShake", &CameraComponent::use_camera_shake)
 				 .field("autoActivate", &CameraComponent::auto_activate)
 				 .get("active", [](JSContext* c, CameraComponent& t) { return ToJS(c, t.IsActive()); })

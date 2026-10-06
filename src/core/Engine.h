@@ -73,6 +73,15 @@ namespace lynx
 		void EndGame();
 
 		Level* CreateLevel(const char* file_name);
+
+		/**
+		 * Rebuilds the draw lists of the renderer for the next `frames`
+		 * frames (a temporary sprite mesh is created then deleted : HRL
+		 * refreshes its lists on a mesh deletion). Called after a level load :
+		 * sprites created during the load could stay invisible until the
+		 * next deletion of a mesh.
+		 */
+		void RequestRenderRefresh(int frames = 10);
 		void DeleteCurrentLevel();
 		Level* GetCurrentLevel() const;
 
@@ -85,6 +94,18 @@ namespace lynx
 
 		/** true between StartGame() and EndGame(). */
 		bool IsGameRunning() const { return game_tick_enabled_; }
+
+		/**
+		 * Simulation (editor "Simulate", like Unreal) : the game runs but
+		 * nobody is possessed (auto_possess_player is ignored, no player
+		 * input) and the default player keeps looking through `camera` (the
+		 * host's camera), whatever the CameraComponents ask. Call it before
+		 * StartGame() ; SetSimulating(false) after EndGame().
+		 */
+		void SetSimulating(bool simulating, uint32_t camera = 0xFFFFFFFFu);
+		bool IsSimulating() const { return simulating_; }
+		/** Camera forced on the default player while simulating (0xFFFFFFFF : none). */
+		uint32_t GetSimulationCamera() const { return simulation_camera_; }
 
 		/**
 		 * Size of the render target in pixels (window, or the image of the
@@ -137,6 +158,13 @@ namespace lynx
 	private:
 		//gameplay
 		bool game_tick_enabled_=false;
+
+		// RequestRenderRefresh
+		int render_refresh_frames_ = 0;
+
+		// SetSimulating
+		bool simulating_ = false;
+		uint32_t simulation_camera_ = 0xFFFFFFFFu;
 		// Dilatation "de fond" (ex : menu de selection). Ne change que par
 		// SetGlobalTimeDilatation(float), jamais par un hit-stop.
 		float base_time_dilatation_ = 1.f;

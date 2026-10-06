@@ -9,6 +9,7 @@
 #include "Object.h"
 #include "Component.h"
 #include "Components.h"
+#include "Interface.h"
 #include "../core/data/EventDispatcher.h"
 
 namespace lynx
@@ -80,6 +81,32 @@ namespace lynx
 		 * nullptr : un voxel. `normal` : direction qui repousse cet acteur.
 		 */
 		virtual void OnHit(Actor* other, const vec3& normal);
+
+		// ====================================================================
+		// Interfaces (voir Interface.h)
+		// ====================================================================
+
+		/** Cet acteur implemente l'interface `name` (C++). */
+		void ImplementInterface(const std::string& name);
+
+		/**
+		 * Implementation C++ d'une fonction d'interface (implemente aussi
+		 * l'interface). Sans handler, une HFUNCTION du meme nom est appelee.
+		 */
+		void BindInterfaceFunction(const std::string& name, const std::string& function, InterfaceHandler handler);
+
+		/** C++, classe JS ou script attache (heritage d'interfaces compris). */
+		bool Implements(const std::string& name) const;
+
+		/** Interfaces declarees en C++ par cet acteur. */
+		const std::vector<std::string>& GetNativeInterfaces() const { return interfaces_; }
+
+		/** lynx::interfaces::Call(this, ...) */
+		bool CallInterface(const std::string& name, const std::string& function,
+		                   const InterfaceArgs& args = {}, InterfaceArg* result = nullptr);
+
+		/** Handler C++ de `function` (nullptr si aucun). Moteur. */
+		const InterfaceHandler* FindInterfaceHandler(const std::string& name, const std::string& function) const;
 
 		/** Joueur qui possede cet acteur (nullptr = aucun). */
 		PlayerController* GetController() const { return controller_; }
@@ -164,5 +191,9 @@ namespace lynx
 
 		// auto_possess_player deja traite pour cette partie (Engine).
 		bool auto_possess_done_ = false;
+
+		// Interfaces C++ (ImplementInterface) et handlers ("Interface.Fonction").
+		std::vector<std::string> interfaces_;
+		std::vector<std::pair<std::string, InterfaceHandler>> interface_handlers_;
 	};
 }

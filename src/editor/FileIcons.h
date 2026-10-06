@@ -25,7 +25,7 @@ namespace lynx::editor::file_icons
 		Python,
 		Cpp,
 		Data,           // .json
-		Level,          // .xml, .hrlv
+		Level,          // .level, .xml, .hrlv
 		Image,
 		Sound,
 		Font,

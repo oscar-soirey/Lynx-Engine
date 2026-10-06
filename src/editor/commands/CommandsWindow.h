@@ -20,5 +20,6 @@ namespace lynx::editor::commands_window
 
 	// Next Draw : the window comes to the front on the Lynxie tab
 	// (the caller opens the window itself).
-	void ShowLynxie();
+	// Brings the Commands window to the front on the Lynxie tab (for `frames` frames).
+	void ShowLynxie(int frames = 1);
 }

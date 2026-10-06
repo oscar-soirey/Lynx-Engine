@@ -1,26 +1,10 @@
 obligé:
 
-revenir a la police d'ecriture normale pour Lynxie
-
-ajouter un menu contextuel dans windows (dans un folder): ouvrir avec Lynx
-
-class Humanoid fonctionel (herite de actor), s'inspirer de Pawn pour les deplacements, ne pas implementer par contre la gestion des input, juste le mouvement
-
-gestion de la musique pour les jeux open world
-
-assossier un level.xml à un .hrlv (pour qu'ils soient liés)
-
-pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>
-
-mode simulation (pour play le jeu, mais ne pas posseder l'actor et rester avec la camera et deplacements de l'editeur
-
 projets sans C++, ou on ne compile pas, on charge tout depuis une dll déja buildée
 
-options de post process (juste editer les valeurs du post process courant, réfere toi a l'api de HRL pour savoir tout ce qu'on peut changer ou pose moi la question)
+publier le moteur sur microsoft store/steam/et autres
 
-casts en javascript (je sais pas si c'est possible), pour genre avoir un ecosysteme entre les classes javascript, genre faire dans coin.js : "player.coin += 1;" alors que coin est une variable qui apartient a la classe Player dans player.js. Enfaite ne permet pas de faire ca, par contre fais un systeme d'evenements comme les interfaces d'unreal, je veux que le moteur soit basé sur ca.
-
-quand lynx echoue le script, il ne doit pas etre affichée, l'erreur ne doit pas etre affichée, elle doit echouer en silence, et continuer d'essayer
+parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
 
 
@@ -30,6 +14,8 @@ plus tard:
 
 Lynxie doit absolument pouvoir chercher sur internet
 
+pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>
+
 
 
 
@@ -37,8 +23,6 @@ Lynxie doit absolument pouvoir chercher sur internet
 kiffe:
 
 component d'objets 3D
-
-on peut choisir en haut a droite du viewport de se deplacer en camera 2D (comme elle est aujourdhui) ou en 3D (comme dans unreal engine par exemple)
 
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
 

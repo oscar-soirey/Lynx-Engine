@@ -1,4 +1,5 @@
 #include "EngineActors.h"
+#include "Humanoid.h"
 
 #include "SoundSourceComponent.h"
 #include "../core/Engine.h"
@@ -111,6 +112,7 @@ namespace lynx
 				{ "SpriteActor", { EngineActorIcon::Sprite } },
 				{ "SoundActor", { EngineActorIcon::Sound } },
 				{ "ColliderActor", { EngineActorIcon::Collider } },
+				{ "Humanoid", { EngineActorIcon::Actor } },
 			};
 			return classes;
 		}
@@ -485,6 +487,7 @@ namespace lynx
 		factory.RegisterObject("SpriteActor", []() -> Object* { return new SpriteActor(); });
 		factory.RegisterObject("SoundActor", []() -> Object* { return new SoundActor(); });
 		factory.RegisterObject("ColliderActor", []() -> Object* { return new ColliderActor(); });
+		factory.RegisterObject("Humanoid", []() -> Object* { return new Humanoid(); });
 
 		for (const auto& [name, info] : EngineClasses())
 			factory.MarkBuiltin(name.c_str());

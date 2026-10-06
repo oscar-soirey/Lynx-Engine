@@ -493,30 +493,21 @@ int main(int argc, char** argv)
 
 
     // ------------------------------------------------------------
-    // World : assets/save_file.txt -> path of the voxel world in assets/
+    // Level : assets/save_file.txt -> startup .level, which is linked to its
+    // voxel world (.hrlv). Old projects : save_file.txt = voxel world and
+    // the actors in world.xml (see Level::ResolveStartupLevel).
     // ------------------------------------------------------------
 
-    auto save_file =
-        lynx::fs::ReadBinary(
-            "save_file.txt"
-        );
+    std::string legacy_voxel_world;
+    const std::string level_file =
+        lynx::Level::ResolveStartupLevel(&legacy_voxel_world);
 
-    std::string world_path(
-        reinterpret_cast<const char*>(save_file.data()),
-        save_file.size()
-    );
+    const std::string world_path =
+        legacy_voxel_world.empty()
+            ? lynx::Level::GetLinkedVoxelWorld(level_file)
+            : legacy_voxel_world;
 
-    while (!world_path.empty() &&
-           (world_path.back() == '\n' ||
-            world_path.back() == '\r' ||
-            world_path.back() == ' ' ||
-            world_path.back() == '\t'))
-    {
-        world_path.pop_back();
-    }
-
-    if (world_path.empty())
-        world_path = "world.vox";
+    std::cout << "[WORLD] Level " << level_file << ", voxel world " << world_path << "\n";
 
     const auto world_file =
         lynx::fs::ReadBinary(
@@ -548,7 +539,7 @@ int main(int argc, char** argv)
 
 
     engine->CreateLevel(
-        "world.xml"
+        level_file.c_str()
     );
 
 
@@ -585,29 +576,9 @@ int main(int argc, char** argv)
     );
 
 
-    HRL_id post_mat =
-        HRL_CreateMaterial(
-            HRL_DEFAULT_POST_PROCESS_SHADER
-        );
-
-    HRL_MaterialSetFloat(
-        post_mat,
-        "vignetteStrength",
-        0.4f
-    );
-
-    // Same post process on the viewport of every player, also the ones the
-    // game creates later (Engine::CreatePlayer).
-    auto add_post_process = [post_mat](lynx::PlayerController* player)
-    {
-        if (player && player->GetViewportBackend() != HRL_INVALID_ID)
-            HRL_CreatePostProcess(player->GetViewportBackend(), post_mat, 1);
-    };
-
-    for (lynx::PlayerController* player : engine->GetPlayers())
-        add_post_process(player);
-
-    engine->ED_player_created.Subscribe(add_post_process);
+    // Post process of every player (HRL default shader). Its settings come
+    // from assets/postprocess.json (editor : Windows > Post Process).
+    lynx::postprocess::Install();
 
 
     HRL_BeginVoxelEdit(scene);

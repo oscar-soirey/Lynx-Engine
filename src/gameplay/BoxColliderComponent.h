@@ -96,6 +96,13 @@ namespace lynx
 		/** Un voxel bloquant (voxel_flags) touche la boite. */
 		bool OverlapsVoxels() const;
 
+		/**
+		 * La boite deplacee de `delta` (sans bouger l'acteur, sans OnHit)
+		 * serait-elle bloquee (voxels / colliders bloquants compatibles) ?
+		 * Toujours false pour un trigger. Sondes de sol, de plafond, marches...
+		 */
+		bool IsBlockedAt(const vec3& delta) const;
+
 		// ---------------------------------------------------------------
 		// Deplacement
 		// ---------------------------------------------------------------
