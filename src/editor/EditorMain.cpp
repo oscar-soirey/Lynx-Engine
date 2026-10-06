@@ -73,6 +73,8 @@
 #include "commands/CommandUtils.h"
 #include "commands/CommandsWindow.h"
 #include "OutputConsole.h"
+#include "EditorOptions.h"
+#include "ExternalIde.h"
 #include "ProjectTemplates.h"
 #include "LynxieIcon.h"
 #include "EditorIcons.h"
@@ -125,6 +127,7 @@ struct EditorWindowVisibility
 };
 
 static EditorWindowVisibility editorWindows;
+static bool showEditorOptions = false;   // Options window (not saved)
 
 static void LoadEditorWindowVisibility()
 {
@@ -331,6 +334,8 @@ static std::string world_file_path_string;
 // Set by InitImGui : BeginImGuiFrame checks imgui.ini before its first frame.
 static bool default_dock_layout_check = false;
 
+static void DrawProjectSettingsPage();
+
 void InitImGui(GLFWwindow* window)
 {
     IMGUI_CHECKVERSION();
@@ -350,7 +355,9 @@ void InitImGui(GLFWwindow* window)
     // for Lynxie (see EditorFonts.h).
     lynx::editor::fonts::Load(24.0f);
 
-    ImGui::StyleColorsDark();
+    // Theme and UI scale : the user's options (Options window).
+    lynx::editor::options::Init();
+    lynx::editor::options::SetProjectPage(DrawProjectSettingsPage);
 
     ImGui_ImplGlfw_InitForOpenGL(
         window,
@@ -465,9 +472,17 @@ void BeginImGuiFrame()
             !ImGuiIniHasDockLayout(ImGui::GetIO().IniFilename);
     }
 
+    lynx::editor::options::ApplyPending();   // theme / scale changed last frame
+
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    // Tab is the Paint / Select shortcut : no widget is a tab stop, so ImGui
+    // never moves the focus to a slider (which turned it into a text field and
+    // blocked the shortcut). Text editors that type Tab still get it.
+    // Popped in EndImGuiFrame.
+    ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
 
     // Main dockspace: every editor panel can be docked/rearranged by ImGui.
     const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
@@ -491,6 +506,7 @@ void EndImGuiFrame()
 {
     LYNX_PROFILE_SCOPE("ImGui render");
 
+    ImGui::PopItemFlag();   // NoTabStop (BeginImGuiFrame)
     ImGui::Render();
 
     ImGui_ImplOpenGL3_RenderDrawData(
@@ -3578,7 +3594,7 @@ static const char* VoxelRenderModeName(HRL_EVoxelRenderMode mode)
 // is proportional to the camera height (far = faster, close = slower).
 // Voxel units (1 = 1 voxel) : the editor sees from ~20 to ~1000 voxels across.
 constexpr float kCameraMinZ = 20.f;
-constexpr float kCameraMaxZ = 3000.f;
+constexpr float kCameraMaxZ = 1000.f;
 constexpr float kCameraSpeedRefZ = 200.f;
 
 static float ClampCameraZ(float z)
@@ -4303,6 +4319,129 @@ static void ShowEditorWarning(const std::string& text)
 #include "EditorCommands.inl"
 
 
+// Project page of the Options window (settings.cfg of the project).
+static void DrawProjectSettingsPage()
+{
+    ImGui::SeparatorText("Game DLL");
+
+    if (ImGui::Checkbox(
+            "Reload the game after \"Compile\"",
+            &appSettings.reloadAfterBuild
+        ))
+    {
+        SaveSettings();
+    }
+
+    if (ImGui::Checkbox(
+            "Reload the game when its DLL is rebuilt",
+            &appSettings.autoReloadOnChange
+        ))
+    {
+        SaveSettings();
+    }
+
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Build.bat or CLion rebuilt build/<game>.dll while the editor runs.\n"
+            "While playing, the reload waits for Stop."
+        );
+    }
+
+    ImGui::SeparatorText("Display");
+
+    if (ImGui::Checkbox(
+            "VSync",
+            &appSettings.vsync
+        ))
+    {
+        ApplyRuntimeSettings(nullptr);
+        glfwSwapInterval(
+            appSettings.vsync ? 1 : 0
+        );
+        SaveSettings();
+    }
+
+    ImGui::SeparatorText("Audio");
+
+    if (ImGui::SliderFloat(
+            "Master volume",
+            &appSettings.masterVolume,
+            0.f,
+            2.f,
+            "%.2f"
+        ))
+    {
+        lynx::SetMasterVolume(
+            appSettings.masterVolume
+        );
+        SaveSettings();
+    }
+
+    ImGui::SeparatorText("Editor camera");
+
+    if (ImGui::SliderFloat(
+            "Camera speed",
+            &appSettings.cameraSpeed,
+            1.f,
+            400.f,
+            "%.0f"
+        ))
+    {
+        cameraSpeed = appSettings.cameraSpeed;
+        SaveSettings();
+    }
+
+    ImGui::SeparatorText("Voxels");
+
+    int voxelMode =
+        static_cast<int>(appSettings.voxelRenderMode);
+
+    const char* voxelModes[] =
+    {
+        "Flat",
+        "Smooth",
+        "Blocky"
+    };
+
+    if (ImGui::Combo(
+            "Render mode",
+            &voxelMode,
+            voxelModes,
+            IM_ARRAYSIZE(voxelModes)
+        ))
+    {
+        appSettings.voxelRenderMode =
+            static_cast<HRL_EVoxelRenderMode>(voxelMode);
+
+        HRL_SetVoxelRenderMode(
+            scene,
+            appSettings.voxelRenderMode
+        );
+
+        SaveSettings();
+    }
+
+    ImGui::TextDisabled("Units : 1 = 1 voxel (positions, sizes, speeds)");
+
+    ImGui::Spacing();
+
+    if (ImGui::Button("Reset project settings"))
+    {
+        appSettings = AppSettings{};
+        cameraSpeed = appSettings.cameraSpeed;
+
+        ApplyRuntimeSettings(
+            ImGui::GetCurrentContext()
+                ? glfwGetCurrentContext()
+                : nullptr
+        );
+
+        SaveSettings();
+    }
+
+}
+
 // Top bar. Every button has a keyboard shortcut that keeps working.
 static void DrawToolbar()
 {
@@ -4475,6 +4614,38 @@ static void DrawToolbar()
             );
         }
 
+        // Open with : the game folder (project root, not src/) in a code editor.
+        ImGui::SameLine();
+
+        if (lynx::editor::icons::ButtonWithLabel("Open with", lynx::editor::icons::Icon::FileCode))
+            ImGui::OpenPopup("OpenWithPopup");
+        tooltip("Open the game folder in Visual Studio, VS Code or CLion");
+
+        if (ImGui::BeginPopup("OpenWithPopup"))
+        {
+            namespace ide = lynx::editor::external_ide;
+            const std::filesystem::path game_folder =
+                currentProject.root.empty() ? std::filesystem::current_path() : currentProject.root;
+
+            ImGui::TextDisabled("Open the game folder with");
+            ImGui::Separator();
+
+            for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+            {
+                const auto which = static_cast<ide::Ide>(i);
+                if (ImGui::Selectable(ide::Name(which)))
+                {
+                    std::string error;
+                    if (!ide::Open(which, game_folder, error))
+                        ShowEditorWarning(error);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("%s", game_folder.string().c_str());
+            ImGui::EndPopup();
+        }
+
         // Build state / DLL rebuilt outside the editor.
         {
             const std::string build_status = lynx::editor::game_build::ToolbarStatus();
@@ -4519,142 +4690,11 @@ static void DrawToolbar()
         ImGui::SameLine();
 
 
-        // -----------------------------------------------------------------
-        // Settings
-        // -----------------------------------------------------------------
+        // Options : interface (theme, scale), project settings, plugins.
         ImGui::SameLine();
-
-        if (lynx::editor::icons::Button("Settings", lynx::editor::icons::Icon::Settings))
-            ImGui::OpenPopup("SettingsPopup");
-
-        if (ImGui::BeginPopup("SettingsPopup"))
-        {
-            ImGui::TextDisabled("Application settings");
-            ImGui::Separator();
-
-            if (ImGui::Checkbox(
-                    "Reload the game after \"Compile\"",
-                    &appSettings.reloadAfterBuild
-                ))
-            {
-                SaveSettings();
-            }
-
-            if (ImGui::Checkbox(
-                    "Reload the game when its DLL is rebuilt",
-                    &appSettings.autoReloadOnChange
-                ))
-            {
-                SaveSettings();
-            }
-
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip(
-                    "Build.bat or CLion rebuilt build/<game>.dll while the editor runs.\n"
-                    "While playing, the reload waits for Stop."
-                );
-            }
-
-            ImGui::Separator();
-
-            if (ImGui::Checkbox(
-                    "VSync",
-                    &appSettings.vsync
-                ))
-            {
-                ApplyRuntimeSettings(nullptr);
-                glfwSwapInterval(
-                    appSettings.vsync ? 1 : 0
-                );
-                SaveSettings();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Audio");
-
-            if (ImGui::SliderFloat(
-                    "Master volume",
-                    &appSettings.masterVolume,
-                    0.f,
-                    2.f,
-                    "%.2f"
-                ))
-            {
-                lynx::SetMasterVolume(
-                    appSettings.masterVolume
-                );
-                SaveSettings();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Editor");
-
-            if (ImGui::SliderFloat(
-                    "Camera speed",
-                    &appSettings.cameraSpeed,
-                    1.f,
-                    400.f,
-                    "%.0f"
-                ))
-            {
-                cameraSpeed = appSettings.cameraSpeed;
-                SaveSettings();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Voxels");
-
-            int voxelMode =
-                static_cast<int>(appSettings.voxelRenderMode);
-
-            const char* voxelModes[] =
-            {
-                "Flat",
-                "Smooth",
-                "Blocky"
-            };
-
-            if (ImGui::Combo(
-                    "Render mode",
-                    &voxelMode,
-                    voxelModes,
-                    IM_ARRAYSIZE(voxelModes)
-                ))
-            {
-                appSettings.voxelRenderMode =
-                    static_cast<HRL_EVoxelRenderMode>(voxelMode);
-
-                HRL_SetVoxelRenderMode(
-                    scene,
-                    appSettings.voxelRenderMode
-                );
-
-                SaveSettings();
-            }
-
-            ImGui::TextDisabled("Units : 1 = 1 voxel (positions, sizes, speeds)");
-
-            ImGui::Separator();
-
-            if (ImGui::Button("Reset to defaults"))
-            {
-                appSettings = AppSettings{};
-                cameraSpeed = appSettings.cameraSpeed;
-
-                ApplyRuntimeSettings(
-                    ImGui::GetCurrentContext()
-                        ? glfwGetCurrentContext()
-                        : nullptr
-                );
-
-                SaveSettings();
-            }
-
-            ImGui::EndPopup();
-        }
-
-        tooltip("Application settings");
+        if (lynx::editor::icons::ButtonWithLabel("Options", lynx::editor::icons::Icon::Settings, lynx::editor::icons::kThemeTint, showEditorOptions))
+            showEditorOptions = !showEditorOptions;
+        tooltip("Options : interface, project settings, plugins");
 
         ImGui::SameLine();
 
@@ -7243,101 +7283,88 @@ namespace editor
 
 
         // --------------------------------------------------------
-        // Brush Mode
+        // Brush Mode : two big tiles with an icon (Tab switches)
         // --------------------------------------------------------
 
-        ImGui::Text(
-            "Brush Mode"
-        );
-
-        ImGui::TextDisabled(
-            "Tab = switch mode"
-        );
-
-
-        if (ImGui::Button("Paint"))
         {
-            brushPaintEnabled = true;
-        }
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float avail = ImGui::GetContentRegionAvail().x;
+            const float tile_w = std::max(70.f, (avail - style.ItemSpacing.x) * 0.5f);
+            const float tile_h = std::floor(ImGui::GetFontSize() * 3.2f);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
 
+            // 0 : paint (brush), 1 : select (arrow)
+            auto tile = [&](int kind, const char* label, const char* help, bool active) -> bool
+            {
+                ImGui::PushID(kind);
+                const ImVec2 p0 = ImGui::GetCursorScreenPos();
+                const bool clicked = ImGui::InvisibleButton("##mode", ImVec2(tile_w, tile_h));
+                const bool hovered = ImGui::IsItemHovered();
+                const ImVec2 p1(p0.x + tile_w, p0.y + tile_h);
+                const float r = 6.f;
+
+                const ImU32 bg = active ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+                                        : hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+                                                  : ImGui::GetColorU32(ImGuiCol_Button);
+                dl->AddRectFilled(p0, p1, bg, r);
+                dl->AddRect(p0, p1, active ? IM_COL32(240, 160, 40, 255) : ImGui::GetColorU32(ImGuiCol_Border), r, 0,
+                            active ? 2.5f : 1.f);
+
+                // Icon (pixel style) on the left, label + help on the right
+                const float u = std::floor(tile_h / 16.f);   // one "pixel"
+                const ImVec2 icon(p0.x + u * 3.f, p0.y + (tile_h - u * 10.f) * 0.5f);
+                const ImU32 ink = IM_COL32(28, 24, 22, 255);
+                auto px = [&](int x, int y, ImU32 c)
+                {
+                    dl->AddRectFilled(ImVec2(icon.x + x * u, icon.y + y * u), ImVec2(icon.x + (x + 1) * u, icon.y + (y + 1) * u), c);
+                };
+                if (kind == 0)
+                {
+                    // brush : handle (wood), ferrule (grey), bristles (color of the voxel type)
+                    ImU32 tip = IM_COL32(230, 90, 70, 255);
+                    if (const lynx::voxels::VoxelType* t = lynx::voxels::GetType(static_cast<uint8_t>(brushVoxelType)))
+                        tip = ImGui::ColorConvertFloat4ToU32(ImVec4(t->color[0], t->color[1], t->color[2], 1.f));
+                    for (int i = 0; i < 5; ++i) { px(9 - i, i, IM_COL32(170, 110, 60, 255)); px(10 - i, i, ink); }
+                    for (int i = 0; i < 2; ++i) { px(4 - i, 5 + i, IM_COL32(160, 160, 170, 255)); px(5 - i, 5 + i, IM_COL32(110, 110, 120, 255)); }
+                    px(1, 7, tip); px(2, 7, tip); px(1, 8, tip); px(0, 9, tip); px(2, 8, ink); px(0, 8, ink);
+                }
+                else
+                {
+                    // arrow cursor
+                    static const char* arrow[] = {
+                        "X.......", "XX......", "XWX.....", "XWWX....", "XWWWX...",
+                        "XWWWWX..", "XWWXXX..", "XX.XWX..", "X...XWX.", ".....XX.",
+                    };
+                    for (int y = 0; y < 10; ++y)
+                        for (int x = 0; x < 8; ++x)
+                        {
+                            if (arrow[y][x] == 'X') px(x + 1, y, ink);
+                            else if (arrow[y][x] == 'W') px(x + 1, y, IM_COL32(250, 248, 240, 255));
+                        }
+                }
+
+                const float tx = p0.x + u * 15.f;
+                const float line = ImGui::GetTextLineHeight();
+                dl->AddText(ImVec2(tx, p0.y + tile_h * 0.5f - line), ImGui::GetColorU32(ImGuiCol_Text), label);
+                dl->AddText(ImVec2(tx, p0.y + tile_h * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), help);
+                if (hovered)
+                    ImGui::SetTooltip("%s  (Tab : switch)", label);
+                ImGui::PopID();
+                return clicked;
+            };
+
+            ImGui::SeparatorText("Mode");
+            if (tile(0, "Paint", "draw voxels", brushPaintEnabled))
+                brushPaintEnabled = true;
+            ImGui::SameLine();
+            if (tile(1, "Select", "pick actors", !brushPaintEnabled))
+                brushPaintEnabled = false;
+            ImGui::TextDisabled("Tab : switch mode");
+        }
 
         if (brushPaintEnabled)
         {
-            ImVec2 min =
-                ImGui::GetItemRectMin();
-
-
-            ImVec2 max =
-                ImGui::GetItemRectMax();
-
-
-            ImGui::GetWindowDrawList()->AddRect(
-                ImVec2(
-                    min.x - 2.f,
-                    min.y - 2.f
-                ),
-                ImVec2(
-                    max.x + 2.f,
-                    max.y + 2.f
-                ),
-                IM_COL32(
-                    255,
-                    255,
-                    255,
-                    255
-                ),
-                2.f,
-                0,
-                2.f
-            );
-        }
-
-
-        ImGui::SameLine();
-
-
-        if (ImGui::Button(
-                "No Painting"
-            ))
-        {
-            brushPaintEnabled = false;
-        }
-
-
-        if (!brushPaintEnabled)
-        {
-            ImVec2 min =
-                ImGui::GetItemRectMin();
-
-
-            ImVec2 max =
-                ImGui::GetItemRectMax();
-
-
-            ImGui::GetWindowDrawList()->AddRect(
-                ImVec2(
-                    min.x - 2.f,
-                    min.y - 2.f
-                ),
-                ImVec2(
-                    max.x + 2.f,
-                    max.y + 2.f
-                ),
-                IM_COL32(
-                    255,
-                    255,
-                    255,
-                    255
-                ),
-                2.f,
-                0,
-                2.f
-            );
-        }
-
-
-        if (brushPaintEnabled)
-        {
+            ImGui::SeparatorText("Brush");
             ImGui::SliderInt(
                 "Brush Radius",
                 &brushRadius,
@@ -7348,8 +7375,6 @@ namespace editor
             // ----------------------------------------------------
             // Brush shapes
             // ----------------------------------------------------
-
-            ImGui::Text("Brush");
 
             struct BrushShapeButton
             {
@@ -7484,10 +7509,15 @@ namespace editor
                     static_cast<int>(brushButton.shape)
                 );
 
-                const ImVec2 buttonSize(52.f, 52.f);
+                const ImVec2 buttonSize(44.f, 44.f);
 
+                // wrap to the next line when the window is too narrow
                 if (i > 0)
-                    ImGui::SameLine();
+                {
+                    const float next = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + buttonSize.x;
+                    if (next < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
+                        ImGui::SameLine();
+                }
 
                 const ImVec2 cursor = ImGui::GetCursorScreenPos();
 
@@ -7503,10 +7533,11 @@ namespace editor
                 ImDrawList* drawList =
                     ImGui::GetWindowDrawList();
 
+                const bool selected_shape = brushShape == brushButton.shape;
                 const ImU32 background =
-                    hovered
-                        ? IM_COL32(70, 70, 70, 255)
-                        : IM_COL32(45, 45, 45, 255);
+                    selected_shape ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+                    : hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+                              : IM_COL32(60, 58, 66, 255);
 
                 drawList->AddRectFilled(
                     cursor,
@@ -7541,7 +7572,7 @@ namespace editor
                         cursor.y + buttonSize.y - 1.f
                     ),
                     selected
-                        ? IM_COL32(255, 255, 255, 255)
+                        ? IM_COL32(240, 160, 40, 255)
                         : IM_COL32(90, 90, 90, 255),
                     4.f,
                     0,
@@ -7579,9 +7610,7 @@ namespace editor
             );
 
 
-            ImGui::Text(
-                "Voxel Type"
-            );
+            ImGui::SeparatorText("Voxel Type");
 
 
             // ----------------------------------------------------
@@ -7727,6 +7756,8 @@ namespace editor
             if (was_open != editorWindows.profiler)
                 SaveEditorWindowVisibility();
         }
+
+        lynx::editor::options::Draw(&showEditorOptions);
 
         // Output of the editor (stdout / stderr, the Windows console is disabled).
         {
@@ -9273,16 +9304,6 @@ int main(int argc, char** argv)
 
         engine->ProgressOneFrame(dt);
 
-
-        // --------------------------------------------------------
-        // Gameplay camera (moved by the game : follow, shake...)
-        // --------------------------------------------------------
-
-        if (gameHooks.update_gameplay_camera)
-        {
-            LYNX_PROFILE_SCOPE("Game camera");
-            gameHooks.update_gameplay_camera(gameplay_cam, dt);
-        }
 
 
         // --------------------------------------------------------

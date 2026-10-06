@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "../../core/Common.h"   // vec3
+
 namespace lynx
 {
 	class Actor;
@@ -42,10 +44,16 @@ namespace lynx::scripting
 
 	/**
 	 * Appelle `function(other)` dans les scripts de `self` (ex : evenements
-	 * OnBeginOverlap de BoxColliderComponent). `other` peut etre nullptr.
+	 * OnBeginOverlap de ColliderComponent). `other` peut etre nullptr.
 	 * @return true si au moins un script definissait la fonction.
 	 */
 	bool CallActorEvent(Actor* self, const char* function, Actor* other);
+
+	/**
+	 * OnHit(other, normal) dans la classe JS / les scripts de `self` (contact
+	 * bloquant d'un ColliderComponent). `other` : nullptr pour un voxel.
+	 */
+	bool CallActorHitEvent(Actor* self, Actor* other, const vec3& normal);
 
 
 	// ---- Joueurs et widgets (GameplayBindings.cpp) -------------------------

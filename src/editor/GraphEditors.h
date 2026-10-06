@@ -6,11 +6,17 @@
 // One window per open file, docked next to the Viewport (like the Widget
 // Editor). Content Browser : double-click, or New file > Anim Graph / Behavior Tree.
 //
-// Anim Graph (state machine of an AnimationSpriteComponent, Unreal-like) :
+// Anim Graph (pose graph of an AnimationSpriteComponent, Unreal-like) : it
+// starts from the output. Three levels (double-click to go down, Backspace /
+// the path at the top of the graph to go up) :
+//   AnimGraph      [Animation | Blend Space | State Machine] -> [Output Pose]
+//   State machine  Entry -> Idle <-> Walk -> Jump ; Any State -> Hurt
+//   State          [Animation | Blend Space] -> [Output Pose]
 //   +-------------+------------------------------------+-------------+
-//   | Parameters  |  Entry -> Idle <-> Walk -> Jump     |  Details    |
-//   | Animations  |  Any State -> Hurt                  |  (state or  |
-//   | Blend spaces|  drag a pin to make a transition    |  transition)|
+//   | Graph       |  AnimGraph > Locomotion > Idle      |  Details    |
+//   | Parameters  |                                     |  (node,     |
+//   | Animations  |  drag a pin : link / transition     |  state,     |
+//   | Blend spaces|  drag an animation of the left : node| transition)|
 //   +-------------+------------------------------------+-------------+
 //
 // Behavior Tree (AI component) :

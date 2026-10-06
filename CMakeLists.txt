@@ -147,6 +147,8 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/GameBuild.cpp
 		src/editor/StartupBuild.cpp
 		src/editor/OutputConsole.cpp
+		src/editor/EditorOptions.cpp
+		src/editor/ExternalIde.cpp
 		src/editor/ProjectTemplates.cpp
 		src/editor/LynxieIcon.cpp
 		src/editor/EditorIcons.cpp

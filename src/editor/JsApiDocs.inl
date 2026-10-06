@@ -42,8 +42,9 @@ static const ApiEntry kApiEntries[] = {
 	{ "@lifecycle", "BeginPlay", "BeginPlay()", "Called when the game starts (or when the actor is spawned while it runs).", "", true },
 	{ "@lifecycle", "Update", "Update(dt)", "Called every game tick. dt : seconds since the last tick.", "", true },
 	{ "@lifecycle", "EndPlay", "EndPlay()", "Called when the game stops, the script is removed or the actor is destroyed.", "", true },
-	{ "@lifecycle", "OnBeginOverlap", "OnBeginOverlap(other)", "A BoxCollider of the actor starts overlapping another actor.", "", true },
-	{ "@lifecycle", "OnEndOverlap", "OnEndOverlap(other)", "A BoxCollider of the actor stops overlapping another actor.", "", true },
+	{ "@lifecycle", "OnBeginOverlap", "OnBeginOverlap(other)", "A Collider of the actor starts overlapping another actor.", "", true },
+	{ "@lifecycle", "OnEndOverlap", "OnEndOverlap(other)", "A Collider of the actor stops overlapping another actor.", "", true },
+	{ "@lifecycle", "OnHit", "OnHit(other, normal)", "Blocking contact of a Collider (moving against a wall / another solid collider). other : null for a voxel ; normal {x, y, z} pushes this actor away.", "", true },
 	{ "@lifecycle", "OnPossessed", "OnPossessed(player)", "A player possesses this actor.", "", true },
 	{ "@lifecycle", "OnUnpossessed", "OnUnpossessed(player)", "The player releases this actor.", "", true },
 	{ "@lifecycle", "ProcessInput", "ProcessInput(player)", "Every game frame, only while the actor is possessed.", "", true },
@@ -121,7 +122,7 @@ static const ApiEntry kApiEntries[] = {
 	{ "Actor", "call", "call(name, ...args)", "Calls a function of the scripts / class of this actor.", "", true },
 	{ "Actor", "callNative", "callNative(name, ...args)", "Calls the C++ function (HFUNCTION) even if a JS method has the same name.", "", true },
 	{ "Actor", "destroy", "destroy()", "Destroys the actor at the end of the frame.", "", true },
-	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, BoxCollider, SoundSource, Light, Velocity, Lifetime, AI.", "Component:0", true },
+	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, Collider, SoundSource, Light, Velocity, Lifetime, AI.", "Component:0", true },
 	{ "Actor", "getComponent", "getComponent(type)", "The component of this type (or null).", "Component:0", true },
 	{ "Actor", "hasComponent", "hasComponent(type)", "The actor has a component of this type.", "", true },
 	{ "Actor", "removeComponent", "removeComponent(type)", "Removes the component (EndPlay is called).", "", true },
@@ -204,27 +205,31 @@ static const ApiEntry kApiEntries[] = {
 	{ "Camera", "far", "far : number", "", "", false },
 	{ "Camera", "followSpeed", "followSpeed : number", "0 : sticks to the actor.", "", false },
 	{ "Camera", "useCameraShake", "useCameraShake : boolean", "", "", false },
-	{ "Camera", "autoActivate", "autoActivate : boolean", "Becomes the view when the game starts.", "", false },
+	{ "Camera", "autoActivate", "autoActivate : boolean", "Actor possessed by nobody : becomes the view of the default player when the game starts. (The camera of a possessed actor is always the view of its player.)", "", false },
 	{ "Camera", "active", "active : boolean", "", "", false },
 	{ "Camera", "activate", "activate()", "Becomes the camera of the view.", "", true },
 	{ "Camera", "activateFor", "activateFor(player)", "Becomes the view of this player.", "", true },
 	{ "Camera", "snap", "snap()", "Jumps to its target (no smoothing).", "", true },
 
-	// BoxCollider
-	{ "BoxCollider", "size", "size : {x, y}", "", "Vec2", false },
-	{ "BoxCollider", "offset", "offset : Vec3", "", "Vec3", false },
-	{ "BoxCollider", "trigger", "trigger : boolean", "A trigger never blocks.", "", false },
-	{ "BoxCollider", "layer", "layer : number", "Two boxes interact if a.layer & b.mask and b.layer & a.mask.", "", false },
-	{ "BoxCollider", "mask", "mask : number", "", "", false },
-	{ "BoxCollider", "collideWithVoxels", "collideWithVoxels : boolean", "", "", false },
-	{ "BoxCollider", "voxelFlags", "voxelFlags : string[]", "Blocking voxels (default : solid voxels).", "Array", false },
-	{ "BoxCollider", "debugDraw", "debugDraw : boolean", "", "", false },
-	{ "BoxCollider", "moveAndCollide", "moveAndCollide(delta)", "Moves the actor, stopping against voxels and boxes. Result : {blockedX, blockedY, ...}.", "", true },
-	{ "BoxCollider", "onBeginOverlap", "onBeginOverlap(fn)", "fn(other) when another actor starts overlapping.", "", true },
-	{ "BoxCollider", "onEndOverlap", "onEndOverlap(fn)", "", "", true },
-	{ "BoxCollider", "overlapping", "overlapping()", "Actors overlapping the box.", "Array", true },
-	{ "BoxCollider", "overlapsVoxels", "overlapsVoxels()", "", "", true },
-	{ "BoxCollider", "isOverlapping", "isOverlapping(actor)", "", "", true },
+	// Collider (old name : BoxCollider)
+	{ "Collider", "size", "size : {x, y}", "", "Vec2", false },
+	{ "Collider", "offset", "offset : Vec3", "", "Vec3", false },
+	{ "Collider", "trigger", "trigger : boolean", "A trigger never blocks.", "", false },
+	{ "Collider", "layer", "layer : number", "Two boxes interact if a.layer & b.mask and b.layer & a.mask.", "", false },
+	{ "Collider", "mask", "mask : number", "", "", false },
+	{ "Collider", "collideWithVoxels", "collideWithVoxels : boolean", "", "", false },
+	{ "Collider", "voxelFlags", "voxelFlags : string[]", "Blocking voxels (default : solid voxels).", "Array", false },
+	{ "Collider", "debugDraw", "debugDraw : boolean", "", "", false },
+	{ "Collider", "movable", "movable : boolean", "Pushed out of the blocking colliders it overlaps (false : a wall that never moves).", "", false },
+	{ "Collider", "generateOverlapEvents", "generateOverlapEvents : boolean", "OnBeginOverlap / OnEndOverlap (false : never).", "", false },
+	{ "Collider", "onHit", "onHit(fn)", "fn(other, normal) on a blocking contact (other : null for a voxel).", "", true },
+	{ "Collider", "resolvePenetration", "resolvePenetration()", "Moves the actor out of the blocking colliders it overlaps (done every tick when movable).", "", true },
+	{ "Collider", "moveAndCollide", "moveAndCollide(delta)", "Moves the actor, stopping against voxels and boxes. Result : {blockedX, blockedY, ...}.", "", true },
+	{ "Collider", "onBeginOverlap", "onBeginOverlap(fn)", "fn(other) when another actor starts overlapping.", "", true },
+	{ "Collider", "onEndOverlap", "onEndOverlap(fn)", "", "", true },
+	{ "Collider", "overlapping", "overlapping()", "Actors overlapping the box.", "Array", true },
+	{ "Collider", "overlapsVoxels", "overlapsVoxels()", "", "", true },
+	{ "Collider", "isOverlapping", "isOverlapping(actor)", "", "", true },
 
 	// SoundSource
 	{ "SoundSource", "sound", "sound : string", "Sound file (path in the assets).", "", false },
@@ -337,7 +342,7 @@ static const ApiEntry kApiEntries[] = {
 
 // Types of component (addComponent("...")).
 static const char* const kComponentTypes[] = {
-	"StaticSprite", "AnimationSprite", "Camera", "BoxCollider", "SoundSource", "Light", "Velocity", "Lifetime", "AI",
+	"StaticSprite", "AnimationSprite", "Camera", "Collider", "SoundSource", "Light", "Velocity", "Lifetime", "AI",
 };
 
 // JavaScript built-ins, when the scripting context can't be read.
@@ -351,7 +356,7 @@ static const char* const kBuiltinGlobals[] = {
 	"decodeURIComponent", "escape", "unescape", "eval", "queueMicrotask", "structuredClone",
 	"print", "console", "vec3", "vec2", "Level", "Input", "Engine", "UI", "BT", "Actor", "UserWidget", "BTTask",
 	"BTDecorator", "BTService", "PointLightActor", "SpotLightActor", "DirectionalLightActor", "SkyLightActor",
-	"SpriteActor", "SoundActor",
+	"SpriteActor", "SoundActor", "ColliderActor",
 };
 
 // Members of every object (Object.prototype).

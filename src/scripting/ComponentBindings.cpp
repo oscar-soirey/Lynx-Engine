@@ -338,8 +338,10 @@ namespace lynx::script_detail
 			return methods;
 		}
 
-		const TypeBinding* FindType(const std::string& name)
+		const TypeBinding* FindType(const std::string& asked)
 		{
+			// Anciens noms
+			const std::string name = asked == "BoxCollider" ? std::string("Collider") : asked;
 			for (const TypeBinding& t : Types())
 			{
 				if (t.name == name)
@@ -988,14 +990,16 @@ namespace lynx::script_detail
 				 .action("snap", [](CameraComponent& t) { t.SnapToTarget(); });
 			}
 
-			// ---------------- BoxCollider ----------------
+			// ---------------- Collider (ancien nom : BoxCollider) ----------------
 			{
-				using BC = BoxColliderComponent;
-				Binder<BC> b(ctx, "BoxCollider");
+				using BC = ColliderComponent;
+				Binder<BC> b(ctx, "Collider");
 
 				b.field("size", &BC::size)
 				 .field("offset", &BC::offset)
 				 .field("trigger", &BC::trigger)
+				 .field("movable", &BC::movable)
+				 .field("generateOverlapEvents", &BC::generate_overlap_events)
 				 .field("layer", &BC::layer)
 				 .field("mask", &BC::mask)
 				 .field("collideWithVoxels", &BC::collide_with_voxels)
@@ -1089,6 +1093,37 @@ namespace lynx::script_detail
 					};
 
 					return JS_UNDEFINED;
+				})
+				// onHit((other, normal) => ...) : contact bloquant (other : null pour un voxel)
+				.method("onHit", 1, [](JSContext* c, BC& t, Actor& a, int argc, JSValueConst* argv) -> JSValue
+				{
+					if (argc < 1 || !JS_IsFunction(c, argv[0]))
+					{
+						t.on_hit = nullptr;
+						return JS_UNDEFINED;
+					}
+
+					JsRef ref = MakeRef(c, argv[0], a.GetEntity());
+
+					t.on_hit = [ref](BC* other, const vec3& normal)
+					{
+						JSContext* ctx = Context();
+
+						if (!ctx)
+							return;
+
+						JSValue args[2] = { ActorObject(ctx, other ? other->GetOwner() : nullptr), ToJS(ctx, normal) };
+						JSValue r = CallRef(ref, 2, args);
+						JS_FreeValue(ctx, r);
+						JS_FreeValue(ctx, args[0]);
+						JS_FreeValue(ctx, args[1]);
+					};
+
+					return JS_UNDEFINED;
+				})
+				.method("resolvePenetration", 0, [](JSContext* c, BC& t, Actor&, int, JSValueConst*) -> JSValue
+				{
+					return ToJS(c, t.ResolvePenetration());
 				})
 				.method("onEndOverlap", 1, [](JSContext* c, BC& t, Actor& a, int argc, JSValueConst* argv) -> JSValue
 				{

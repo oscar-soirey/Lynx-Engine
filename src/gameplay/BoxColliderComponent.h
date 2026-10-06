@@ -1,21 +1,32 @@
 #pragma once
 
 /**
- * Boite de collision 2D (axes alignes) qui suit l'acteur.
+ * Collider : boite de collision 2D (axes alignes) qui suit l'acteur.
  *
- *     auto& box = actor->AddComponent<lynx::BoxColliderComponent>();
+ *     auto& box = actor->AddComponent<lynx::ColliderComponent>();
  *     box.size = {1.f, 2.f};
- *     box.on_begin_overlap = [](lynx::BoxColliderComponent& other) { ... };
+ *     box.trigger = true;      // chevauchement seulement (ne bloque pas)
  *
- *     // deplacement qui s'arrete contre les voxels pleins / les boites bloquantes
- *     const lynx::vec3 moved = box.MoveAndCollide({vx * dt, vy * dt, 0.f});
+ * Deux usages :
+ *   - CHEVAUCHEMENT (overlap) : quand deux colliders se mettent a se
+ *     chevaucher / se separent, chaque acteur recoit
+ *         virtual void OnBeginOverlap(Actor* other)   (C++, voir Actor.h)
+ *         virtual void OnEndOverlap(Actor* other)
+ *     et en JS OnBeginOverlap(other) / OnEndOverlap(other) (methodes de la
+ *     classe JS ou fonctions des scripts attaches), plus on_begin_overlap /
+ *     on_end_overlap ici.
+ *   - BLOCAGE (pas trigger) : un collider bloquant arrete les autres colliders
+ *     bloquants et les voxels pleins. Le deplacement passe par
+ *     MoveAndCollide(), et la vitesse (VelocityComponent, actor.velocity en JS)
+ *     aussi : l'acteur glisse contre les murs, la vitesse s'annule sur l'axe
+ *     bloque. Un contact donne OnHit(Actor* other, normal) aux DEUX acteurs
+ *     (other = nullptr : un voxel), JS : OnHit(other, normal).
+ *     Un collider "movable" qui se retrouve dans un collider bloquant (teleport,
+ *     spawn, l'autre qui avance) en est repousse ; movable = false : mur fixe.
  *
- * Evenements (pendant le jeu) : on_begin_overlap / on_end_overlap en C++, et les
- * fonctions OnBeginOverlap(other) / OnEndOverlap(other) des scripts de l'acteur.
- *
- * Filtrage : deux boites interagissent si (a.layer & b.mask) et (b.layer & a.mask).
- * Une boite "trigger" ne bloque jamais (evenements seulement).
+ * Filtrage : deux colliders interagissent si (a.layer & b.mask) et (b.layer & a.mask).
  * Unites : monde (comme transform.location). Taille multipliee par |scale|.
+ * JS : "Collider" (ancien nom accepte : "BoxCollider").
  */
 
 #include <cstdint>
@@ -26,7 +37,7 @@
 
 namespace lynx
 {
-	class LYNX_API BoxColliderComponent : public Component
+	class LYNX_API ColliderComponent : public Component
 	{
 	public:
 		/** Taille (monde, avant la scale de l'acteur). */
@@ -37,6 +48,15 @@ namespace lynx
 
 		/** Evenements de chevauchement seulement, ne bloque jamais. */
 		bool trigger = false;
+
+		/**
+		 * Repousse hors des colliders bloquants qu'il chevauche (dans Tick).
+		 * false : ne bouge jamais tout seul (mur, plateforme, ColliderActor).
+		 */
+		bool movable = true;
+
+		/** OnBeginOverlap / OnEndOverlap (false : jamais, ex : un mur). */
+		bool generate_overlap_events = true;
 
 		uint32_t layer = 1u;
 		uint32_t mask = 0xFFFFFFFFu;
@@ -53,8 +73,10 @@ namespace lynx
 		/** Dessine la boite (aussi dans l'editeur). */
 		bool debug_draw = false;
 
-		std::function<void(BoxColliderComponent& other)> on_begin_overlap;
-		std::function<void(BoxColliderComponent& other)> on_end_overlap;
+		std::function<void(ColliderComponent& other)> on_begin_overlap;
+		std::function<void(ColliderComponent& other)> on_end_overlap;
+		/** Contact bloquant : other = nullptr pour un voxel ; normal : vers cet acteur. */
+		std::function<void(ColliderComponent* other, const vec3& normal)> on_hit;
 
 		// ---------------------------------------------------------------
 		// Requetes
@@ -64,12 +86,12 @@ namespace lynx
 		void GetWorldBox(float& center_x, float& center_y, float& width, float& height) const;
 
 		/** Les boites (des autres acteurs) qui chevauchent celle-ci. */
-		std::vector<BoxColliderComponent*> GetOverlapping() const;
+		std::vector<ColliderComponent*> GetOverlapping() const;
 
-		bool IsOverlapping(const BoxColliderComponent& other) const;
+		bool IsOverlapping(const ColliderComponent& other) const;
 
 		/** true si les filtres layer / mask des deux boites se correspondent. */
-		bool CanInteractWith(const BoxColliderComponent& other) const;
+		bool CanInteractWith(const ColliderComponent& other) const;
 
 		/** Un voxel bloquant (voxel_flags) touche la boite. */
 		bool OverlapsVoxels() const;
@@ -89,13 +111,22 @@ namespace lynx
 		bool WasBlockedX() const { return blocked_x_; }
 		bool WasBlockedY() const { return blocked_y_; }
 
+		/**
+		 * Sort des colliders bloquants chevauches (le plus court chemin, X ou Y).
+		 * Appele chaque tick pour les colliders movable.
+		 * @return true si l'acteur a ete deplace.
+		 */
+		bool ResolvePenetration();
+
 	protected:
 		void Update(float dt) override;
 		void Tick(float dt) override;
 		void EndPlay() override;
 
 	private:
-		bool BlockedAt(float center_x, float center_y, float width, float height) const;
+		/** `by` : le collider qui bloque (nullptr + `voxel` : un voxel). */
+		bool BlockedAt(float center_x, float center_y, float width, float height,
+		               ColliderComponent** by = nullptr, bool* voxel = nullptr) const;
 
 		// Boites chevauchees au tick precedent (entites, jamais de pointeurs).
 		std::vector<uint32_t> overlapping_;
@@ -103,4 +134,7 @@ namespace lynx
 		bool blocked_x_ = false;
 		bool blocked_y_ = false;
 	};
+
+	/** Ancien nom (C++). */
+	using BoxColliderComponent = ColliderComponent;
 }

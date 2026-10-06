@@ -55,12 +55,13 @@ namespace lynx
 		if (possessed_actor_ == a)
 			scripting::CallPlayerEvent(a, "OnPossessed", this);
 
-		// The camera of the actor becomes the view. Before BeginPlay the
-		// component does it itself (CameraComponent::BeginPlay).
+		// The camera of the possessed actor is the view of this player (its
+		// viewport). Before BeginPlay the component does it itself
+		// (CameraComponent::BeginPlay).
 		if (possessed_actor_ == a)
 		{
 			if (auto* camera = a->GetComponent<CameraComponent>();
-				camera && camera->auto_activate && camera->HasBegunPlay())
+				camera && camera->HasBegunPlay())
 			{
 				camera->ActivateFor(this);
 			}
@@ -76,7 +77,14 @@ namespace lynx
 		possessed_actor_ = nullptr;
 		a->controller_ = nullptr;
 
-		// The view stays where it is (like Unreal) until another one is chosen.
+		// The camera of the released actor stops being the view : back to the
+		// default camera of the player (Possess of another actor gives its own).
+		if (auto* camera = a->GetComponent<CameraComponent>();
+			camera && view_camera_ == camera->GetCameraId())
+		{
+			SetViewCamera(HRL_INVALID_ID);
+		}
+
 		a->OnUnpossessed(this);
 		scripting::CallPlayerEvent(a, "OnUnpossessed", this);
 	}

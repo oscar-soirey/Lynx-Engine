@@ -481,6 +481,18 @@ namespace lynx
 	{
 	}
 
+	void Actor::OnBeginOverlap(Actor*)
+	{
+	}
+
+	void Actor::OnEndOverlap(Actor*)
+	{
+	}
+
+	void Actor::OnHit(Actor*, const vec3&)
+	{
+	}
+
 
 	// ---- Composants --------------------------------------------------------
 

@@ -110,6 +110,7 @@ namespace lynx
 				{ "SkyLightActor", { EngineActorIcon::SkyLight } },
 				{ "SpriteActor", { EngineActorIcon::Sprite } },
 				{ "SoundActor", { EngineActorIcon::Sound } },
+				{ "ColliderActor", { EngineActorIcon::Collider } },
 			};
 			return classes;
 		}
@@ -408,6 +409,62 @@ namespace lynx
 
 
 	// ========================================================================
+	// ColliderActor
+	// ========================================================================
+
+	ColliderActor::ColliderActor()
+	{
+		HPROPERTY(size, Exposed);
+		HPROPERTY(trigger, Exposed);
+		HPROPERTY(movable, Exposed);
+		HPROPERTY(generate_overlap_events, Exposed);
+		HPROPERTY(layer, Exposed);
+		HPROPERTY(mask, Exposed);
+		HPROPERTY(show_in_game, Exposed);
+	}
+
+	void ColliderActor::Init()
+	{
+		Actor::Init();
+		collider_ = &AddComponent<ColliderComponent>();
+		if (EditorDecorations())
+			AddComponent<EditorIconComponent>(EngineActorIcon::Collider);
+		Update(0.0);
+	}
+
+	void ColliderActor::Update(double dt)
+	{
+		Actor::Update(dt);
+
+		if (!collider_)
+			return;
+
+		collider_->size = size;
+		collider_->trigger = trigger;
+		collider_->movable = movable;
+		collider_->generate_overlap_events = generate_overlap_events;
+		collider_->layer = static_cast<uint32_t>(layer);
+		collider_->mask = static_cast<uint32_t>(mask);
+		// The box : always in the editor, in the game when asked.
+		collider_->debug_draw = playing_ ? show_in_game : EditorDecorations();
+	}
+
+	void ColliderActor::StartGame()
+	{
+		Actor::StartGame();
+		playing_ = true;
+		Update(0.0);
+	}
+
+	void ColliderActor::EndGame()
+	{
+		Actor::EndGame();
+		playing_ = false;
+		Update(0.0);
+	}
+
+
+	// ========================================================================
 	// Factory
 	// ========================================================================
 
@@ -427,6 +484,7 @@ namespace lynx
 		factory.RegisterObject("SkyLightActor", []() -> Object* { return new SkyLightActor(); });
 		factory.RegisterObject("SpriteActor", []() -> Object* { return new SpriteActor(); });
 		factory.RegisterObject("SoundActor", []() -> Object* { return new SoundActor(); });
+		factory.RegisterObject("ColliderActor", []() -> Object* { return new ColliderActor(); });
 
 		for (const auto& [name, info] : EngineClasses())
 			factory.MarkBuiltin(name.c_str());

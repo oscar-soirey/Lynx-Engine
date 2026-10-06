@@ -1136,7 +1136,7 @@ namespace lynx
 			const vec3 move = delta * (step / dist);
 
 			const vec3 before = owner->transform.location;
-			if (auto* box = owner->GetComponent<BoxColliderComponent>())
+			if (auto* box = owner->GetComponent<ColliderComponent>())
 				box->MoveAndCollide(move);
 			else
 				owner->transform.location += move;

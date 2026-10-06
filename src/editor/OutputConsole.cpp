@@ -1,5 +1,6 @@
 #include "OutputConsole.h"
 #include "EditorIcons.h"
+#include "TextSelection.h"
 
 #include <imgui/imgui.h>
 #include <hrl/hrl.h>
@@ -394,35 +395,46 @@ namespace lynx::editor::output_console
 			return filter.empty() || Lower(line.text).find(filter) != std::string::npos;
 		};
 
-		auto draw_line = [](const Line& line)
+		// Selectable text (drag, double-click : a word, Ctrl+C, Ctrl+A, right
+		// click : Copy). Every visible line is recorded ; only the ones in the
+		// view are drawn (a Dummy keeps the place of the others).
+		text_selection::Begin("##ConsoleSelection");
+		const float line_h = ImGui::GetTextLineHeightWithSpacing();
+		const float view_top = ImGui::GetScrollY() - line_h;
+		const float view_bottom = ImGui::GetScrollY() + ImGui::GetWindowHeight() + line_h;
+
+		auto draw_line = [&](const Line& line)
 		{
+			const ImVec2 local = ImGui::GetCursorPos();
+			const ImVec2 screen = ImGui::GetCursorScreenPos();
+			if (local.y < view_top || local.y > view_bottom)
+			{
+				ImGui::Dummy(ImVec2(1.f, ImGui::GetTextLineHeight()));
+				text_selection::Record(ImGui::GetFont(), ImGui::GetFontSize(), screen, line.text.c_str());
+				return;
+			}
 			if (line.kind == Kind::Error)
-				ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f), "%s", line.text.c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
 			else if (line.kind == Kind::Warning)
-				ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.f), "%s", line.text.c_str());
-			else
-				ImGui::TextUnformatted(line.text.c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.f));
+			ImGui::TextUnformatted(line.text.c_str());
+			if (line.kind != Kind::Normal)
+				ImGui::PopStyleColor();
+			text_selection::Record(ImGui::GetFont(), ImGui::GetFontSize(), screen, line.text.c_str());
 		};
 
-		if (filtered)
-		{
-			for (const Line& line : g_lines)
-				if (visible(line))
-					draw_line(line);
-		}
-		else
-		{
-			ImGuiListClipper clipper;
-			clipper.Begin(static_cast<int>(g_lines.size()));
-			while (clipper.Step())
-				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-					draw_line(g_lines[static_cast<size_t>(i)]);
-		}
+		for (const Line& line : g_lines)
+			if (!filtered || visible(line))
+				draw_line(line);
+
+		text_selection::End();
 
 		if (g_lines.empty())
 			ImGui::TextDisabled("Editor output (printf, std::cout, errors...) appears here.");
 
-		if (g_scroll && g_auto_scroll)
+		// No auto-scroll while text is selected (the selection would run away).
+		const char* selected = text_selection::GetSelectedText();
+		if (g_scroll && g_auto_scroll && !(selected && *selected))
 			ImGui::SetScrollHereY(1.f);
 		g_scroll = false;
 

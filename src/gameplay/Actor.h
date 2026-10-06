@@ -67,6 +67,20 @@ namespace lynx
 		/** Appele quand le joueur le relache (Unpossess, autre acteur, fin du jeu...). */
 		virtual void OnUnpossessed(PlayerController* pc);
 
+		// ====================================================================
+		// Collisions (ColliderComponent, voir BoxColliderComponent.h)
+		// ====================================================================
+
+		/** Un collider de cet acteur commence a chevaucher celui de `other`. */
+		virtual void OnBeginOverlap(Actor* other);
+		/** ... ne le chevauche plus (`other` peut etre en train d'etre detruit). */
+		virtual void OnEndOverlap(Actor* other);
+		/**
+		 * Contact bloquant (l'un des deux avance contre l'autre). `other` =
+		 * nullptr : un voxel. `normal` : direction qui repousse cet acteur.
+		 */
+		virtual void OnHit(Actor* other, const vec3& normal);
+
 		/** Joueur qui possede cet acteur (nullptr = aucun). */
 		PlayerController* GetController() const { return controller_; }
 		bool IsPossessed() const { return controller_ != nullptr; }

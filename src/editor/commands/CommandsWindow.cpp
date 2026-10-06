@@ -66,6 +66,7 @@ namespace lynx::editor::commands_window
 			std::string status = "Ollama local server : not checked";
 			std::string generated_code;
 			std::vector<std::pair<std::string, std::string>> conversation;
+			bool hidden_exchange = false;   // the current request is a silent auto-fix
 			std::vector<Json> messages;
 			std::string model;               // model of the last request (auto-fix uses it)
 			std::string last_request;        // last request typed by the user (context of the fixes)
@@ -1123,8 +1124,10 @@ namespace lynx::editor::commands_window
 		// resolution...) : the user's request, not the text of an error.
 		// `speaker` : how the message appears in the chat ("You", or "Lynx" for the
 		// reports the editor sends by itself : script errors, script outputs).
+		// `hidden` : nothing of this exchange appears in the conversation (the
+		// silent auto-fix of a failed script) ; the model still gets everything.
 		void StartChatRequest(const std::string& model, const std::string& prompt, const std::string& display = {},
-		                      const std::string& context_request = {}, const char* speaker = "You")
+		                      const std::string& context_request = {}, const char* speaker = "You", bool hidden = false)
 		{
 			if (g_local_ai.busy || model.empty() || prompt.empty())
 				return;
@@ -1135,7 +1138,9 @@ namespace lynx::editor::commands_window
 			if (context_request.empty())
 				g_local_ai.last_request = prompt;
 			g_local_ai.messages.push_back({ {"role", "user"}, {"content", prompt} });
-			g_local_ai.conversation.emplace_back(speaker, display.empty() ? prompt : display);
+			if (!hidden)
+				g_local_ai.conversation.emplace_back(speaker, display.empty() ? prompt : display);
+			g_local_ai.hidden_exchange = hidden;
 
 			const std::string system = BuildSystemPrompt(context_request.empty() ? prompt : context_request);
 
@@ -1201,7 +1206,8 @@ namespace lynx::editor::commands_window
 				{
 					// The chat shows the explanation only ; the code goes to the
 					// generated script editor below (the history keeps everything).
-					g_local_ai.conversation.emplace_back("Lynxie", StripCodeBlocks(file_edits::StripBlocks(answer)));
+					if (!g_local_ai.hidden_exchange)
+						g_local_ai.conversation.emplace_back("Lynxie", StripCodeBlocks(file_edits::StripBlocks(answer)));
 					g_local_ai.messages.push_back({ {"role", "assistant"}, {"content", answer} });
 					// A plain answer (question, explanation) keeps the previous script.
 					if (std::string code = ExtractPython(answer); !code.empty())
@@ -1210,7 +1216,7 @@ namespace lynx::editor::commands_window
 				else if (!g_local_ai.messages.empty() && Field(g_local_ai.messages.back(), "role", std::string()) == "user")
 				{
 					g_local_ai.messages.pop_back();
-					if (!g_local_ai.conversation.empty()) g_local_ai.conversation.pop_back();
+					if (!g_local_ai.hidden_exchange && !g_local_ai.conversation.empty()) g_local_ai.conversation.pop_back();
 				}
 				g_local_ai.is_model_result = false;
 				g_local_ai.done = true;
@@ -1319,32 +1325,25 @@ namespace lynx::editor::commands_window
 		void HandleAttemptFailure(int exit_code, const std::string& reason, bool edit = false,
 		                          const std::string& details = {})
 		{
-			const char* what = edit ? "The file edit was refused" : "The script failed";
+			// Silent : no error in the conversation. The changes are already
+			// undone ; Lynxie gets the error and tries again, as long as
+			// "Auto-fix" is on (untick it, or send a new message, to stop).
+			// The full output stays in Commands > Scripts.
 			const int attempt = g_ai_run.attempt;
-			const bool retry = g_ai_run.auto_fix && attempt < g_ai_run.max_attempts && !g_local_ai.model.empty();
+			const bool retry = g_ai_run.auto_fix && !g_local_ai.model.empty();
 
 			if (!retry)
 			{
-				std::string tail = reason;
-				if (tail.size() > 600)
-					tail = "..." + tail.substr(tail.size() - 600);
-				ChatNote("[Error] " + std::string(what) +
-				         std::string(attempt > 1 ? " after " + std::to_string(attempt) + " attempts" : "") +
-				         (edit ? " ; no file was changed.\n" : " ; its changes were undone.\n") + tail);
-				g_local_ai.status = "The script failed. See Commands > Scripts for the full output.";
+				g_local_ai.status.clear();
 				return;
 			}
 
-			ChatNote("[Error] " + std::string(what) + " (attempt " + std::to_string(attempt) + "/" +
-			         std::to_string(g_ai_run.max_attempts) + "), " + (edit ? "nothing written" : "changes undone") +
-			         ". Lynxie is fixing it...\n" + TailLines(reason, 4));
-
 			g_ai_run.waiting_fix = true;
 			g_ai_run.attempt = attempt + 1;
+			g_local_ai.status = "Lynxie is working on it...";
 			StartChatRequest(g_local_ai.model, edit ? BuildEditFixMessage(reason, details) : BuildFixMessage(exit_code, reason),
-			                 edit ? "(refused edit sent to Lynxie)" : "(script error output sent to Lynxie)",
-			                 g_local_ai.last_request.empty() ? std::string("(script fix)") : g_local_ai.last_request,
-			                 "Lynx");
+			                 {}, g_local_ai.last_request.empty() ? std::string("(script fix)") : g_local_ai.last_request,
+			                 "Lynx", true);
 
 			if (!g_local_ai.busy)   // could not start the request
 				g_ai_run.waiting_fix = false;
@@ -1459,8 +1458,7 @@ namespace lynx::editor::commands_window
 			}
 
 			const std::string tail = TailLines(output, 6);
-			ChatNote("[OK] Script ran without errors" +
-			         std::string(g_ai_run.attempt > 1 ? " (attempt " + std::to_string(g_ai_run.attempt) + ")." : ".") +
+			ChatNote("[OK] Script ran without errors." +
 			         (tail.empty() ? std::string() : "\n" + tail));
 			g_local_ai.status = "Script done. Ctrl+Z undoes it.";
 
@@ -1550,8 +1548,9 @@ namespace lynx::editor::commands_window
 			const bool has_edits = !g_local_ai.edits.empty();
 			if (!has_edits && !g_local_ai.answer_has_code)
 			{
+				// A fix without code : asked again, silently.
 				if (kind == AnswerKind::Fix)
-					ChatNote("Lynxie did not send a correction.");
+					HandleAttemptFailure(1, "Your answer had no python block. Send the COMPLETE corrected script.");
 				return;   // plain answer (question, explanation)
 			}
 
@@ -1579,12 +1578,11 @@ namespace lynx::editor::commands_window
 
 			if (script_runner::IsRunning())
 			{
-				ChatNote("[Error] Another script is already running ; this one was not started.");
-				return;
+				return;   // another script runs : this one is dropped, silently
 			}
 
 			if (!RunAiScript(code, g_ai_run.attempt))
-				ChatNote("[Error] " + g_local_ai.status);
+				HandleAttemptFailure(1, g_local_ai.status);
 		}
 
 		// Commands used by tools/lynxie_eval (same prompt as the chat).
@@ -2448,14 +2446,9 @@ namespace lynx::editor::commands_window
 
 			ImGui::Checkbox("Auto-fix errors", &g_ai_run.auto_fix);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("If the script fails : its changes are undone, the error goes back to Lynxie, "
-				                  "and the corrected script runs again.");
-			if (g_ai_run.auto_fix)
-			{
-				ImGui::SameLine();
-				ImGui::SetNextItemWidth(ImGui::CalcTextSize("0 tries").x + ImGui::GetFrameHeight() * 2.f);
-				ImGui::SliderInt("##AiAttempts", &g_ai_run.max_attempts, 2, 5, "%d tries");
-			}
+				ImGui::SetTooltip("If the script fails : its changes are undone and Lynxie silently corrects it "
+				                  "and tries again, until it works (no error in the conversation ; the output of "
+				                  "every run is in Commands > Scripts). Untick to stop.");
 			ImGui::SameLine();
 			ImGui::TextDisabled("Scripts run automatically");
 			if (ImGui::IsItemHovered())

@@ -1,4 +1,5 @@
 #include "Components.h"
+#include "BoxColliderComponent.h"
 
 #include "Actor.h"
 #include "../core/Engine.h"
@@ -39,7 +40,22 @@ namespace lynx
 		if (!owner)
 			return;
 
-		owner->transform.location += linear * dt;
+		// Avec un collider bloquant : le deplacement s'arrete contre les murs
+		// (et la vitesse s'annule sur l'axe bloque, comme un objet physique).
+		ColliderComponent* box = owner->GetComponent<ColliderComponent>();
+		if (box && !box->trigger)
+		{
+			box->MoveAndCollide(linear * dt);
+			owner = GetOwner();   // OnHit peut avoir tout change
+			if (!owner)
+				return;
+			if (box->WasBlockedX())
+				linear.x = 0.f;
+			if (box->WasBlockedY())
+				linear.y = 0.f;
+		}
+		else
+			owner->transform.location += linear * dt;
 		owner->transform.rotation += angular * dt;
 
 		if (damping > 0.f)

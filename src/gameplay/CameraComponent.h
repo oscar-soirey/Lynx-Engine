@@ -1,21 +1,23 @@
 #pragma once
 
 /**
- * Camera qui suit l'acteur.
+ * Camera of an actor : the view of the player who possesses the actor.
  *
  *     auto& cam = player->AddComponent<lynx::CameraComponent>();
  *     cam.offset = {0.f, 2.f, 80.f};
- *     cam.follow_speed = 3.f;          // 0 = colle a l'acteur
+ *     cam.follow_speed = 3.f;          // 0 = stuck to the actor
  *
- * Au lancement du jeu (BeginPlay), une camera avec auto_activate devient la
- * vue du joueur qui possede l'acteur (PlayerController), ou du joueur par
- * defaut si l'acteur n'est possede par personne. Un acteur possede pendant le
- * jeu donne aussi sa camera au joueur. Activate() la choisit a tout moment ;
- * la derniere activee gagne. A l'arret du jeu, l'hote (editeur / runtime)
- * reprend sa camera.
+ * The camera is handled by the engine, not by the game's main : when a
+ * PlayerController possesses the actor (Possess, auto_possess_player), the
+ * camera of the actor is shown in the viewport of that player (split-screen :
+ * each player sees through the camera of its own actor). Unpossess : the
+ * player goes back to its default camera.
  *
- * Si le jeu deplace deja sa camera avec LynxGame_UpdateGameplayCamera,
- * utiliser l'un ou l'autre (sinon la camera shake avance deux fois par frame).
+ * An actor possessed by nobody : with auto_activate, its camera becomes the
+ * view of the default player, unless that player already sees through the
+ * camera of the actor it possesses. Activate() / ActivateFor() choose a camera
+ * at any time (the last one wins). When the game stops, the host (editor /
+ * runtime) takes its camera back.
  */
 
 #include <cstdint>
@@ -48,7 +50,7 @@ namespace lynx
 		/** Applique lynx::GetCameraShake() (ajoute a la position / au roll). */
 		bool use_camera_shake = true;
 
-		/** Devient la camera de la vue au lancement du jeu. */
+		/** Actor possessed by nobody : becomes the view of the default player at game start. */
 		bool auto_activate = true;
 
 		/**

@@ -48,14 +48,14 @@ namespace lynx::game_api
 	constexpr const char* kOnGameEnd = "LynxGame_OnGameEnd";
 
 	// Called every time a level was (re)created : startup, game DLL reload,
-	// editor "Stop". Lets the game snap its gameplay camera, cache ids...
+	// editor "Stop". Lets the game cache ids... (`gameplay_camera` : the default
+	// camera of player 0, kept for compatibility.)
 	using OnLevelLoadedFn = void (*)(uint32_t gameplay_camera);
 	constexpr const char* kOnLevelLoaded = "LynxGame_OnLevelLoaded";
 
-	// Called every frame, after the engine tick. The game moves its gameplay
-	// camera (follow the player, camera shake...).
-	using UpdateGameplayCameraFn = void (*)(uint32_t gameplay_camera, float dt);
-	constexpr const char* kUpdateGameplayCamera = "LynxGame_UpdateGameplayCamera";
+	// (No camera hook : the camera is a CameraComponent of the actor the
+	// PlayerController possesses ; the engine shows it in that player's
+	// viewport. LynxGame_UpdateGameplayCamera is no longer called.)
 
 	// Collision debug overlay (editor F4). 0 = off, 1 = on.
 	using SetCollisionDebugEnabledFn = void (*)(int enabled);
@@ -70,7 +70,6 @@ namespace lynx::game_api
 		OnGameStartFn on_game_start = nullptr;
 		OnGameEndFn on_game_end = nullptr;
 		OnLevelLoadedFn on_level_loaded = nullptr;
-		UpdateGameplayCameraFn update_gameplay_camera = nullptr;
 		SetCollisionDebugEnabledFn set_collision_debug_enabled = nullptr;
 
 		// ModuleT = lynx::SysModule (anything with void* GetSymbol(const char*)).
@@ -81,7 +80,6 @@ namespace lynx::game_api
 			on_game_start = reinterpret_cast<OnGameStartFn>(module.GetSymbol(kOnGameStart));
 			on_game_end = reinterpret_cast<OnGameEndFn>(module.GetSymbol(kOnGameEnd));
 			on_level_loaded = reinterpret_cast<OnLevelLoadedFn>(module.GetSymbol(kOnLevelLoaded));
-			update_gameplay_camera = reinterpret_cast<UpdateGameplayCameraFn>(module.GetSymbol(kUpdateGameplayCamera));
 			set_collision_debug_enabled = reinterpret_cast<SetCollisionDebugEnabledFn>(module.GetSymbol(kSetCollisionDebugEnabled));
 		}
 

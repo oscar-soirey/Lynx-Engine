@@ -14,6 +14,8 @@
  *   SkyLightActor          soft ambient light
  *   SpriteActor            an image (decor) : texture, size, flip
  *   SoundActor             a sound (ambience, music...) played at Play
+ *   ColliderActor          a collision box : wall / platform (blocks) or zone
+ *                          (trigger) ; OnBeginOverlap / OnHit in C++ and JS
  *
  * Their settings are properties (Details, world.xml, getProperty /
  * setProperty). In the editor, an icon shows the actors that have no image
@@ -26,6 +28,7 @@
 #include <string>
 
 #include "Actor.h"
+#include "BoxColliderComponent.h"
 #include "LightComponent.h"
 #include "SpriteComponents.h"
 
@@ -44,6 +47,7 @@ namespace lynx
 		SkyLight,
 		Sound,
 		Sprite,
+		Collider,
 		Count
 	};
 
@@ -208,6 +212,46 @@ namespace lynx
 
 	private:
 		SoundSourceComponent* source_ = nullptr;
+	};
+
+
+	/**
+	 * A collision box placed in the level (ColliderComponent) :
+	 *   - trigger = false : blocks the actors that have a blocking collider
+	 *     (walls, platforms, invisible limits) ; they receive OnHit ;
+	 *   - trigger = true  : a zone : OnBeginOverlap / OnEndOverlap (checkpoint,
+	 *     damage zone, end of the level...).
+	 * The box is drawn in the editor (green : trigger, red : blocking), and in
+	 * the game with show_in_game. Its events reach its own class too :
+	 *     class Checkpoint extends ColliderActor { OnBeginOverlap(other) { ... } }
+	 *     class Lava : public lynx::ColliderActor { void OnBeginOverlap(Actor* other) override; };
+	 */
+	class LYNX_API ColliderActor : public Actor
+	{
+	public:
+		ColliderActor();
+
+		/** World size (before the scale of the actor). */
+		vec2 size{4.f, 4.f};
+		bool trigger = false;
+		/** Pushed out of the blocking colliders (false : never moves by itself). */
+		bool movable = false;
+		bool generate_overlap_events = true;
+		int layer = 1;
+		int mask = -1;
+		/** Draws the box while playing too. */
+		bool show_in_game = false;
+
+		void Init() override;
+		void Update(double dt) override;
+		void StartGame() override;
+		void EndGame() override;
+
+		ColliderComponent* GetCollider() const { return collider_; }
+
+	private:
+		ColliderComponent* collider_ = nullptr;
+		bool playing_ = false;
 	};
 
 

@@ -1,23 +1,10 @@
 obligé:
 
-la caméra ne doit plus etre gérée par le main du jeu, mais en tant que composant, la camera doit etre affichée dans le viewport du personnage dont l'actor est possédé, en gros la camera est en composant de l'actor possedé par le PlayerController
-
 revenir a la police d'ecriture normale pour Lynxie
-
-menu options de l'editeur (scale de l'ui global, theme, plugins (pour plus tard), etc...
 
 ajouter un menu contextuel dans windows (dans un folder): ouvrir avec Lynx
 
 class Humanoid fonctionel (herite de actor), s'inspirer de Pawn pour les deplacements, ne pas implementer par contre la gestion des input, juste le mouvement
-
-revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
-Q : Quelle structure veux-tu pour l'animgraph ?
-R : Graphe de pose Unreal : un nœud Output Pose final, auquel on branche une Animation, un Blend Space ou la State Machine (plus de nœud Entry au niveau racine)
-
-collider component (qui déclenche overlapp et qui peut ausse bloquer physiquement les objets)
-collider components qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
-
-collider actor dans les actors standards du moteur
 
 gestion de la musique pour les jeux open world
 
@@ -31,11 +18,7 @@ projets sans C++, ou on ne compile pas, on charge tout depuis une dll déja buil
 
 options de post process (juste editer les valeurs du post process courant, réfere toi a l'api de HRL pour savoir tout ce qu'on peut changer ou pose moi la question)
 
-casts en javascript (je sais pas si c'est possible), pour genre avoir un ecosysteme entre les classes javascript, genre faire dans coin.js : "player.coin += 1;" alors que coin est une variable qui apartient a la classe Player dans player.js
-
-limiter l'éloignement de la camera à 1000 dans l'editeur
-
-pouvoir selectionner et copier les messages de la console
+casts en javascript (je sais pas si c'est possible), pour genre avoir un ecosysteme entre les classes javascript, genre faire dans coin.js : "player.coin += 1;" alors que coin est une variable qui apartient a la classe Player dans player.js. Enfaite ne permet pas de faire ca, par contre fais un systeme d'evenements comme les interfaces d'unreal, je veux que le moteur soit basé sur ca.
 
 quand lynx echoue le script, il ne doit pas etre affichée, l'erreur ne doit pas etre affichée, elle doit echouer en silence, et continuer d'essayer
 
@@ -60,6 +43,9 @@ on peut choisir en haut a droite du viewport de se deplacer en camera 2D (comme 
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
 
 plugins C++ comme dans Horizon-Next qui peuvent modifier l'editeur, ajouter des classes, des components, etc...
+plugins:
+-histoire et dialogue
+-cine camera
 
 editeur de post process
 
@@ -74,6 +60,8 @@ editeur de sprites pixel art integré a l'editeur (qui exporte pas en png ou aut
 HRL:
 
 bugs quand on met plusieurs lights dans une scene
+
+textures de voxels au lieu de juste couleur (optionel a chaque voxel type)
 
 trouver pourquoi le color picking marche a moitié
 

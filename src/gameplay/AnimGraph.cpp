@@ -11,7 +11,7 @@ namespace lynx
 {
 	namespace
 	{
-		constexpr int kVersion = 1;
+		constexpr int kVersion = 2;
 
 		std::string Str(const tinyxml2::XMLElement* e, const char* name, const char* fallback = "")
 		{
@@ -24,6 +24,133 @@ namespace lynx
 			char buffer[32];
 			std::snprintf(buffer, sizeof(buffer), "%g", static_cast<double>(v));
 			return buffer;
+		}
+	}
+
+	namespace
+	{
+		AnimGraphState ReadState(const tinyxml2::XMLElement* e)
+		{
+			AnimGraphState s;
+			s.id = e->IntAttribute("id", 0);
+			s.name = Str(e, "name");
+			s.motion = Str(e, "motion");
+			s.interruptible = e->BoolAttribute("interruptible", true);
+			s.restart_on_enter = e->BoolAttribute("restart_on_enter", true);
+			s.next = Str(e, "next");
+			s.on_enter = Str(e, "on_enter");
+			s.on_exit = Str(e, "on_exit");
+			s.x = e->FloatAttribute("x", 0.f);
+			s.y = e->FloatAttribute("y", 0.f);
+			s.pose_x = e->FloatAttribute("pose_x", 0.f);
+			s.pose_y = e->FloatAttribute("pose_y", 0.f);
+			s.output_x = e->FloatAttribute("output_x", 320.f);
+			s.output_y = e->FloatAttribute("output_y", 0.f);
+			return s;
+		}
+
+		AnimGraphTransition ReadTransition(const tinyxml2::XMLElement* e)
+		{
+			AnimGraphTransition t;
+			t.id = e->IntAttribute("id", 0);
+			t.from = Str(e, "from");
+			if (t.from == "*")
+				t.from.clear();
+			t.to = Str(e, "to");
+			t.priority = e->IntAttribute("priority", 0);
+			t.wait_finished = e->BoolAttribute("wait_finished", false);
+			for (const tinyxml2::XMLElement* c = e->FirstChildElement("Condition"); c; c = c->NextSiblingElement("Condition"))
+			{
+				AnimGraphCondition cond;
+				cond.kind = Str(c, "kind", "compare");
+				cond.param = Str(c, "param");
+				cond.op = Str(c, "op", ">");
+				cond.value = c->FloatAttribute("value", 0.f);
+				cond.function = Str(c, "function");
+				t.conditions.push_back(std::move(cond));
+			}
+			return t;
+		}
+
+		// <State> / <Transition> / <Entry> / <AnyState> d'une state machine (ou de la racine en v1).
+		bool ReadMachineChild(const tinyxml2::XMLElement* e, AnimGraphStateMachine& m)
+		{
+			const std::string tag = e->Name();
+			if (tag == "State")
+				m.states.push_back(ReadState(e));
+			else if (tag == "Transition")
+				m.transitions.push_back(ReadTransition(e));
+			else if (tag == "Entry")
+			{
+				m.entry_x = e->FloatAttribute("x", 0.f);
+				m.entry_y = e->FloatAttribute("y", 0.f);
+			}
+			else if (tag == "AnyState")
+			{
+				m.any_x = e->FloatAttribute("x", 0.f);
+				m.any_y = e->FloatAttribute("y", 220.f);
+			}
+			else
+				return false;
+			return true;
+		}
+
+		void WriteMachine(tinyxml2::XMLDocument& doc, tinyxml2::XMLElement* parent, const AnimGraphStateMachine& m)
+		{
+			using namespace tinyxml2;
+			XMLElement* entry = doc.NewElement("Entry");
+			entry->SetAttribute("x", Num(m.entry_x).c_str());
+			entry->SetAttribute("y", Num(m.entry_y).c_str());
+			parent->InsertEndChild(entry);
+
+			XMLElement* any = doc.NewElement("AnyState");
+			any->SetAttribute("x", Num(m.any_x).c_str());
+			any->SetAttribute("y", Num(m.any_y).c_str());
+			parent->InsertEndChild(any);
+
+			for (const auto& s : m.states)
+			{
+				XMLElement* e = doc.NewElement("State");
+				e->SetAttribute("id", s.id);
+				e->SetAttribute("name", s.name.c_str());
+				e->SetAttribute("motion", s.motion.c_str());
+				e->SetAttribute("interruptible", s.interruptible);
+				e->SetAttribute("restart_on_enter", s.restart_on_enter);
+				if (!s.next.empty()) e->SetAttribute("next", s.next.c_str());
+				if (!s.on_enter.empty()) e->SetAttribute("on_enter", s.on_enter.c_str());
+				if (!s.on_exit.empty()) e->SetAttribute("on_exit", s.on_exit.c_str());
+				e->SetAttribute("x", Num(s.x).c_str());
+				e->SetAttribute("y", Num(s.y).c_str());
+				e->SetAttribute("pose_x", Num(s.pose_x).c_str());
+				e->SetAttribute("pose_y", Num(s.pose_y).c_str());
+				e->SetAttribute("output_x", Num(s.output_x).c_str());
+				e->SetAttribute("output_y", Num(s.output_y).c_str());
+				parent->InsertEndChild(e);
+			}
+
+			for (const auto& t : m.transitions)
+			{
+				XMLElement* e = doc.NewElement("Transition");
+				e->SetAttribute("id", t.id);
+				e->SetAttribute("from", t.from.empty() ? "*" : t.from.c_str());
+				e->SetAttribute("to", t.to.c_str());
+				e->SetAttribute("priority", t.priority);
+				e->SetAttribute("wait_finished", t.wait_finished);
+				for (const auto& c : t.conditions)
+				{
+					XMLElement* ce = doc.NewElement("Condition");
+					ce->SetAttribute("kind", c.kind.c_str());
+					if (!c.param.empty()) ce->SetAttribute("param", c.param.c_str());
+					if (c.kind == "compare")
+					{
+						ce->SetAttribute("op", c.op.c_str());
+						ce->SetAttribute("value", Num(c.value).c_str());
+					}
+					if (!c.function.empty()) ce->SetAttribute("function", c.function.c_str());
+					e->InsertEndChild(ce);
+				}
+				parent->InsertEndChild(e);
+			}
 		}
 	}
 
@@ -48,7 +175,13 @@ namespace lynx
 		}
 
 		*this = AnimGraphAsset{};
-		entry_state = Str(root, "entry");
+
+		// Version 1 : une seule machine a etats a la racine.
+		AnimGraphStateMachine legacy;
+		legacy.name = "Locomotion";
+		legacy.entry_state = Str(root, "entry");
+		bool has_legacy = false;
+		bool has_output = false;
 
 		for (const XMLElement* e = root->FirstChildElement(); e; e = e->NextSiblingElement())
 		{
@@ -83,62 +216,76 @@ namespace lynx
 					b.samples.push_back({ s->FloatAttribute("position", 0.f), Str(s, "animation") });
 				blend_spaces.push_back(std::move(b));
 			}
-			else if (tag == "State")
+			else if (tag == "StateMachine")
 			{
-				AnimGraphState s;
-				s.id = e->IntAttribute("id", 0);
-				s.name = Str(e, "name");
-				s.motion = Str(e, "motion");
-				s.interruptible = e->BoolAttribute("interruptible", true);
-				s.restart_on_enter = e->BoolAttribute("restart_on_enter", true);
-				s.next = Str(e, "next");
-				s.on_enter = Str(e, "on_enter");
-				s.on_exit = Str(e, "on_exit");
-				s.x = e->FloatAttribute("x", 0.f);
-				s.y = e->FloatAttribute("y", 0.f);
-				states.push_back(std::move(s));
+				AnimGraphStateMachine m;
+				m.id = e->IntAttribute("id", 0);
+				m.name = Str(e, "name");
+				m.entry_state = Str(e, "entry");
+				for (const XMLElement* c = e->FirstChildElement(); c; c = c->NextSiblingElement())
+					ReadMachineChild(c, m);
+				state_machines.push_back(std::move(m));
 			}
-			else if (tag == "Transition")
+			else if (tag == "PoseNode")
 			{
-				AnimGraphTransition t;
-				t.id = e->IntAttribute("id", 0);
-				t.from = Str(e, "from");
-				if (t.from == "*")
-					t.from.clear();
-				t.to = Str(e, "to");
-				t.priority = e->IntAttribute("priority", 0);
-				t.wait_finished = e->BoolAttribute("wait_finished", false);
-				for (const XMLElement* c = e->FirstChildElement("Condition"); c; c = c->NextSiblingElement("Condition"))
-				{
-					AnimGraphCondition cond;
-					cond.kind = Str(c, "kind", "compare");
-					cond.param = Str(c, "param");
-					cond.op = Str(c, "op", ">");
-					cond.value = c->FloatAttribute("value", 0.f);
-					cond.function = Str(c, "function");
-					t.conditions.push_back(std::move(cond));
-				}
-				transitions.push_back(std::move(t));
+				AnimGraphPoseNode n;
+				n.id = e->IntAttribute("id", 0);
+				n.type = Str(e, "type", "animation");
+				n.source = Str(e, "source");
+				n.x = e->FloatAttribute("x", 0.f);
+				n.y = e->FloatAttribute("y", 0.f);
+				pose_nodes.push_back(std::move(n));
 			}
-			else if (tag == "Entry")
+			else if (tag == "Output")
 			{
-				entry_x = e->FloatAttribute("x", 0.f);
-				entry_y = e->FloatAttribute("y", 0.f);
+				has_output = true;
+				output_source = e->IntAttribute("source", 0);
+				output_x = e->FloatAttribute("x", 360.f);
+				output_y = e->FloatAttribute("y", 0.f);
 			}
-			else if (tag == "AnyState")
+			else if (ReadMachineChild(e, legacy))
+				has_legacy = has_legacy || tag == "State" || tag == "Transition";
+		}
+
+		// Version 1 : [Locomotion] -> [Output Pose]
+		if (has_legacy || (!has_output && !legacy.entry_state.empty()))
+		{
+			legacy.name = "Locomotion";
+			for (int i = 2; FindStateMachine(legacy.name); ++i)
+				legacy.name = "Locomotion" + std::to_string(i);
+			state_machines.push_back(std::move(legacy));
+			AnimGraphPoseNode n;
+			n.type = "statemachine";
+			n.source = state_machines.back().name;
+			n.x = 0.f;
+			n.y = 0.f;
+			pose_nodes.push_back(n);
+			if (!has_output)
 			{
-				any_x = e->FloatAttribute("x", 0.f);
-				any_y = e->FloatAttribute("y", 200.f);
+				output_x = 360.f;
+				output_y = 0.f;
 			}
 		}
 
-		// Fichiers anciens / ecrits a la main : ids manquants.
-		for (auto& s : states)
-			if (s.id <= 0)
-				s.id = NewId();
-		for (auto& t : transitions)
-			if (t.id <= 0)
-				t.id = NewId();
+		// Ids manquants (fichiers anciens / ecrits a la main).
+		for (auto& m : state_machines)
+		{
+			if (m.id <= 0)
+				m.id = NewId();
+			for (auto& st : m.states)
+				if (st.id <= 0)
+					st.id = NewId();
+			for (auto& t : m.transitions)
+				if (t.id <= 0)
+					t.id = NewId();
+		}
+		for (auto& n : pose_nodes)
+			if (n.id <= 0)
+			{
+				n.id = NewId();
+				if (!has_output && n.type == "statemachine" && output_source == 0)
+					output_source = n.id;   // la machine de la version 1 est branchee
+			}
 
 		return true;
 	}
@@ -151,18 +298,13 @@ namespace lynx
 		doc.InsertFirstChild(doc.NewDeclaration());
 		XMLElement* root = doc.NewElement("AnimGraph");
 		root->SetAttribute("version", kVersion);
-		root->SetAttribute("entry", entry_state.c_str());
 		doc.InsertEndChild(root);
 
-		XMLElement* entry = doc.NewElement("Entry");
-		entry->SetAttribute("x", Num(entry_x).c_str());
-		entry->SetAttribute("y", Num(entry_y).c_str());
-		root->InsertEndChild(entry);
-
-		XMLElement* any = doc.NewElement("AnyState");
-		any->SetAttribute("x", Num(any_x).c_str());
-		any->SetAttribute("y", Num(any_y).c_str());
-		root->InsertEndChild(any);
+		XMLElement* output = doc.NewElement("Output");
+		output->SetAttribute("source", output_source);
+		output->SetAttribute("x", Num(output_x).c_str());
+		output->SetAttribute("y", Num(output_y).c_str());
+		root->InsertEndChild(output);
 
 		for (const auto& p : parameters)
 		{
@@ -206,43 +348,24 @@ namespace lynx
 			root->InsertEndChild(e);
 		}
 
-		for (const auto& s : states)
+		for (const auto& n : pose_nodes)
 		{
-			XMLElement* e = doc.NewElement("State");
-			e->SetAttribute("id", s.id);
-			e->SetAttribute("name", s.name.c_str());
-			e->SetAttribute("motion", s.motion.c_str());
-			e->SetAttribute("interruptible", s.interruptible);
-			e->SetAttribute("restart_on_enter", s.restart_on_enter);
-			if (!s.next.empty()) e->SetAttribute("next", s.next.c_str());
-			if (!s.on_enter.empty()) e->SetAttribute("on_enter", s.on_enter.c_str());
-			if (!s.on_exit.empty()) e->SetAttribute("on_exit", s.on_exit.c_str());
-			e->SetAttribute("x", Num(s.x).c_str());
-			e->SetAttribute("y", Num(s.y).c_str());
+			XMLElement* e = doc.NewElement("PoseNode");
+			e->SetAttribute("id", n.id);
+			e->SetAttribute("type", n.type.c_str());
+			e->SetAttribute("source", n.source.c_str());
+			e->SetAttribute("x", Num(n.x).c_str());
+			e->SetAttribute("y", Num(n.y).c_str());
 			root->InsertEndChild(e);
 		}
 
-		for (const auto& t : transitions)
+		for (const auto& m : state_machines)
 		{
-			XMLElement* e = doc.NewElement("Transition");
-			e->SetAttribute("id", t.id);
-			e->SetAttribute("from", t.from.empty() ? "*" : t.from.c_str());
-			e->SetAttribute("to", t.to.c_str());
-			e->SetAttribute("priority", t.priority);
-			e->SetAttribute("wait_finished", t.wait_finished);
-			for (const auto& c : t.conditions)
-			{
-				XMLElement* ce = doc.NewElement("Condition");
-				ce->SetAttribute("kind", c.kind.c_str());
-				if (!c.param.empty()) ce->SetAttribute("param", c.param.c_str());
-				if (c.kind == "compare")
-				{
-					ce->SetAttribute("op", c.op.c_str());
-					ce->SetAttribute("value", Num(c.value).c_str());
-				}
-				if (!c.function.empty()) ce->SetAttribute("function", c.function.c_str());
-				e->InsertEndChild(ce);
-			}
+			XMLElement* e = doc.NewElement("StateMachine");
+			e->SetAttribute("id", m.id);
+			e->SetAttribute("name", m.name.c_str());
+			e->SetAttribute("entry", m.entry_state.c_str());
+			WriteMachine(doc, e, m);
 			root->InsertEndChild(e);
 		}
 
@@ -263,7 +386,36 @@ namespace lynx
 		return LoadFromString(std::string(reinterpret_cast<const char*>(data.data()), data.size()), error);
 	}
 
-	AnimGraphState* AnimGraphAsset::FindState(const std::string& name)
+	AnimGraphCompiled AnimGraphAsset::Compile() const
+	{
+		AnimGraphCompiled out;
+		const AnimGraphPoseNode* node = OutputNode();
+		if (!node)
+			return out;
+		if (node->type == "statemachine")
+		{
+			if (const AnimGraphStateMachine* m = FindStateMachine(node->source))
+			{
+				out.states = m->states;
+				out.transitions = m->transitions;
+				out.entry_state = m->entry_state;
+				out.state_machine = m->name;
+			}
+			return out;
+		}
+		// Une animation / un blend space seul : un etat qui le joue.
+		if (!IsMotion(node->source))
+			return out;
+		AnimGraphState s;
+		s.id = 1;
+		s.name = node->source;
+		s.motion = node->source;
+		out.states.push_back(s);
+		out.entry_state = s.name;
+		return out;
+	}
+
+	AnimGraphState* AnimGraphStateMachine::FindState(const std::string& name)
 	{
 		for (auto& s : states)
 			if (s.name == name)
@@ -271,36 +423,15 @@ namespace lynx
 		return nullptr;
 	}
 
-	const AnimGraphParameter* AnimGraphAsset::FindParameter(const std::string& name) const
+	const AnimGraphState* AnimGraphStateMachine::FindState(const std::string& name) const
 	{
-		for (const auto& p : parameters)
-			if (p.name == name)
-				return &p;
+		for (const auto& s : states)
+			if (s.name == name)
+				return &s;
 		return nullptr;
 	}
 
-	bool AnimGraphAsset::IsMotion(const std::string& name) const
-	{
-		for (const auto& a : animations)
-			if (a.name == name)
-				return true;
-		for (const auto& b : blend_spaces)
-			if (b.name == name)
-				return true;
-		return false;
-	}
-
-	int AnimGraphAsset::NewId() const
-	{
-		int id = 1;
-		for (const auto& s : states)
-			id = std::max(id, s.id + 1);
-		for (const auto& t : transitions)
-			id = std::max(id, t.id + 1);
-		return id;
-	}
-
-	void AnimGraphAsset::RenameState(const std::string& from, const std::string& to)
+	void AnimGraphStateMachine::RenameState(const std::string& from, const std::string& to)
 	{
 		if (from == to)
 			return;
@@ -320,5 +451,131 @@ namespace lynx
 		}
 		if (entry_state == from)
 			entry_state = to;
+	}
+
+	const AnimGraphParameter* AnimGraphAsset::FindParameter(const std::string& name) const
+	{
+		for (const auto& p : parameters)
+			if (p.name == name)
+				return &p;
+		return nullptr;
+	}
+
+	bool AnimGraphAsset::IsAnimation(const std::string& name) const
+	{
+		for (const auto& a : animations)
+			if (a.name == name)
+				return true;
+		return false;
+	}
+
+	bool AnimGraphAsset::IsBlendSpace(const std::string& name) const
+	{
+		for (const auto& b : blend_spaces)
+			if (b.name == name)
+				return true;
+		return false;
+	}
+
+	bool AnimGraphAsset::IsMotion(const std::string& name) const
+	{
+		return IsAnimation(name) || IsBlendSpace(name);
+	}
+
+	AnimGraphStateMachine* AnimGraphAsset::FindStateMachine(const std::string& name)
+	{
+		for (auto& m : state_machines)
+			if (m.name == name)
+				return &m;
+		return nullptr;
+	}
+
+	const AnimGraphStateMachine* AnimGraphAsset::FindStateMachine(const std::string& name) const
+	{
+		for (const auto& m : state_machines)
+			if (m.name == name)
+				return &m;
+		return nullptr;
+	}
+
+	AnimGraphStateMachine* AnimGraphAsset::FindStateMachine(int id)
+	{
+		for (auto& m : state_machines)
+			if (m.id == id)
+				return &m;
+		return nullptr;
+	}
+
+	AnimGraphPoseNode* AnimGraphAsset::FindPoseNode(int id)
+	{
+		for (auto& n : pose_nodes)
+			if (n.id == id)
+				return &n;
+		return nullptr;
+	}
+
+	const AnimGraphPoseNode* AnimGraphAsset::FindPoseNode(int id) const
+	{
+		for (const auto& n : pose_nodes)
+			if (n.id == id)
+				return &n;
+		return nullptr;
+	}
+
+	const AnimGraphPoseNode* AnimGraphAsset::OutputNode() const
+	{
+		return output_source > 0 ? FindPoseNode(output_source) : nullptr;
+	}
+
+	int AnimGraphAsset::NewId() const
+	{
+		int id = 1;
+		for (const auto& m : state_machines)
+		{
+			id = std::max(id, m.id + 1);
+			for (const auto& s : m.states)
+				id = std::max(id, s.id + 1);
+			for (const auto& t : m.transitions)
+				id = std::max(id, t.id + 1);
+		}
+		for (const auto& n : pose_nodes)
+			id = std::max(id, n.id + 1);
+		return id;
+	}
+
+	void AnimGraphAsset::RenameMotion(const std::string& from, const std::string& to)
+	{
+		if (from == to)
+			return;
+		for (auto& a : animations)
+			if (a.name == from)
+				a.name = to;
+		for (auto& b : blend_spaces)
+		{
+			if (b.name == from)
+				b.name = to;
+			for (auto& s : b.samples)
+				if (s.animation == from)
+					s.animation = to;
+		}
+		for (auto& m : state_machines)
+			for (auto& s : m.states)
+				if (s.motion == from)
+					s.motion = to;
+		for (auto& n : pose_nodes)
+			if (n.type != "statemachine" && n.source == from)
+				n.source = to;
+	}
+
+	void AnimGraphAsset::RenameStateMachine(const std::string& from, const std::string& to)
+	{
+		if (from == to)
+			return;
+		for (auto& m : state_machines)
+			if (m.name == from)
+				m.name = to;
+		for (auto& n : pose_nodes)
+			if (n.type == "statemachine" && n.source == from)
+				n.source = to;
 	}
 }

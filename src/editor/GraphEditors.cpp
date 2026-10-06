@@ -113,6 +113,11 @@ namespace lynx::editor::graph_editors
 
 			int debug_index = 0;        // which running instance is shown
 
+			// Anim graph : the view shown (0, 0 : the root graph with Output Pose ;
+			// machine : a state machine ; machine + state : the pose of a state).
+			int anim_machine = 0;
+			int anim_state = 0;
+
 			std::string message;
 			double message_time = -100.0;
 
@@ -561,29 +566,78 @@ namespace lynx::editor::graph_editors
 
 		namespace anim
 		{
-			constexpr int kEntryNode = 1;
-			constexpr int kAnyNode = 2;
-			constexpr int kEntryLink = 1;
+			// ---------------------------------------------------------------------
+			// Views : the anim graph (root), a state machine, a state.
+			//   root     [Animation / Blend Space / State Machine] --> [Output Pose]
+			//   machine  Entry -> states <-> ... ; Any State -> ...
+			//   state    [Animation / Blend Space] --> [Output Pose]
+			// ---------------------------------------------------------------------
 
-			int StateNode(int state_id) { return 1000 + state_id; }
-			int StateOfNode(int node) { return node - 1000; }
+			// ImNodes ids (one view at a time in the canvas).
+			constexpr int kEntryNode = 1;       // machine view
+			constexpr int kAnyNode = 2;
+			constexpr int kOutputNode = 3;      // root and state views
+			constexpr int kMotionNode = 4;      // state view : the pose of the state
+			constexpr int kEntryLink = 1;
+			constexpr int kOutputLink = 2;
+
+			int ItemNode(int id) { return 1000 + id; }     // states (machine view), pose nodes (root view)
+			int ItemOfNode(int node) { return node - 1000; }
 			int TransitionLink(int id) { return 1000 + id; }
 			int TransitionOfLink(int link) { return link - 1000; }
 
-			AnimGraphState* FindState(AnimGraphAsset& g, int id)
+			const ImU32 kOutputColor = IM_COL32(150, 60, 60, 255);
+			const ImU32 kAnimColor = IM_COL32(50, 110, 170, 255);
+			const ImU32 kBlendColor = IM_COL32(120, 70, 165, 255);
+			const ImU32 kMachineColor = IM_COL32(40, 120, 110, 255);
+
+			AnimGraphStateMachine* Machine(Doc& doc)
 			{
-				for (auto& s : g.states)
+				return doc.anim_machine ? doc.anim.FindStateMachine(doc.anim_machine) : nullptr;
+			}
+
+			AnimGraphState* FindState(AnimGraphStateMachine& m, int id)
+			{
+				for (auto& s : m.states)
 					if (s.id == id)
 						return &s;
 				return nullptr;
 			}
 
-			AnimGraphTransition* FindTransition(AnimGraphAsset& g, int id)
+			AnimGraphTransition* FindTransition(AnimGraphStateMachine& m, int id)
 			{
-				for (auto& t : g.transitions)
+				for (auto& t : m.transitions)
 					if (t.id == id)
 						return &t;
 				return nullptr;
+			}
+
+			AnimGraphState* CurrentState(Doc& doc)
+			{
+				AnimGraphStateMachine* m = Machine(doc);
+				return m && doc.anim_state ? FindState(*m, doc.anim_state) : nullptr;
+			}
+
+			void SetView(Doc& doc, int machine, int state)
+			{
+				if (doc.anim_machine == machine && doc.anim_state == state)
+					return;
+				doc.anim_machine = machine;
+				doc.anim_state = state;
+				doc.place_all = true;
+				doc.center_pending = true;
+				ClearSelection(doc);
+				ImNodes::ClearNodeSelection();
+				ImNodes::ClearLinkSelection();
+			}
+
+			// After an undo / a delete : the view may not exist any more.
+			void ValidateView(Doc& doc)
+			{
+				if (doc.anim_machine && !Machine(doc))
+					SetView(doc, 0, 0);
+				else if (doc.anim_state && !CurrentState(doc))
+					SetView(doc, doc.anim_machine, 0);
 			}
 
 			std::vector<std::string> Motions(const AnimGraphAsset& g)
@@ -596,10 +650,10 @@ namespace lynx::editor::graph_editors
 				return out;
 			}
 
-			std::vector<std::string> StateNames(const AnimGraphAsset& g)
+			std::vector<std::string> StateNames(const AnimGraphStateMachine& m)
 			{
 				std::vector<std::string> out;
-				for (const auto& s : g.states)
+				for (const auto& s : m.states)
 					out.push_back(s.name);
 				return out;
 			}
@@ -640,6 +694,25 @@ namespace lynx::editor::graph_editors
 				return text.empty() ? "always" : text;
 			}
 
+			const char* PoseTypeLabel(const std::string& type)
+			{
+				if (type == "statemachine")
+					return "State Machine";
+				if (type == "blendspace")
+					return "Blend Space";
+				return "Animation";
+			}
+
+			// Kind of a motion name : "animation", "blendspace" or "".
+			std::string MotionType(const AnimGraphAsset& g, const std::string& name)
+			{
+				if (g.IsAnimation(name))
+					return "animation";
+				if (g.IsBlendSpace(name))
+					return "blendspace";
+				return "";
+			}
+
 			// ---- Renames (references follow) -----------------------------------
 
 			void RenameParameter(AnimGraphAsset& g, const std::string& from, const std::string& to)
@@ -647,136 +720,189 @@ namespace lynx::editor::graph_editors
 				for (auto& p : g.parameters)
 					if (p.name == from)
 						p.name = to;
-				for (auto& t : g.transitions)
-					for (auto& c : t.conditions)
-						if (c.param == from)
-							c.param = to;
+				for (auto& m : g.state_machines)
+					for (auto& t : m.transitions)
+						for (auto& c : t.conditions)
+							if (c.param == from)
+								c.param = to;
 				for (auto& b : g.blend_spaces)
 					if (b.variable == from)
 						b.variable = to;
 			}
 
-			void RenameMotion(AnimGraphAsset& g, const std::string& from, const std::string& to)
-			{
-				for (auto& a : g.animations)
-					if (a.name == from)
-						a.name = to;
-				for (auto& b : g.blend_spaces)
-				{
-					if (b.name == from)
-						b.name = to;
-					for (auto& s : b.samples)
-						if (s.animation == from)
-							s.animation = to;
-				}
-				for (auto& s : g.states)
-					if (s.motion == from)
-						s.motion = to;
-			}
+			// ---- Edits : root (pose nodes) ------------------------------------------
 
-			bool NameUsedByMotion(const AnimGraphAsset& g, const std::string& name)
-			{
-				return g.IsMotion(name);
-			}
-
-			// ---- Edits ------------------------------------------------------------
-
-			int AddState(Doc& doc, const std::string& base, const std::string& motion, const ImVec2& screen)
+			int AddPoseNode(Doc& doc, const std::string& type, const std::string& source, const ImVec2& screen)
 			{
 				AnimGraphAsset& g = doc.anim;
+				AnimGraphPoseNode n;
+				n.id = g.NewId();
+				n.type = type;
+				n.source = source;
+				g.pose_nodes.push_back(n);
+				// The first one goes into Output Pose.
+				if (!g.OutputNode())
+					g.output_source = n.id;
+				doc.place_screen.emplace_back(ItemNode(n.id), screen);
+				doc.select_node_next = ItemNode(n.id);
+				doc.touched = true;
+				return n.id;
+			}
+
+			std::string NewStateMachine(Doc& doc)
+			{
+				AnimGraphAsset& g = doc.anim;
+				AnimGraphStateMachine m;
+				m.id = g.NewId();
+				m.name = UniqueName("Locomotion", [&](const std::string& n) { return g.FindStateMachine(n) != nullptr; });
+				m.entry_x = 0.f;
+				m.entry_y = 0.f;
+				m.any_x = 0.f;
+				m.any_y = 220.f;
+				g.state_machines.push_back(m);
+				doc.touched = true;
+				return m.name;
+			}
+
+			void DeletePoseNode(Doc& doc, int id)
+			{
+				AnimGraphAsset& g = doc.anim;
+				const AnimGraphPoseNode* n = g.FindPoseNode(id);
+				if (!n)
+					return;
+				const std::string machine = n->type == "statemachine" ? n->source : std::string();
+				g.pose_nodes.erase(std::remove_if(g.pose_nodes.begin(), g.pose_nodes.end(),
+				                                  [id](const AnimGraphPoseNode& p) { return p.id == id; }),
+				                   g.pose_nodes.end());
+				if (g.output_source == id)
+					g.output_source = 0;
+				// A state machine lives in its node (like Unreal) : gone with its last node.
+				if (!machine.empty() && std::none_of(g.pose_nodes.begin(), g.pose_nodes.end(), [&](const AnimGraphPoseNode& p)
+				    { return p.type == "statemachine" && p.source == machine; }))
+				{
+					g.state_machines.erase(std::remove_if(g.state_machines.begin(), g.state_machines.end(),
+					                                      [&](const AnimGraphStateMachine& m) { return m.name == machine; }),
+					                       g.state_machines.end());
+				}
+				doc.touched = true;
+			}
+
+			// ---- Edits : state machine --------------------------------------------
+
+			int AddState(Doc& doc, AnimGraphStateMachine& m, const std::string& base, const std::string& motion, const ImVec2& screen)
+			{
 				AnimGraphState s;
-				s.id = g.NewId();
-				s.name = UniqueName(base.empty() ? "State" : base,
-				                    [&](const std::string& n) { return g.FindState(n) != nullptr; });
+				s.id = doc.anim.NewId();
+				s.name = UniqueName(base.empty() ? "State" : base, [&](const std::string& n) { return m.FindState(n) != nullptr; });
 				s.motion = motion;
-				g.states.push_back(s);
-				if (g.entry_state.empty())
-					g.entry_state = s.name;
-				doc.place_screen.emplace_back(StateNode(s.id), screen);
-				doc.select_node_next = StateNode(s.id);
+				s.pose_x = 0.f;
+				s.pose_y = 0.f;
+				s.output_x = 320.f;
+				s.output_y = 0.f;
+				m.states.push_back(s);
+				if (m.entry_state.empty())
+					m.entry_state = s.name;
+				doc.place_screen.emplace_back(ItemNode(s.id), screen);
+				doc.select_node_next = ItemNode(s.id);
 				doc.touched = true;
 				return s.id;
 			}
 
-			int AddTransition(Doc& doc, const std::string& from, const std::string& to)
+			int AddTransition(Doc& doc, AnimGraphStateMachine& m, const std::string& from, const std::string& to)
 			{
-				AnimGraphAsset& g = doc.anim;
 				AnimGraphTransition t;
-				t.id = g.NewId();
+				t.id = doc.anim.NewId();
 				t.from = from;
 				t.to = to;
-				g.transitions.push_back(t);
+				m.transitions.push_back(t);
 				doc.select_link_next = TransitionLink(t.id);
 				doc.touched = true;
 				return t.id;
 			}
 
-			void DeleteState(Doc& doc, int id)
+			void DeleteState(Doc& doc, AnimGraphStateMachine& m, int id)
 			{
-				AnimGraphAsset& g = doc.anim;
-				AnimGraphState* s = FindState(g, id);
+				AnimGraphState* s = FindState(m, id);
 				if (!s)
 					return;
 				const std::string name = s->name;
-				g.transitions.erase(std::remove_if(g.transitions.begin(), g.transitions.end(),
+				m.transitions.erase(std::remove_if(m.transitions.begin(), m.transitions.end(),
 				                                   [&](const AnimGraphTransition& t) { return t.from == name || t.to == name; }),
-				                    g.transitions.end());
-				for (auto& other : g.states)
+				                    m.transitions.end());
+				for (auto& other : m.states)
 					if (other.next == name)
 						other.next.clear();
-				g.states.erase(std::remove_if(g.states.begin(), g.states.end(),
+				m.states.erase(std::remove_if(m.states.begin(), m.states.end(),
 				                              [id](const AnimGraphState& st) { return st.id == id; }),
-				               g.states.end());
-				if (g.entry_state == name)
-					g.entry_state = g.states.empty() ? std::string() : g.states.front().name;
+				               m.states.end());
+				if (m.entry_state == name)
+					m.entry_state = m.states.empty() ? std::string() : m.states.front().name;
 				doc.touched = true;
 			}
 
-			void DeleteTransition(Doc& doc, int id)
+			void DeleteTransition(Doc& doc, AnimGraphStateMachine& m, int id)
 			{
-				auto& v = doc.anim.transitions;
+				auto& v = m.transitions;
 				v.erase(std::remove_if(v.begin(), v.end(), [id](const AnimGraphTransition& t) { return t.id == id; }), v.end());
 				doc.touched = true;
 			}
 
-			void DuplicateState(Doc& doc, int id)
+			void DuplicateState(Doc& doc, AnimGraphStateMachine& m, int id)
 			{
-				AnimGraphState* s = FindState(doc.anim, id);
+				AnimGraphState* s = FindState(m, id);
 				if (!s)
 					return;
 				AnimGraphState copy = *s;
 				copy.id = doc.anim.NewId();
-				copy.name = UniqueName(s->name, [&](const std::string& n) { return doc.anim.FindState(n) != nullptr; });
+				copy.name = UniqueName(s->name, [&](const std::string& n) { return m.FindState(n) != nullptr; });
 				copy.x += 40.f;
 				copy.y += 40.f;
-				doc.anim.states.push_back(copy);
+				m.states.push_back(copy);
 				doc.place_all = true;
-				doc.select_node_next = StateNode(copy.id);
+				doc.select_node_next = ItemNode(copy.id);
 				doc.touched = true;
 			}
 
-			/** File written by hand (no positions) : Entry, Any State, then the states in a grid. */
+			/** File written by hand (no positions) : laid out. */
 			void LayoutIfOverlapping(AnimGraphAsset& g)
 			{
+				for (auto& m : g.state_machines)
+				{
+					std::set<std::pair<int, int>> seen;
+					bool overlap = false;
+					auto add = [&](float x, float y) { overlap |= !seen.insert({ static_cast<int>(x), static_cast<int>(y) }).second; };
+					add(m.entry_x, m.entry_y);
+					add(m.any_x, m.any_y);
+					for (const auto& s : m.states)
+						add(s.x, s.y);
+					if (!overlap)
+						continue;
+					m.entry_x = 0.f;
+					m.entry_y = 0.f;
+					m.any_x = 0.f;
+					m.any_y = 220.f;
+					const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(m.states.size())))));
+					for (size_t i = 0; i < m.states.size(); ++i)
+					{
+						m.states[i].x = 280.f + static_cast<float>(i % static_cast<size_t>(columns)) * 300.f;
+						m.states[i].y = static_cast<float>(i / static_cast<size_t>(columns)) * 180.f;
+					}
+				}
+				// Root : the pose nodes in a column on the left of Output Pose.
 				std::set<std::pair<int, int>> seen;
 				bool overlap = false;
-				auto add = [&](float x, float y) { overlap |= !seen.insert({ static_cast<int>(x), static_cast<int>(y) }).second; };
-				add(g.entry_x, g.entry_y);
-				add(g.any_x, g.any_y);
-				for (const auto& s : g.states)
-					add(s.x, s.y);
-				if (!overlap)
-					return;
-
-				g.entry_x = 0.f;
-				g.entry_y = 0.f;
-				g.any_x = 0.f;
-				g.any_y = 220.f;
-				const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(g.states.size())))));
-				for (size_t i = 0; i < g.states.size(); ++i)
+				for (const auto& n : g.pose_nodes)
+					overlap |= !seen.insert({ static_cast<int>(n.x), static_cast<int>(n.y) }).second;
+				overlap |= seen.count({ static_cast<int>(g.output_x), static_cast<int>(g.output_y) }) != 0;
+				if (overlap)
 				{
-					g.states[i].x = 280.f + static_cast<float>(i % static_cast<size_t>(columns)) * 300.f;
-					g.states[i].y = static_cast<float>(i / static_cast<size_t>(columns)) * 180.f;
+					for (size_t i = 0; i < g.pose_nodes.size(); ++i)
+					{
+						g.pose_nodes[i].x = 0.f;
+						g.pose_nodes[i].y = static_cast<float>(i) * 140.f;
+					}
+					g.output_x = 360.f;
+					g.output_y = 0.f;
 				}
 			}
 
@@ -799,21 +925,32 @@ namespace lynx::editor::graph_editors
 			std::vector<std::string> Issues(const AnimGraphAsset& g)
 			{
 				std::vector<std::string> out;
-				if (g.states.empty())
-					out.push_back("No state : right click on the graph to add one.");
-				else if (std::none_of(g.states.begin(), g.states.end(), [&](const AnimGraphState& s) { return s.name == g.entry_state; }))
-					out.push_back("No entry state (link Entry to a state).");
-				for (const auto& s : g.states)
-					if (!g.IsMotion(s.motion))
-						out.push_back("State " + s.name + " : no animation / blend space.");
+				const AnimGraphPoseNode* output = g.OutputNode();
+				if (!output)
+					out.push_back("Nothing is plugged into Output Pose.");
+				else if (output->type == "statemachine" ? !g.FindStateMachine(output->source) : !g.IsMotion(output->source))
+					out.push_back("Output Pose : \"" + output->source + "\" does not exist.");
+				for (const auto& n : g.pose_nodes)
+					if (n.type != "statemachine" && !g.IsMotion(n.source))
+						out.push_back(std::string(PoseTypeLabel(n.type)) + " node : no " + (n.type == "blendspace" ? "blend space." : "animation."));
+				for (const auto& m : g.state_machines)
+				{
+					if (m.states.empty())
+						out.push_back(m.name + " : no state (double-click the state machine, then right click).");
+					else if (!m.FindState(m.entry_state))
+						out.push_back(m.name + " : no entry state (link Entry to a state).");
+					for (const auto& s : m.states)
+						if (!g.IsMotion(s.motion))
+							out.push_back(m.name + " > " + s.name + " : nothing plugged into its Output Pose.");
+					for (const auto& t : m.transitions)
+						for (const auto& c : t.conditions)
+							if (c.kind != "finished" && c.kind != "script" && !g.FindParameter(c.param))
+								out.push_back(m.name + " : transition " + (t.from.empty() ? std::string("Any") : t.from) + " -> " +
+								              t.to + " : unknown parameter \"" + c.param + "\".");
+				}
 				for (const auto& a : g.animations)
 					if (a.texture.empty())
 						out.push_back("Animation " + a.name + " : no texture.");
-				for (const auto& t : g.transitions)
-					for (const auto& c : t.conditions)
-						if (c.kind != "finished" && c.kind != "script" && !g.FindParameter(c.param))
-							out.push_back("Transition " + (t.from.empty() ? std::string("Any") : t.from) + " -> " + t.to +
-							              " : unknown parameter \"" + c.param + "\".");
 				return out;
 			}
 
@@ -858,7 +995,6 @@ namespace lynx::editor::graph_editors
 					ImGui::SetNextItemWidth(std::max(30.f, w * 0.34f - ImGui::GetFrameHeight() - 12.f));
 					if (debug)
 					{
-						// Live value of the game.
 						const float v = debug->GetFloat(p.name);
 						ImGui::AlignTextToFramePadding();
 						if (p.type == "bool" || p.type == "trigger")
@@ -929,6 +1065,13 @@ namespace lynx::editor::graph_editors
 					AnimGraphAnimation& a = g.animations[i];
 					ImGui::PushID(static_cast<int>(i) + 10000);
 					const bool open = ImGui::TreeNodeEx("##anim", ImGuiTreeNodeFlags_SpanAvailWidth, "%s", a.name.c_str());
+					// Drag onto the graph : a node that plays it.
+					if (ImGui::BeginDragDropSource())
+					{
+						ImGui::SetDragDropPayload("LYNX_ANIM_MOTION", a.name.c_str(), a.name.size() + 1);
+						ImGui::Text("Animation %s", a.name.c_str());
+						ImGui::EndDragDropSource();
+					}
 					if (ImGui::BeginPopupContextItem())
 					{
 						if (ImGui::MenuItem("Delete"))
@@ -943,11 +1086,11 @@ namespace lynx::editor::graph_editors
 							std::string renamed;
 							if (InputName("##name", a.name, renamed))
 							{
-								if (NameUsedByMotion(g, renamed))
+								if (g.IsMotion(renamed))
 									ShowMessage(doc, "\"" + renamed + "\" is already an animation or a blend space");
 								else
 								{
-									RenameMotion(g, a.name, renamed);
+									g.RenameMotion(a.name, renamed);
 									doc.touched = true;
 								}
 							}
@@ -1008,10 +1151,8 @@ namespace lynx::editor::graph_editors
 				}
 				if (remove >= 0)
 				{
-					const std::string name = g.animations[static_cast<size_t>(remove)].name;
 					g.animations.erase(g.animations.begin() + remove);
 					doc.touched = true;
-					(void)name;
 				}
 
 				if (ImGui::Button("+ Animation"))
@@ -1039,6 +1180,12 @@ namespace lynx::editor::graph_editors
 					AnimGraphBlendSpace& b = g.blend_spaces[i];
 					ImGui::PushID(static_cast<int>(i) + 20000);
 					const bool open = ImGui::TreeNodeEx("##bs", ImGuiTreeNodeFlags_SpanAvailWidth, "%s", b.name.c_str());
+					if (ImGui::BeginDragDropSource())
+					{
+						ImGui::SetDragDropPayload("LYNX_ANIM_MOTION", b.name.c_str(), b.name.size() + 1);
+						ImGui::Text("Blend Space %s", b.name.c_str());
+						ImGui::EndDragDropSource();
+					}
 					if (ImGui::BeginPopupContextItem())
 					{
 						if (ImGui::MenuItem("Delete"))
@@ -1053,11 +1200,11 @@ namespace lynx::editor::graph_editors
 							std::string renamed;
 							if (InputName("##name", b.name, renamed))
 							{
-								if (NameUsedByMotion(g, renamed))
+								if (g.IsMotion(renamed))
 									ShowMessage(doc, "\"" + renamed + "\" is already an animation or a blend space");
 								else
 								{
-									RenameMotion(g, b.name, renamed);
+									g.RenameMotion(b.name, renamed);
 									doc.touched = true;
 								}
 							}
@@ -1120,13 +1267,79 @@ namespace lynx::editor::graph_editors
 				}
 			}
 
+			// Outline of the graph : AnimGraph > state machines > states (click : open).
+			void DrawOutline(Doc& doc)
+			{
+				AnimGraphAsset& g = doc.anim;
+				if (!ImGui::CollapsingHeader("Graph", ImGuiTreeNodeFlags_DefaultOpen))
+					return;
+				const bool root = doc.anim_machine == 0;
+				if (ImGui::Selectable("AnimGraph  (Output Pose)", root && doc.anim_state == 0))
+					SetView(doc, 0, 0);
+				ImGui::Indent();
+				for (const auto& m : g.state_machines)
+				{
+					ImGui::PushID(m.id);
+					const bool here = doc.anim_machine == m.id && doc.anim_state == 0;
+					const std::string label = m.name + "  (state machine)";
+					if (ImGui::Selectable(label.c_str(), here))
+						SetView(doc, m.id, 0);
+					ImGui::Indent();
+					for (const auto& s : m.states)
+					{
+						ImGui::PushID(s.id);
+						if (ImGui::Selectable(s.name.c_str(), doc.anim_machine == m.id && doc.anim_state == s.id))
+							SetView(doc, m.id, s.id);
+						ImGui::PopID();
+					}
+					ImGui::Unindent();
+					ImGui::PopID();
+				}
+				ImGui::Unindent();
+			}
+
 			void DrawLeft(Doc& doc, AnimationSpriteComponent* debug)
 			{
+				DrawOutline(doc);
+				ImGui::Spacing();
 				DrawParameters(doc, debug);
 				ImGui::Spacing();
 				DrawAnimations(doc);
 				ImGui::Spacing();
 				DrawBlendSpaces(doc);
+			}
+
+			// Path of the view in the toolbar : AnimGraph > Locomotion > Idle
+			void DrawBreadcrumb(Doc& doc)
+			{
+				AnimGraphStateMachine* m = Machine(doc);
+				AnimGraphState* s = CurrentState(doc);
+				if (m || s)
+				{
+					if (ImGui::SmallButton("^ Up"))
+						SetView(doc, s ? doc.anim_machine : 0, 0);
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Back to the graph above (Backspace)");
+					ImGui::SameLine();
+				}
+				if (ImGui::SmallButton("AnimGraph"))
+					SetView(doc, 0, 0);
+				if (m)
+				{
+					ImGui::SameLine();
+					ImGui::TextDisabled(">");
+					ImGui::SameLine();
+					const std::string label = m->name + "##crumb_machine";
+					if (ImGui::SmallButton(label.c_str()))
+						SetView(doc, m->id, 0);
+				}
+				if (s)
+				{
+					ImGui::SameLine();
+					ImGui::TextDisabled(">");
+					ImGui::SameLine();
+					ImGui::TextUnformatted(s->name.c_str());
+				}
 			}
 
 			// ---- Details ----------------------------------------------------------------
@@ -1224,19 +1437,187 @@ namespace lynx::editor::graph_editors
 				}
 			}
 
-			void DrawDetails(Doc& doc, AnimationSpriteComponent* debug)
+			// Details of the motion played by a node (animation fields / blend space variable).
+			void DrawMotionSummary(Doc& doc, const std::string& motion)
 			{
 				AnimGraphAsset& g = doc.anim;
+				for (auto& a : g.animations)
+					if (a.name == motion)
+					{
+						SectionTitle("Animation");
+						if (BeginFields("##motion"))
+						{
+							FieldLabel("Texture");
+							if (AssetField("texture", a.texture))
+								doc.touched = true;
+							FieldLabel("Frames");
+							if (ImGui::InputInt("##frames", &a.frames))
+							{
+								a.frames = std::max(1, a.frames);
+								doc.touched = true;
+							}
+							FieldLabel("Frame time");
+							if (ImGui::DragFloat("##ft", &a.frame_time, 0.005f, 0.001f, 10.f, "%.3f s"))
+								doc.touched = true;
+							FieldLabel("Loop");
+							if (ImGui::Checkbox("##loop", &a.loop))
+								doc.touched = true;
+							ImGui::EndTable();
+						}
+						return;
+					}
+				for (auto& b : g.blend_spaces)
+					if (b.name == motion)
+					{
+						SectionTitle("Blend Space");
+						if (BeginFields("##motion"))
+						{
+							FieldLabel("Variable");
+							if (ComboStr("##var", b.variable, ParamNames(g, "float"), "(none)"))
+								doc.touched = true;
+							ImGui::EndTable();
+						}
+						for (const auto& s : b.samples)
+							ImGui::BulletText("%s  ->  %s", Num(s.position).c_str(), s.animation.c_str());
+						return;
+					}
+			}
 
+			void DrawRootDetails(Doc& doc, AnimationSpriteComponent* debug)
+			{
+				AnimGraphAsset& g = doc.anim;
+				if (doc.sel_node == kOutputNode || doc.sel_link == kOutputLink)
+				{
+					ImGui::TextUnformatted("Output Pose");
+					ImGui::Separator();
+					ImGui::TextWrapped("The final pose of the sprite. Plug an Animation, a Blend Space or a State Machine into it.");
+					std::vector<std::string> sources;
+					for (const auto& n : g.pose_nodes)
+						sources.push_back(std::string(PoseTypeLabel(n.type)) + " : " + n.source + "##" + std::to_string(n.id));
+					if (BeginFields("##output"))
+					{
+						FieldLabel("Plugged");
+						const AnimGraphPoseNode* now = g.OutputNode();
+						const std::string preview = now ? std::string(PoseTypeLabel(now->type)) + " : " + now->source : std::string("(nothing)");
+						if (ImGui::BeginCombo("##plugged", preview.c_str()))
+						{
+							if (ImGui::Selectable("(nothing)", !now))
+							{
+								g.output_source = 0;
+								doc.touched = true;
+							}
+							for (const auto& n : g.pose_nodes)
+							{
+								ImGui::PushID(n.id);
+								const std::string label = std::string(PoseTypeLabel(n.type)) + " : " + n.source;
+								if (ImGui::Selectable(label.c_str(), now && now->id == n.id))
+								{
+									g.output_source = n.id;
+									doc.touched = true;
+								}
+								ImGui::PopID();
+							}
+							ImGui::EndCombo();
+						}
+						ImGui::EndTable();
+					}
+					if (debug)
+						ImGui::TextColored(kLive, "Playing : %s", debug->GetCurrentState().c_str());
+					return;
+				}
+
+				AnimGraphPoseNode* n = doc.sel_node >= 1000 ? g.FindPoseNode(ItemOfNode(doc.sel_node)) : nullptr;
+				if (!n)
+				{
+					ImGui::TextDisabled("Nothing selected");
+					ImGui::Spacing();
+					ImGui::TextWrapped(
+						"Start from the output : plug what the sprite plays into Output Pose.\n\n"
+						"Right click on the graph : add an Animation, a Blend Space or a State Machine.\n"
+						"Drag the pin of a node onto Output Pose to plug it.\n"
+						"Double-click a State Machine to edit its states.\n\n"
+						"Use : AnimationSprite.graph = \"%s\" (or loadGraph), then setFloat / setBool / setTrigger.",
+						AssetPathOf(doc.path).c_str());
+					return;
+				}
+
+				const bool plugged = g.output_source == n->id;
+				ImGui::Text("%s   %s%s", PoseTypeLabel(n->type), n->source.c_str(), plugged ? "   (output)" : "");
+				ImGui::Separator();
+				if (n->type == "statemachine")
+				{
+					AnimGraphStateMachine* m = g.FindStateMachine(n->source);
+					if (BeginFields("##machine"))
+					{
+						FieldLabel("Name");
+						std::string renamed;
+						if (m && InputName("##name", m->name, renamed))
+						{
+							if (g.FindStateMachine(renamed))
+								ShowMessage(doc, "A state machine \"" + renamed + "\" already exists");
+							else
+							{
+								g.RenameStateMachine(m->name, renamed);
+								doc.touched = true;
+							}
+						}
+						ImGui::EndTable();
+					}
+					if (m)
+					{
+						ImGui::Text("%d states, %d transitions", static_cast<int>(m->states.size()), static_cast<int>(m->transitions.size()));
+						if (ImGui::Button("Open (double-click)"))
+						{
+							const int id = m->id;
+							Later(doc, [&doc, id] { SetView(doc, id, 0); });
+						}
+					}
+				}
+				else
+				{
+					if (BeginFields("##pose"))
+					{
+						FieldLabel(n->type == "blendspace" ? "Blend space" : "Animation");
+						std::vector<std::string> options;
+						if (n->type == "blendspace")
+							for (const auto& b : g.blend_spaces)
+								options.push_back(b.name);
+						else
+							for (const auto& a : g.animations)
+								options.push_back(a.name);
+						if (ComboStr("##source", n->source, options, "(none)"))
+							doc.touched = true;
+						ImGui::EndTable();
+					}
+					DrawMotionSummary(doc, n->source);
+				}
+				ImGui::Spacing();
+				if (!plugged && ImGui::Button("Plug into Output Pose"))
+				{
+					g.output_source = n->id;
+					doc.touched = true;
+				}
+				if (!plugged)
+					ImGui::SameLine();
+				if (ImGui::Button("Delete"))
+				{
+					const int id = n->id;
+					Later(doc, [&doc, id] { DeletePoseNode(doc, id); doc.sel_node = 0; });
+				}
+			}
+
+			void DrawMachineDetails(Doc& doc, AnimGraphStateMachine& m, AnimationSpriteComponent* debug)
+			{
+				AnimGraphAsset& g = doc.anim;
 				if (doc.sel_link == kEntryLink || doc.sel_node == kEntryNode)
 				{
 					ImGui::TextUnformatted("Entry");
 					ImGui::Separator();
-					ImGui::TextWrapped("The state the graph starts in.");
+					ImGui::TextWrapped("The state %s starts in.", m.name.c_str());
 					if (BeginFields("##entry"))
 					{
 						FieldLabel("Entry state");
-						if (ComboStr("##entry", g.entry_state, StateNames(g)))
+						if (ComboStr("##entry", m.entry_state, StateNames(m)))
 							doc.touched = true;
 						ImGui::EndTable();
 					}
@@ -1252,9 +1633,9 @@ namespace lynx::editor::graph_editors
 					return;
 				}
 
-				if (doc.sel_link > kEntryLink)
+				if (doc.sel_link >= 1000)
 				{
-					AnimGraphTransition* t = FindTransition(g, TransitionOfLink(doc.sel_link));
+					AnimGraphTransition* t = FindTransition(m, TransitionOfLink(doc.sel_link));
 					if (!t)
 						return;
 					ImGui::Text("Transition   %s  ->  %s", t->from.empty() ? "Any State" : t->from.c_str(), t->to.c_str());
@@ -1275,27 +1656,32 @@ namespace lynx::editor::graph_editors
 					if (ImGui::Button("Delete transition"))
 					{
 						const int id = t->id;
-						Later(doc, [&doc, id] { DeleteTransition(doc, id); doc.sel_link = 0; });
+						const int machine = m.id;
+						Later(doc, [&doc, id, machine]
+						{
+							if (AnimGraphStateMachine* mm = doc.anim.FindStateMachine(machine))
+								DeleteTransition(doc, *mm, id);
+							doc.sel_link = 0;
+						});
 					}
 					return;
 				}
 
-				AnimGraphState* s = doc.sel_node >= 1000 ? FindState(g, StateOfNode(doc.sel_node)) : nullptr;
+				AnimGraphState* s = doc.sel_node >= 1000 ? FindState(m, ItemOfNode(doc.sel_node)) : nullptr;
 				if (!s)
 				{
-					ImGui::TextDisabled("Nothing selected");
-					ImGui::Spacing();
+					ImGui::Text("State machine   %s", m.name.c_str());
+					ImGui::Separator();
 					ImGui::TextWrapped(
 						"Right click on the graph : add a state.\n"
 						"Drag the pin of a state onto another one : transition.\n"
-						"Click a transition (a link) to edit its conditions.\n\n"
-						"Use : AnimationSprite.graph = \"%s\" (or loadGraph), then setFloat / setBool / setTrigger.\n"
-						"Notifies and on enter / on exit call the JS function of the actor with that name.",
-						AssetPathOf(doc.path).c_str());
+						"Click a transition (a link) to edit its conditions.\n"
+						"Double-click a state : its pose (what it plays -> Output Pose).\n\n"
+						"Notifies and on enter / on exit call the JS function of the actor with that name.");
 					return;
 				}
 
-				const bool is_entry = g.entry_state == s->name;
+				const bool is_entry = m.entry_state == s->name;
 				ImGui::Text("State   %s%s", s->name.c_str(), is_entry ? "   (entry)" : "");
 				if (debug && debug->GetCurrentState() == s->name)
 				{
@@ -1310,15 +1696,15 @@ namespace lynx::editor::graph_editors
 					std::string renamed;
 					if (InputName("##name", s->name, renamed))
 					{
-						if (g.FindState(renamed))
+						if (m.FindState(renamed))
 							ShowMessage(doc, "A state \"" + renamed + "\" already exists");
 						else
 						{
-							g.RenameState(s->name, renamed);
+							m.RenameState(s->name, renamed);
 							doc.touched = true;
 						}
 					}
-					FieldLabel("Animation", "Animation or blend space played in this state.");
+					FieldLabel("Pose", "What the state plays (its Output Pose) : animation or blend space.");
 					if (ComboStr("##motion", s->motion, Motions(g), "(none)"))
 						doc.touched = true;
 					FieldLabel("Interruptible", "Off : transitions wait for the end of the animation.");
@@ -1329,7 +1715,7 @@ namespace lynx::editor::graph_editors
 						doc.touched = true;
 					FieldLabel("Next", "Played at the end of the animation when no transition is taken.");
 					std::vector<std::string> others;
-					for (const auto& o : g.states)
+					for (const auto& o : m.states)
 						if (o.id != s->id)
 							others.push_back(o.name);
 					if (ComboStr("##next", s->next, others, "(none)"))
@@ -1344,28 +1730,27 @@ namespace lynx::editor::graph_editors
 				}
 
 				ImGui::Spacing();
+				const int machine = m.id;
+				const int id = s->id;
+				if (ImGui::Button("Edit pose (double-click)"))
+					Later(doc, [&doc, machine, id] { SetView(doc, machine, id); });
+				ImGui::SameLine();
 				if (!is_entry && ImGui::Button("Set as entry"))
 				{
-					g.entry_state = s->name;
+					m.entry_state = s->name;
 					doc.touched = true;
 				}
 				if (!is_entry)
 					ImGui::SameLine();
 				if (ImGui::Button("Duplicate"))
-				{
-					const int id = s->id;
-					Later(doc, [&doc, id] { DuplicateState(doc, id); });
-				}
+					Later(doc, [&doc, machine, id] { if (auto* mm = doc.anim.FindStateMachine(machine)) DuplicateState(doc, *mm, id); });
 				ImGui::SameLine();
 				if (ImGui::Button("Delete"))
-				{
-					const int id = s->id;
-					Later(doc, [&doc, id] { DeleteState(doc, id); doc.sel_node = 0; });
-				}
+					Later(doc, [&doc, machine, id] { if (auto* mm = doc.anim.FindStateMachine(machine)) DeleteState(doc, *mm, id); doc.sel_node = 0; });
 
 				SectionTitle("Transitions from this state");
 				std::vector<const AnimGraphTransition*> out;
-				for (const auto& t : g.transitions)
+				for (const auto& t : m.transitions)
 					if (t.from == s->name)
 						out.push_back(&t);
 				std::stable_sort(out.begin(), out.end(), [](auto* a, auto* b) { return a->priority > b->priority; });
@@ -1381,37 +1766,120 @@ namespace lynx::editor::graph_editors
 				}
 			}
 
-			// ---- Canvas -------------------------------------------------------------------
-
-			void DrawStateNode(Doc& doc, const AnimGraphState& s, bool playing)
+			void DrawStateDetails(Doc& doc, AnimGraphStateMachine& m, AnimGraphState& s)
 			{
 				AnimGraphAsset& g = doc.anim;
-				const int node = StateNode(s.id);
+				ImGui::Text("%s > %s", m.name.c_str(), s.name.c_str());
+				ImGui::Separator();
+				ImGui::TextWrapped("The pose of the state : plug an Animation or a Blend Space into its Output Pose.");
+				if (BeginFields("##statepose"))
+				{
+					FieldLabel("Plays");
+					if (ComboStr("##motion", s.motion, Motions(g), "(nothing)"))
+						doc.touched = true;
+					ImGui::EndTable();
+				}
+				DrawMotionSummary(doc, s.motion);
+			}
+
+			void DrawDetails(Doc& doc, AnimationSpriteComponent* debug)
+			{
+				ValidateView(doc);
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m)
+					DrawRootDetails(doc, debug);
+				else if (AnimGraphState* s = CurrentState(doc))
+					DrawStateDetails(doc, *m, *s);
+				else
+					DrawMachineDetails(doc, *m, debug);
+			}
+
+			// ---- Nodes ----------------------------------------------------------------------
+
+			// A node that produces a pose : output pin on the right.
+			void DrawPoseSourceNode(Doc& doc, int node, const std::string& type, const std::string& source, bool live)
+			{
+				AnimGraphAsset& g = doc.anim;
+				const bool machine = type == "statemachine";
+				const ImU32 color = live ? kActive : machine ? kMachineColor : type == "blendspace" ? kBlendColor : kAnimColor;
+				const float width = ImGui::GetFontSize() * 9.f;
+				PushTitleColor(color);
+				ImNodes::BeginNode(node);
+				BeginTitle();
+				TitleBadge(machine ? "SM" : type == "blendspace" ? "BS" : "A", Lighter(color, 45));
+				ImGui::TextUnformatted(source.empty() ? "(none)" : source.c_str());
+				EndTitle();
+
+				ImGui::TextDisabled("%s", PoseTypeLabel(type));
+				if (machine)
+				{
+					if (const AnimGraphStateMachine* m = g.FindStateMachine(source))
+						ImGui::TextDisabled("%d states", static_cast<int>(m->states.size()));
+				}
+				else
+				{
+					bool exists = machine ? false : g.IsMotion(source);
+					if (!exists)
+						ImGui::TextColored(kWarning, "%s", source.empty() ? "choose one" : "missing");
+					else
+						for (const auto& a : g.animations)
+							if (a.name == source)
+								ImGui::TextDisabled("%d frames%s", a.frames, a.loop ? ", loop" : "");
+					for (const auto& b : g.blend_spaces)
+						if (b.name == source)
+							ImGui::TextDisabled("by %s", b.variable.empty() ? "?" : b.variable.c_str());
+				}
+				ImNodes::BeginOutputAttribute(node * 4 + 2, ImNodesPinShape_TriangleFilled);
+				ImGui::Dummy(ImVec2(width - ImGui::CalcTextSize("Pose").x, 1.f));
+				ImGui::SameLine();
+				ImGui::TextUnformatted("Pose");
+				ImNodes::EndOutputAttribute();
+				ImNodes::EndNode();
+				PopTitleColor();
+			}
+
+			void DrawOutputNode(bool live)
+			{
+				PushTitleColor(live ? kActive : kOutputColor);
+				ImNodes::BeginNode(kOutputNode);
+				BeginTitle();
+				TitleBadge(">|", Lighter(kOutputColor, 45));
+				ImGui::TextUnformatted("Output Pose");
+				EndTitle();
+				ImNodes::BeginInputAttribute(kOutputNode * 4 + 1, ImNodesPinShape_CircleFilled);
+				ImGui::TextUnformatted("Result");
+				ImNodes::EndInputAttribute();
+				ImGui::Dummy(ImVec2(ImGui::GetFontSize() * 6.f, 1.f));
+				ImNodes::EndNode();
+				PopTitleColor();
+			}
+
+			void DrawStateNode(Doc& doc, const AnimGraphStateMachine& m, const AnimGraphState& s, bool playing)
+			{
+				AnimGraphAsset& g = doc.anim;
+				const int node = ItemNode(s.id);
 				const float width = ImGui::GetFontSize() * 10.f;
 
 				PushTitleColor(playing ? kActive : kStateColor);
 				ImNodes::BeginNode(node);
 				BeginTitle();
 				{
-					// Badge : animation, blend space, or nothing yet.
-					bool blend = false;
-					for (const auto& b : g.blend_spaces)
-						blend |= b.name == s.motion;
-					if (s.motion.empty() || !g.IsMotion(s.motion))
+					const std::string type = MotionType(g, s.motion);
+					if (type.empty())
 						TitleBadge("?", IM_COL32(200, 110, 40, 255));
-					else if (blend)
+					else if (type == "blendspace")
 						TitleBadge("BS", IM_COL32(150, 90, 200, 255));
 					else
 						TitleBadge("A", IM_COL32(60, 140, 210, 255));
 				}
 				ImGui::TextUnformatted(s.name.c_str());
-				if (g.entry_state == s.name)
+				if (m.entry_state == s.name)
 					TitleDim("(entry)");
 				EndTitle();
 
 				ImNodes::BeginInputAttribute(InAttr(node), ImNodesPinShape_CircleFilled);
 				if (s.motion.empty())
-					ImGui::TextColored(kWarning, "no animation");
+					ImGui::TextColored(kWarning, "no pose");
 				else if (!g.IsMotion(s.motion))
 					ImGui::TextColored(kWarning, "%s (missing)", s.motion.c_str());
 				else
@@ -1420,7 +1888,7 @@ namespace lynx::editor::graph_editors
 
 				ImNodes::BeginOutputAttribute(OutAttr(node), ImNodesPinShape_TriangleFilled);
 				int shown = 0, count = 0;
-				for (const auto& t : g.transitions)
+				for (const auto& t : m.transitions)
 				{
 					if (t.from != s.name)
 						continue;
@@ -1461,20 +1929,59 @@ namespace lynx::editor::graph_editors
 				PopTitleColor();
 			}
 
-			void AddStateMenu(Doc& doc, const std::string& link_from)
+			// ---- Menus ------------------------------------------------------------------------
+
+			// Root : add a pose node (plugged into Output Pose when `plug`).
+			void AddPoseMenu(Doc& doc, bool plug)
+			{
+				AnimGraphAsset& g = doc.anim;
+				auto create = [&](const std::string& type, const std::string& source)
+				{
+					const int id = AddPoseNode(doc, type, source, doc.popup_pos);
+					if (plug)
+						g.output_source = id;
+				};
+				if (ImGui::MenuItem("New state machine"))
+					create("statemachine", NewStateMachine(doc));
+				if (!g.state_machines.empty() && ImGui::BeginMenu("State machine"))
+				{
+					for (const auto& m : g.state_machines)
+						if (ImGui::MenuItem(m.name.c_str()))
+							create("statemachine", m.name);
+					ImGui::EndMenu();
+				}
+				ImGui::Separator();
+				if (ImGui::BeginMenu("Animation", !g.animations.empty()))
+				{
+					for (const auto& a : g.animations)
+						if (ImGui::MenuItem(a.name.c_str()))
+							create("animation", a.name);
+					ImGui::EndMenu();
+				}
+				if (ImGui::BeginMenu("Blend space", !g.blend_spaces.empty()))
+				{
+					for (const auto& b : g.blend_spaces)
+						if (ImGui::MenuItem(b.name.c_str()))
+							create("blendspace", b.name);
+					ImGui::EndMenu();
+				}
+				if (g.animations.empty() && g.blend_spaces.empty())
+					ImGui::TextDisabled("(add animations on the left)");
+			}
+
+			void AddStateMenu(Doc& doc, AnimGraphStateMachine& m, const std::string& link_from)
 			{
 				AnimGraphAsset& g = doc.anim;
 				auto create = [&](const std::string& base, const std::string& motion)
 				{
-					const ImVec2 pos = doc.popup_pos;
-					const int id = AddState(doc, base, motion, pos);
+					const int id = AddState(doc, m, base, motion, doc.popup_pos);
 					if (doc.dropped_attr)
 					{
-						const std::string to = FindState(g, id)->name;
+						const std::string to = FindState(m, id)->name;
 						if (link_from == "<entry>")
-							g.entry_state = to;
+							m.entry_state = to;
 						else
-							AddTransition(doc, link_from, to);
+							AddTransition(doc, m, link_from, to);
 					}
 				};
 
@@ -1485,67 +1992,253 @@ namespace lynx::editor::graph_editors
 				{
 					ImGui::Separator();
 					ImGui::TextDisabled("State playing");
-					for (const std::string& m : motions)
-						if (ImGui::MenuItem(m.c_str()))
-							create(m, m);
+					for (const std::string& mo : motions)
+						if (ImGui::MenuItem(mo.c_str()))
+							create(mo, mo);
 				}
 			}
 
-			void DrawCanvas(Doc& doc, AnimationSpriteComponent* debug)
+			// ---- Canvas : positions -------------------------------------------------------------
+
+			void Sync(Doc& doc, const std::unordered_set<int>& drawn, int node, float& x, float& y)
 			{
-				AnimGraphAsset& g = doc.anim;
-				const std::string playing = debug ? debug->GetCurrentState() : std::string();
-
-				ImNodes::BeginNodeEditor();
-
-				// Positions of the asset (load, undo) and of the new nodes.
-				if (doc.place_all)
+				if (!drawn.count(node))
+					return;
+				const ImVec2 p = ImNodes::GetNodeGridSpacePos(node);
+				if (std::fabs(p.x - x) > 0.5f || std::fabs(p.y - y) > 0.5f)
 				{
-					ImNodes::SetNodeGridSpacePos(kEntryNode, ImVec2(g.entry_x, g.entry_y));
-					ImNodes::SetNodeGridSpacePos(kAnyNode, ImVec2(g.any_x, g.any_y));
-					ImNodes::SnapNodeToGrid(kEntryNode);
-					ImNodes::SnapNodeToGrid(kAnyNode);
-					for (const auto& s : g.states)
-					{
-						ImNodes::SetNodeGridSpacePos(StateNode(s.id), ImVec2(s.x, s.y));
-						ImNodes::SnapNodeToGrid(StateNode(s.id));     // the nodes are always on the grid
-					}
+					x = std::round(p.x);
+					y = std::round(p.y);
+					if (!doc.place_all && doc.place_now.empty())
+						doc.touched = true;
 				}
+			}
+
+			void Place(int node, float x, float y)
+			{
+				ImNodes::SetNodeGridSpacePos(node, ImVec2(x, y));
+				ImNodes::SnapNodeToGrid(node);   // the nodes are always on the grid
+			}
+
+			void PlaceNew(Doc& doc)
+			{
 				for (const auto& [node, screen] : doc.place_now)
 				{
 					ImNodes::SetNodeScreenSpacePos(node, screen);
 					ImNodes::SnapNodeToGrid(node);
 				}
+			}
+
+			// Drop of an animation / blend space of the left panel onto the canvas.
+			std::string AcceptMotionDrop()
+			{
+				std::string motion;
+				if (ImGui::BeginDragDropTarget())
+				{
+					if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("LYNX_ANIM_MOTION"))
+						motion = static_cast<const char*>(p->Data);
+					ImGui::EndDragDropTarget();
+				}
+				return motion;
+			}
+
+			// ---- Canvas : root -------------------------------------------------------------------
+
+			void DrawRootCanvas(Doc& doc, AnimationSpriteComponent* debug)
+			{
+				AnimGraphAsset& g = doc.anim;
+				ImNodes::BeginNodeEditor();
+				if (doc.place_all)
+				{
+					Place(kOutputNode, g.output_x, g.output_y);
+					for (const auto& n : g.pose_nodes)
+						Place(ItemNode(n.id), n.x, n.y);
+				}
+				PlaceNew(doc);
+
+				DrawOutputNode(debug != nullptr && g.OutputNode() != nullptr);
+				std::unordered_set<int> drawn{ kOutputNode };
+				for (const auto& n : g.pose_nodes)
+				{
+					DrawPoseSourceNode(doc, ItemNode(n.id), n.type, n.source, debug && g.output_source == n.id);
+					drawn.insert(ItemNode(n.id));
+				}
+				doc.drawn_nodes = drawn;
+				doc.drawn_links.clear();
+				if (const AnimGraphPoseNode* out = g.OutputNode())
+				{
+					if (debug)
+						ImNodes::PushColorStyle(ImNodesCol_Link, kActive);
+					ImNodes::Link(kOutputLink, ItemNode(out->id) * 4 + 2, kOutputNode * 4 + 1);
+					if (debug)
+						ImNodes::PopColorStyle();
+					doc.drawn_links.insert(kOutputLink);
+				}
+				ImNodes::EndNodeEditor();
+
+				// Drop from the left panel : a node that plays it.
+				const std::string dropped_motion = AcceptMotionDrop();
+				if (!dropped_motion.empty())
+					AddPoseNode(doc, MotionType(g, dropped_motion), dropped_motion, ImGui::GetMousePos());
+
+				const bool editor_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+				int hovered_node = 0;
+				const bool node_hovered = ImNodes::IsNodeHovered(&hovered_node);
+
+				// Double-click on a state machine : its states.
+				if (node_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+					if (const AnimGraphPoseNode* n = hovered_node >= 1000 ? g.FindPoseNode(ItemOfNode(hovered_node)) : nullptr)
+						if (n->type == "statemachine")
+							if (const AnimGraphStateMachine* m = g.FindStateMachine(n->source))
+							{
+								const int id = m->id;
+								Later(doc, [&doc, id] { SetView(doc, id, 0); });
+							}
+
+				if (editor_hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+				    ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
+				{
+					doc.popup_pos = ImGui::GetMousePos();
+					doc.dropped_attr = 0;
+					if (node_hovered)
+					{
+						doc.context_node = hovered_node;
+						ImGui::OpenPopup("##node_menu");
+					}
+					else
+						ImGui::OpenPopup("##add_pose");
+				}
+
+				if (ImGui::BeginPopup("##add_pose"))
+				{
+					ImGui::TextDisabled(doc.dropped_attr ? "Plug into Output Pose" : "Add a pose node");
+					ImGui::Separator();
+					AddPoseMenu(doc, doc.dropped_attr != 0);
+					ImGui::EndPopup();
+				}
+
+				if (ImGui::BeginPopup("##node_menu"))
+				{
+					const int node = doc.context_node;
+					if (const AnimGraphPoseNode* n = node >= 1000 ? g.FindPoseNode(ItemOfNode(node)) : nullptr)
+					{
+						const int id = n->id;
+						ImGui::TextDisabled("%s %s", PoseTypeLabel(n->type), n->source.c_str());
+						ImGui::Separator();
+						if (n->type == "statemachine" && ImGui::MenuItem("Open", "double-click"))
+							if (const AnimGraphStateMachine* m = g.FindStateMachine(n->source))
+							{
+								const int mid = m->id;
+								Later(doc, [&doc, mid] { SetView(doc, mid, 0); });
+							}
+						if (ImGui::MenuItem("Plug into Output Pose", nullptr, false, g.output_source != id))
+						{
+							g.output_source = id;
+							doc.touched = true;
+						}
+						if (ImGui::MenuItem("Delete", "Del"))
+							Later(doc, [&doc, id] { DeletePoseNode(doc, id); doc.sel_node = 0; });
+					}
+					else
+					{
+						ImGui::TextDisabled("Output Pose");
+						ImGui::Separator();
+						if (ImGui::BeginMenu("Plug"))
+						{
+							AddPoseMenu(doc, true);
+							ImGui::EndMenu();
+						}
+					}
+					ImGui::EndPopup();
+				}
+
+				int start = 0, end = 0;
+				if (ImNodes::IsLinkCreated(&start, &end))
+				{
+					if (!IsOutAttr(start))
+						std::swap(start, end);
+					if (IsOutAttr(start) && NodeOfAttr(end) == kOutputNode && NodeOfAttr(start) >= 1000)
+					{
+						g.output_source = ItemOfNode(NodeOfAttr(start));
+						doc.touched = true;
+					}
+				}
+
+				int dropped = 0;
+				if (ImNodes::IsLinkDropped(&dropped, false))
+				{
+					// The input of Output Pose dropped on empty space : what to plug.
+					if (NodeOfAttr(dropped) == kOutputNode)
+					{
+						doc.dropped_attr = dropped;
+						doc.popup_pos = ImGui::GetMousePos();
+						ImGui::OpenPopup("##add_pose");
+					}
+				}
+
+				int destroyed = 0;
+				if (ImNodes::IsLinkDestroyed(&destroyed) && destroyed == kOutputLink)
+				{
+					g.output_source = 0;
+					doc.touched = true;
+				}
+
+				Sync(doc, drawn, kOutputNode, g.output_x, g.output_y);
+				for (auto& n : g.pose_nodes)
+					Sync(doc, drawn, ItemNode(n.id), n.x, n.y);
+			}
+
+			// ---- Canvas : state machine ------------------------------------------------------------
+
+			void DrawMachineCanvas(Doc& doc, AnimGraphStateMachine& m, AnimationSpriteComponent* debug)
+			{
+				AnimGraphAsset& g = doc.anim;
+				// The running machine (the one plugged into Output Pose) shows the live state.
+				std::string playing;
+				if (debug)
+				{
+					const AnimGraphPoseNode* out = g.OutputNode();
+					if (out && out->type == "statemachine" && out->source == m.name)
+						playing = debug->GetCurrentState();
+				}
+
+				ImNodes::BeginNodeEditor();
+				if (doc.place_all)
+				{
+					Place(kEntryNode, m.entry_x, m.entry_y);
+					Place(kAnyNode, m.any_x, m.any_y);
+					for (const auto& s : m.states)
+						Place(ItemNode(s.id), s.x, s.y);
+				}
+				PlaceNew(doc);
 
 				DrawSpecialNode(kEntryNode, "Entry", kEntryColor, "start");
 				DrawSpecialNode(kAnyNode, "Any State", kAnyColor, "from any state");
-				// Only these exist in ImNodes this frame (a node added by a menu below is drawn next frame).
 				std::unordered_set<int> drawn{ kEntryNode, kAnyNode };
-				for (const auto& s : g.states)
+				for (const auto& s : m.states)
 				{
-					DrawStateNode(doc, s, !playing.empty() && s.name == playing);
-					drawn.insert(StateNode(s.id));
+					DrawStateNode(doc, m, s, !playing.empty() && s.name == playing);
+					drawn.insert(ItemNode(s.id));
 				}
 				doc.drawn_nodes = drawn;
 				doc.drawn_links.clear();
 
-				// Links
-				if (AnimGraphState* entry = g.FindState(g.entry_state))
+				if (AnimGraphState* entry = m.FindState(m.entry_state))
 				{
-					ImNodes::Link(kEntryLink, OutAttr(kEntryNode), InAttr(StateNode(entry->id)));
+					ImNodes::Link(kEntryLink, OutAttr(kEntryNode), InAttr(ItemNode(entry->id)));
 					doc.drawn_links.insert(kEntryLink);
 				}
-				for (const auto& t : g.transitions)
+				for (const auto& t : m.transitions)
 				{
-					AnimGraphState* to = g.FindState(t.to);
-					AnimGraphState* from = t.from.empty() ? nullptr : g.FindState(t.from);
+					AnimGraphState* to = m.FindState(t.to);
+					AnimGraphState* from = t.from.empty() ? nullptr : m.FindState(t.from);
 					if (!to || (!t.from.empty() && !from))
 						continue;
-					const int start = from ? OutAttr(StateNode(from->id)) : OutAttr(kAnyNode);
-					const bool live = debug && t.to == playing && (t.from.empty() || from);
+					const int start = from ? OutAttr(ItemNode(from->id)) : OutAttr(kAnyNode);
+					const bool live = !playing.empty() && t.to == playing;
 					if (live)
 						ImNodes::PushColorStyle(ImNodesCol_Link, kActive);
-					ImNodes::Link(TransitionLink(t.id), start, InAttr(StateNode(to->id)));
+					ImNodes::Link(TransitionLink(t.id), start, InAttr(ItemNode(to->id)));
 					doc.drawn_links.insert(TransitionLink(t.id));
 					if (live)
 						ImNodes::PopColorStyle();
@@ -1553,12 +2246,22 @@ namespace lynx::editor::graph_editors
 
 				ImNodes::EndNodeEditor();
 
-				// Context menus
-				// After EndNodeEditor : ImNodes::IsEditorHovered() only works inside the editor
-				// scope, so the canvas child (and its ImNodes region) is checked here.
+				const std::string dropped_motion = AcceptMotionDrop();
+				if (!dropped_motion.empty())
+					AddState(doc, m, dropped_motion, dropped_motion, ImGui::GetMousePos());
+
 				const bool editor_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
 				int hovered_node = 0;
 				const bool node_hovered = ImNodes::IsNodeHovered(&hovered_node);
+
+				// Double-click on a state : its pose.
+				if (node_hovered && hovered_node >= 1000 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+				{
+					const int machine = m.id;
+					const int id = ItemOfNode(hovered_node);
+					Later(doc, [&doc, machine, id] { SetView(doc, machine, id); });
+				}
+
 				if (editor_hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
 				    ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
 				{
@@ -1584,10 +2287,10 @@ namespace lynx::editor::graph_editors
 						if (node == kEntryNode)
 							from = "<entry>";
 						else if (node != kAnyNode)
-							if (AnimGraphState* s = FindState(g, StateOfNode(node)))
+							if (AnimGraphState* s = FindState(m, ItemOfNode(node)))
 								from = s->name;
 					}
-					AddStateMenu(doc, from);
+					AddStateMenu(doc, m, from);
 					ImGui::EndPopup();
 				}
 
@@ -1596,26 +2299,23 @@ namespace lynx::editor::graph_editors
 					const int node = doc.context_node;
 					if (node >= 1000)
 					{
-						AnimGraphState* s = FindState(g, StateOfNode(node));
-						if (s)
+						if (AnimGraphState* s = FindState(m, ItemOfNode(node)))
 						{
+							const int machine = m.id;
+							const int id = s->id;
 							ImGui::TextDisabled("%s", s->name.c_str());
 							ImGui::Separator();
-							if (ImGui::MenuItem("Set as entry", nullptr, false, g.entry_state != s->name))
+							if (ImGui::MenuItem("Edit pose", "double-click"))
+								Later(doc, [&doc, machine, id] { SetView(doc, machine, id); });
+							if (ImGui::MenuItem("Set as entry", nullptr, false, m.entry_state != s->name))
 							{
-								g.entry_state = s->name;
+								m.entry_state = s->name;
 								doc.touched = true;
 							}
 							if (ImGui::MenuItem("Duplicate", "Ctrl+D"))
-							{
-								const int id = s->id;
-								Later(doc, [&doc, id] { DuplicateState(doc, id); });
-							}
+								Later(doc, [&doc, machine, id] { if (auto* mm = doc.anim.FindStateMachine(machine)) DuplicateState(doc, *mm, id); });
 							if (ImGui::MenuItem("Delete", "Del"))
-							{
-								const int id = s->id;
-								Later(doc, [&doc, id] { DeleteState(doc, id); doc.sel_node = 0; });
-							}
+								Later(doc, [&doc, machine, id] { if (auto* mm = doc.anim.FindStateMachine(machine)) DeleteState(doc, *mm, id); doc.sel_node = 0; });
 						}
 					}
 					else
@@ -1627,7 +2327,6 @@ namespace lynx::editor::graph_editors
 					ImGui::EndPopup();
 				}
 
-				// ---- Changes made in the canvas ---------------------------------------
 				int start = 0, end = 0;
 				if (ImNodes::IsLinkCreated(&start, &end))
 				{
@@ -1635,25 +2334,24 @@ namespace lynx::editor::graph_editors
 						std::swap(start, end);
 					const int from_node = NodeOfAttr(start);
 					const int to_node = NodeOfAttr(end);
-					AnimGraphState* to = to_node >= 1000 ? FindState(g, StateOfNode(to_node)) : nullptr;
+					AnimGraphState* to = to_node >= 1000 ? FindState(m, ItemOfNode(to_node)) : nullptr;
 					if (IsOutAttr(start) && !IsOutAttr(end) && to && from_node != to_node)
 					{
 						if (from_node == kEntryNode)
 						{
-							g.entry_state = to->name;
+							m.entry_state = to->name;
 							doc.touched = true;
 						}
 						else if (from_node == kAnyNode)
-							AddTransition(doc, "", to->name);
-						else if (AnimGraphState* from = FindState(g, StateOfNode(from_node)))
-							AddTransition(doc, from->name, to->name);
+							AddTransition(doc, m, "", to->name);
+						else if (AnimGraphState* from = FindState(m, ItemOfNode(from_node)))
+							AddTransition(doc, m, from->name, to->name);
 					}
 				}
 
 				int dropped = 0;
 				if (ImNodes::IsLinkDropped(&dropped, false) && IsOutAttr(dropped))
 				{
-					// Pin dropped on empty space : new state linked to it.
 					doc.dropped_attr = dropped;
 					doc.popup_pos = ImGui::GetMousePos();
 					ImGui::OpenPopup("##add_state");
@@ -1663,45 +2361,203 @@ namespace lynx::editor::graph_editors
 				if (ImNodes::IsLinkDestroyed(&destroyed))
 				{
 					if (destroyed == kEntryLink)
-						g.entry_state.clear();
+						m.entry_state.clear();
 					else
-						DeleteTransition(doc, TransitionOfLink(destroyed));
+						DeleteTransition(doc, m, TransitionOfLink(destroyed));
 					doc.touched = true;
 				}
 
-				// Positions back into the asset.
-				auto sync = [&](int node, float& x, float& y)
+				Sync(doc, drawn, kEntryNode, m.entry_x, m.entry_y);
+				Sync(doc, drawn, kAnyNode, m.any_x, m.any_y);
+				for (auto& s : m.states)
+					Sync(doc, drawn, ItemNode(s.id), s.x, s.y);
+			}
+
+			// ---- Canvas : the pose of a state ---------------------------------------------------------
+
+			void DrawStateCanvas(Doc& doc, AnimGraphState& s, AnimationSpriteComponent* debug)
+			{
+				AnimGraphAsset& g = doc.anim;
+				const bool live = debug && debug->GetCurrentState() == s.name;
+				ImNodes::BeginNodeEditor();
+				if (doc.place_all)
 				{
-					if (!drawn.count(node))
-						return;
-					const ImVec2 p = ImNodes::GetNodeGridSpacePos(node);
-					if (std::fabs(p.x - x) > 0.5f || std::fabs(p.y - y) > 0.5f)
-					{
-						x = std::round(p.x);
-						y = std::round(p.y);
-						if (!doc.place_all && doc.place_now.empty())
-							doc.touched = true;
-					}
+					Place(kOutputNode, s.output_x, s.output_y);
+					Place(kMotionNode, s.pose_x, s.pose_y);
+				}
+				PlaceNew(doc);
+
+				DrawOutputNode(live);
+				std::unordered_set<int> drawn{ kOutputNode };
+				doc.drawn_links.clear();
+				if (!s.motion.empty())
+				{
+					std::string type = MotionType(g, s.motion);
+					DrawPoseSourceNode(doc, kMotionNode, type.empty() ? "animation" : type, s.motion, live);
+					drawn.insert(kMotionNode);
+					ImNodes::Link(kOutputLink, kMotionNode * 4 + 2, kOutputNode * 4 + 1);
+					doc.drawn_links.insert(kOutputLink);
+				}
+				doc.drawn_nodes = drawn;
+				ImNodes::EndNodeEditor();
+
+				auto set_motion = [&](const std::string& motion, const ImVec2& screen)
+				{
+					s.motion = motion;
+					doc.place_screen.emplace_back(kMotionNode, screen);
+					doc.select_node_next = kMotionNode;
+					doc.touched = true;
 				};
-				sync(kEntryNode, g.entry_x, g.entry_y);
-				sync(kAnyNode, g.any_x, g.any_y);
-				for (auto& s : g.states)
-					sync(StateNode(s.id), s.x, s.y);
+
+				const std::string dropped_motion = AcceptMotionDrop();
+				if (!dropped_motion.empty())
+					set_motion(dropped_motion, ImGui::GetMousePos());
+
+				const bool editor_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+				int hovered_node = 0;
+				const bool node_hovered = ImNodes::IsNodeHovered(&hovered_node);
+				if (editor_hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+				    ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
+				{
+					doc.popup_pos = ImGui::GetMousePos();
+					doc.context_node = node_hovered ? hovered_node : 0;
+					ImGui::OpenPopup("##state_pose");
+				}
+				int dropped = 0;
+				if (ImNodes::IsLinkDropped(&dropped, false) && NodeOfAttr(dropped) == kOutputNode)
+				{
+					doc.popup_pos = ImGui::GetMousePos();
+					doc.context_node = 0;
+					ImGui::OpenPopup("##state_pose");
+				}
+				if (ImGui::BeginPopup("##state_pose"))
+				{
+					if (doc.context_node == kMotionNode)
+					{
+						ImGui::TextDisabled("%s", s.motion.c_str());
+						ImGui::Separator();
+						if (ImGui::MenuItem("Remove", "Del"))
+						{
+							s.motion.clear();
+							doc.touched = true;
+						}
+					}
+					else
+					{
+						ImGui::TextDisabled("Plug into Output Pose");
+						ImGui::Separator();
+						if (ImGui::BeginMenu("Animation", !g.animations.empty()))
+						{
+							for (const auto& a : g.animations)
+								if (ImGui::MenuItem(a.name.c_str()))
+									set_motion(a.name, doc.popup_pos);
+							ImGui::EndMenu();
+						}
+						if (ImGui::BeginMenu("Blend space", !g.blend_spaces.empty()))
+						{
+							for (const auto& b : g.blend_spaces)
+								if (ImGui::MenuItem(b.name.c_str()))
+									set_motion(b.name, doc.popup_pos);
+							ImGui::EndMenu();
+						}
+					}
+					ImGui::EndPopup();
+				}
+				int destroyed = 0;
+				if (ImNodes::IsLinkDestroyed(&destroyed) && destroyed == kOutputLink)
+				{
+					s.motion.clear();
+					doc.touched = true;
+				}
+				Sync(doc, drawn, kOutputNode, s.output_x, s.output_y);
+				Sync(doc, drawn, kMotionNode, s.pose_x, s.pose_y);
+			}
+
+			void DrawCanvas(Doc& doc, AnimationSpriteComponent* debug)
+			{
+				ValidateView(doc);
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m)
+					DrawRootCanvas(doc, debug);
+				else if (AnimGraphState* s = CurrentState(doc))
+					DrawStateCanvas(doc, *s, debug);
+				else
+					DrawMachineCanvas(doc, *m, debug);
+			}
+
+			// ---- Selection / shortcuts -------------------------------------------------------------------
+
+			bool NodeExists(Doc& doc, int node)
+			{
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m)
+					return node == kOutputNode || (node >= 1000 && doc.anim.FindPoseNode(ItemOfNode(node)));
+				if (AnimGraphState* s = CurrentState(doc))
+					return node == kOutputNode || (node == kMotionNode && !s->motion.empty());
+				return node == kEntryNode || node == kAnyNode || (node >= 1000 && FindState(*m, ItemOfNode(node)));
+			}
+
+			bool LinkExists(Doc& doc, int link)
+			{
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m)
+					return link == kOutputLink && doc.anim.OutputNode();
+				if (AnimGraphState* s = CurrentState(doc))
+					return link == kOutputLink && !s->motion.empty();
+				if (link == kEntryLink)
+					return m->FindState(m->entry_state) != nullptr;
+				const AnimGraphTransition* t = FindTransition(*m, TransitionOfLink(link));
+				return t && m->FindState(t->to) && (t->from.empty() || m->FindState(t->from));
+			}
+
+			ImVec2 ViewStart(Doc& doc)
+			{
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m)
+				{
+					float x = doc.anim.output_x, y = doc.anim.output_y;
+					for (const auto& n : doc.anim.pose_nodes)
+						x = std::min(x, n.x);
+					return ImVec2(x, y);
+				}
+				if (AnimGraphState* s = CurrentState(doc))
+					return ImVec2(std::min(s->pose_x, s->output_x), s->output_y);
+				return ImVec2(m->entry_x, m->entry_y);
 			}
 
 			void DeleteSelection(Doc& doc)
 			{
-				AnimGraphAsset& g = doc.anim;
-				for (int link : SelectedLinks())
+				AnimGraphStateMachine* m = Machine(doc);
+				const auto links = SelectedLinks();
+				const auto nodes = SelectedNodes();
+				if (!m)
 				{
-					if (link == kEntryLink)
-						g.entry_state.clear();
-					else
-						DeleteTransition(doc, TransitionOfLink(link));
+					for (int link : links)
+						if (link == kOutputLink)
+							doc.anim.output_source = 0;
+					for (int node : nodes)
+						if (node >= 1000)
+							DeletePoseNode(doc, ItemOfNode(node));
 				}
-				for (int node : SelectedNodes())
-					if (node >= 1000)
-						DeleteState(doc, StateOfNode(node));
+				else if (AnimGraphState* s = CurrentState(doc))
+				{
+					if (std::find(nodes.begin(), nodes.end(), kMotionNode) != nodes.end() ||
+					    std::find(links.begin(), links.end(), kOutputLink) != links.end())
+						s->motion.clear();
+				}
+				else
+				{
+					for (int link : links)
+					{
+						if (link == kEntryLink)
+							m->entry_state.clear();
+						else
+							DeleteTransition(doc, *m, TransitionOfLink(link));
+					}
+					for (int node : nodes)
+						if (node >= 1000)
+							DeleteState(doc, *m, ItemOfNode(node));
+				}
 				ImNodes::ClearLinkSelection();
 				ImNodes::ClearNodeSelection();
 				ClearSelection(doc);
@@ -1710,9 +2566,12 @@ namespace lynx::editor::graph_editors
 
 			void DuplicateSelection(Doc& doc)
 			{
+				AnimGraphStateMachine* m = Machine(doc);
+				if (!m || CurrentState(doc))
+					return;
 				for (int node : SelectedNodes())
 					if (node >= 1000)
-						DuplicateState(doc, StateOfNode(node));
+						DuplicateState(doc, *m, ItemOfNode(node));
 			}
 		}
 
@@ -2962,8 +3821,7 @@ namespace lynx::editor::graph_editors
 		{
 			if (doc.kind == Kind::Tree)
 				return doc.bt.Find(node) != nullptr;
-			return node == anim::kEntryNode || node == anim::kAnyNode ||
-			       (node >= 1000 && anim::FindState(doc.anim, anim::StateOfNode(node)));
+			return anim::NodeExists(doc, node);
 		}
 
 		bool LinkExists(Doc& doc, int link)
@@ -2974,10 +3832,7 @@ namespace lynx::editor::graph_editors
 				const BTNodeDesc* parent = child ? doc.bt.Find(child->parent) : nullptr;
 				return parent && !tree::IsTask(*parent);
 			}
-			if (link == anim::kEntryLink)
-				return doc.anim.FindState(doc.anim.entry_state) != nullptr;
-			const AnimGraphTransition* t = anim::FindTransition(doc.anim, anim::TransitionOfLink(link));
-			return t && doc.anim.FindState(t->to) && (t->from.empty() || doc.anim.FindState(t->from));
+			return anim::LinkExists(doc, link);
 		}
 
 
@@ -3012,6 +3867,9 @@ namespace lynx::editor::graph_editors
 				Redo(doc);
 			if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false))
 				doc.kind == Kind::Anim ? anim::DuplicateSelection(doc) : tree::DuplicateSelection(doc);
+			// Anim graph : back to the graph above.
+			if (doc.kind == Kind::Anim && ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && doc.anim_machine)
+				anim::SetView(doc, doc.anim_state ? doc.anim_machine : 0, 0);
 			if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && (canvas_hovered || ImNodes::NumSelectedNodes() + ImNodes::NumSelectedLinks() > 0))
 			{
 				if (doc.kind == Kind::Tree && doc.sel_aux)
@@ -3026,7 +3884,7 @@ namespace lynx::editor::graph_editors
 			// The start (Entry / Root) near the left, at mid height.
 			ImVec2 start(0.f, 0.f);
 			if (doc.kind == Kind::Anim)
-				start = ImVec2(doc.anim.entry_x, doc.anim.entry_y);
+				start = anim::ViewStart(doc);
 			else if (const BTNodeDesc* root = doc.bt.Root())
 				start = ImVec2(root->x, root->y);
 			// Panning is in grid units : the screen offsets are divided by the zoom.
@@ -3238,7 +4096,11 @@ namespace lynx::editor::graph_editors
 					doc.place_screen.clear();
 					const bool placing = doc.place_all || !doc.place_now.empty();
 					if (doc.kind == Kind::Anim)
+					{
+						// Where we are : AnimGraph > Locomotion > Idle
+						anim::DrawBreadcrumb(doc);
 						anim::DrawCanvas(doc, anim_debug);
+					}
 					else
 						tree::DrawCanvas(doc, tree_debug);
 					canvas_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
@@ -3538,11 +4400,8 @@ namespace lynx::editor::graph_editors
 
 	std::string NewAnimGraphTemplate()
 	{
+		// [Locomotion (State Machine)] -> [Output Pose] ; Locomotion : Entry -> Idle
 		AnimGraphAsset g;
-		g.entry_x = 0.f;
-		g.entry_y = 0.f;
-		g.any_x = 0.f;
-		g.any_y = 220.f;
 
 		AnimGraphParameter speed;
 		speed.name = "speed";
@@ -3552,14 +4411,29 @@ namespace lynx::editor::graph_editors
 		idle.name = "Idle";
 		g.animations.push_back(idle);
 
+		AnimGraphStateMachine m;
+		m.id = 1;
+		m.name = "Locomotion";
 		AnimGraphState state;
-		state.id = 1;
+		state.id = 2;
 		state.name = "Idle";
 		state.motion = "Idle";
 		state.x = 260.f;
 		state.y = 0.f;
-		g.states.push_back(state);
-		g.entry_state = "Idle";
+		m.states.push_back(state);
+		m.entry_state = "Idle";
+		g.state_machines.push_back(m);
+
+		AnimGraphPoseNode node;
+		node.id = 3;
+		node.type = "statemachine";
+		node.source = "Locomotion";
+		node.x = 0.f;
+		node.y = 0.f;
+		g.pose_nodes.push_back(node);
+		g.output_source = node.id;
+		g.output_x = 360.f;
+		g.output_y = 0.f;
 		return g.SaveToString();
 	}
 

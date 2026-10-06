@@ -74,16 +74,49 @@ namespace lynx
 			return false;
 		}
 
-		std::vector<BoxColliderComponent*> AllColliders()
+		std::vector<ColliderComponent*> AllColliders()
 		{
-			std::vector<BoxColliderComponent*> out;
+			std::vector<ColliderComponent*> out;
 			ecs::CollectComponents(out);
 			return out;
+		}
+
+		constexpr uint32_t kNoEntity = 0xFFFFFFFFu;
+
+		/**
+		 * Contact bloquant : OnHit sur l'acteur `self` (C++, callback du
+		 * collider, JS). `other` = kNoEntity : un voxel. Les acteurs sont
+		 * retrouves par leur entite (un evenement peut detruire un acteur).
+		 */
+		void FireHit(uint32_t self_entity, uint32_t other_entity, const vec3& normal)
+		{
+			Actor* self = ecs::GetActor(self_entity);
+			if (!self)
+				return;
+			Actor* other = other_entity != kNoEntity ? ecs::GetActor(other_entity) : nullptr;
+			if (other_entity != kNoEntity && !other)
+				return;
+
+			self->OnHit(other, normal);
+
+			self = ecs::GetActor(self_entity);
+			ColliderComponent* box = self ? self->GetComponent<ColliderComponent>() : nullptr;
+			if (box && box->on_hit)
+			{
+				other = other_entity != kNoEntity ? ecs::GetActor(other_entity) : nullptr;
+				auto copy = box->on_hit;
+				copy(other ? other->GetComponent<ColliderComponent>() : nullptr, normal);
+			}
+
+			self = ecs::GetActor(self_entity);
+			other = other_entity != kNoEntity ? ecs::GetActor(other_entity) : nullptr;
+			if (self)
+				scripting::CallActorHitEvent(self, other, normal);
 		}
 	}
 
 
-	void BoxColliderComponent::GetWorldBox(float& center_x, float& center_y, float& width, float& height) const
+	void ColliderComponent::GetWorldBox(float& center_x, float& center_y, float& width, float& height) const
 	{
 		Actor* owner = GetOwner();
 
@@ -105,12 +138,12 @@ namespace lynx
 		height = std::fabs(size.y) * abs_y;
 	}
 
-	bool BoxColliderComponent::CanInteractWith(const BoxColliderComponent& other) const
+	bool ColliderComponent::CanInteractWith(const ColliderComponent& other) const
 	{
 		return (layer & other.mask) != 0u && (other.layer & mask) != 0u;
 	}
 
-	bool BoxColliderComponent::IsOverlapping(const BoxColliderComponent& other) const
+	bool ColliderComponent::IsOverlapping(const ColliderComponent& other) const
 	{
 		if (&other == this || other.GetOwner() == GetOwner())
 			return false;
@@ -122,11 +155,11 @@ namespace lynx
 		return BoxesOverlap(ax, ay, aw, ah, bx, by, bw, bh);
 	}
 
-	std::vector<BoxColliderComponent*> BoxColliderComponent::GetOverlapping() const
+	std::vector<ColliderComponent*> ColliderComponent::GetOverlapping() const
 	{
-		std::vector<BoxColliderComponent*> out;
+		std::vector<ColliderComponent*> out;
 
-		for (BoxColliderComponent* other : AllColliders())
+		for (ColliderComponent* other : AllColliders())
 		{
 			if (CanInteractWith(*other) && IsOverlapping(*other))
 				out.push_back(other);
@@ -135,40 +168,106 @@ namespace lynx
 		return out;
 	}
 
-	bool BoxColliderComponent::OverlapsVoxels() const
+	bool ColliderComponent::OverlapsVoxels() const
 	{
 		float cx, cy, w, h;
 		GetWorldBox(cx, cy, w, h);
 		return VoxelBoxBlocked(cx, cy, w, h, voxel_flags ? voxel_flags : SolidVoxelFlags());
 	}
 
-	bool BoxColliderComponent::BlockedAt(float cx, float cy, float w, float h) const
+	bool ColliderComponent::BlockedAt(float cx, float cy, float w, float h, ColliderComponent** by, bool* voxel) const
 	{
+		if (by)
+			*by = nullptr;
+		if (voxel)
+			*voxel = false;
+
 		if (trigger)
 			return false;
 
 		if (collide_with_voxels &&
 		    VoxelBoxBlocked(cx, cy, w, h, voxel_flags ? voxel_flags : SolidVoxelFlags()))
 		{
+			if (voxel)
+				*voxel = true;
 			return true;
 		}
 
-		for (BoxColliderComponent* other : AllColliders())
+		for (ColliderComponent* other : AllColliders())
 		{
 			if (other == this || other->trigger || other->GetOwner() == GetOwner() || !CanInteractWith(*other))
 				continue;
 
-			float bx, by, bw, bh;
-			other->GetWorldBox(bx, by, bw, bh);
+			float bx, by_, bw, bh;
+			other->GetWorldBox(bx, by_, bw, bh);
 
-			if (BoxesOverlap(cx, cy, w, h, bx, by, bw, bh))
+			if (BoxesOverlap(cx, cy, w, h, bx, by_, bw, bh))
+			{
+				if (by)
+					*by = other;
 				return true;
+			}
 		}
 
 		return false;
 	}
 
-	vec3 BoxColliderComponent::MoveAndCollide(const vec3& delta)
+	bool ColliderComponent::ResolvePenetration()
+	{
+		Actor* owner = GetOwner();
+		if (!owner || trigger || !movable)
+			return false;
+
+		bool moved = false;
+		// Plusieurs colliders : quelques passes (chaque poussee peut en creer une autre).
+		for (int pass = 0; pass < 4; ++pass)
+		{
+			float ax, ay, aw, ah;
+			GetWorldBox(ax, ay, aw, ah);
+
+			// Le chevauchement le plus profond d'abord.
+			float best = 0.f;
+			vec3 push(0.f);
+			for (ColliderComponent* other : AllColliders())
+			{
+				if (other == this || other->trigger || other->GetOwner() == owner || !CanInteractWith(*other))
+					continue;
+				float bx, by, bw, bh;
+				other->GetWorldBox(bx, by, bw, bh);
+				if (!BoxesOverlap(ax, ay, aw, ah, bx, by, bw, bh))
+					continue;
+
+				const float ox = (aw + bw) * 0.5f - std::fabs(ax - bx);
+				const float oy = (ah + bh) * 0.5f - std::fabs(ay - by);
+				// Deux colliders mobiles : chacun fait la moitie du chemin.
+				const float share = other->movable ? 0.5f : 1.f;
+				vec3 p(0.f);
+				float depth;
+				if (ox < oy)
+				{
+					depth = ox;
+					p.x = (ax >= bx ? 1.f : -1.f) * (ox * share + kEpsilon);
+				}
+				else
+				{
+					depth = oy;
+					p.y = (ay >= by ? 1.f : -1.f) * (oy * share + kEpsilon);
+				}
+				if (depth > best)
+				{
+					best = depth;
+					push = p;
+				}
+			}
+			if (best <= 0.f)
+				break;
+			owner->transform.location += push;
+			moved = true;
+		}
+		return moved;
+	}
+
+	vec3 ColliderComponent::MoveAndCollide(const vec3& delta)
 	{
 		blocked_x_ = blocked_y_ = false;
 
@@ -202,6 +301,24 @@ namespace lynx
 
 		// Avance sur un axe par pas ; au premier pas bloque, recherche
 		// dichotomique de la plus grande avance possible dans ce pas.
+		// Contacts de ce deplacement : (entite de l'autre ou kNoEntity, normale).
+		std::vector<std::pair<uint32_t, vec3>> hits;
+		auto record_hit = [&](float m, bool axis_x, float dir)
+		{
+			ColliderComponent* by = nullptr;
+			bool voxel = false;
+			if (axis_x)
+				BlockedAt(cx + m, cy, w, h, &by, &voxel);
+			else
+				BlockedAt(cx, cy + m, w, h, &by, &voxel);
+			vec3 normal(0.f);
+			(axis_x ? normal.x : normal.y) = -dir;
+			if (by && by->GetOwner())
+				hits.emplace_back(by->GetOwner()->GetEntity(), normal);
+			else if (voxel)
+				hits.emplace_back(kNoEntity, normal);
+		};
+
 		auto solve_axis = [&](float move, bool axis_x, bool& blocked) -> float
 		{
 			if (move == 0.f || stuck)
@@ -228,6 +345,7 @@ namespace lynx
 				}
 
 				blocked = true;
+				record_hit(dir * next, axis_x, dir);
 
 				float lo = done;
 				float hi = next;
@@ -255,22 +373,40 @@ namespace lynx
 		applied.z = delta.z;
 
 		owner->transform.location += applied;
+
+		// OnHit : l'acteur qui avance et celui qu'il touche (normale opposee).
+		const uint32_t self_entity = owner->GetEntity();
+		for (const auto& [other, normal] : hits)
+		{
+			FireHit(self_entity, other, normal);
+			if (other != kNoEntity)
+				FireHit(other, self_entity, vec3(-normal.x, -normal.y, -normal.z));
+		}
 		return applied;
 	}
 
-	void BoxColliderComponent::Tick(float)
+	void ColliderComponent::Tick(float)
 	{
 		Actor* owner = GetOwner();
 
 		if (!owner)
 			return;
 
+		// Dans un collider bloquant : on en sort d'abord.
+		if (movable && !trigger)
+			ResolvePenetration();
+
 		std::vector<uint32_t> now;
 
-		for (BoxColliderComponent* other : GetOverlapping())
+		if (generate_overlap_events)
 		{
-			if (Actor* other_owner = other->GetOwner())
-				now.push_back(other_owner->GetEntity());
+			for (ColliderComponent* other : GetOverlapping())
+			{
+				if (!other->generate_overlap_events)
+					continue;
+				if (Actor* other_owner = other->GetOwner())
+					now.push_back(other_owner->GetEntity());
+			}
 		}
 
 		std::sort(now.begin(), now.end());
@@ -287,8 +423,18 @@ namespace lynx
 			if (!self)
 				return;
 
-			BoxColliderComponent* other =
-				other_actor ? other_actor->GetComponent<BoxColliderComponent>() : nullptr;
+			// C++ : Actor::OnBeginOverlap / OnEndOverlap (classe de l'acteur)
+			if (begin)
+				self->OnBeginOverlap(other_actor);
+			else
+				self->OnEndOverlap(other_actor);
+			self = ecs::GetActor(self_entity);
+			other_actor = ecs::GetActor(entity);
+			if (!self)
+				return;
+
+			ColliderComponent* other =
+				other_actor ? other_actor->GetComponent<ColliderComponent>() : nullptr;
 
 			if (other)
 			{
@@ -302,7 +448,10 @@ namespace lynx
 				}
 			}
 
-			scripting::CallActorEvent(self, begin ? "OnBeginOverlap" : "OnEndOverlap", other_actor);
+			self = ecs::GetActor(self_entity);
+			other_actor = ecs::GetActor(entity);
+			if (self)
+				scripting::CallActorEvent(self, begin ? "OnBeginOverlap" : "OnEndOverlap", other_actor);
 		};
 
 		const std::vector<uint32_t> before = overlapping_;
@@ -321,12 +470,12 @@ namespace lynx
 		}
 	}
 
-	void BoxColliderComponent::EndPlay()
+	void ColliderComponent::EndPlay()
 	{
 		overlapping_.clear();
 	}
 
-	void BoxColliderComponent::Update(float)
+	void ColliderComponent::Update(float)
 	{
 		if (!debug_draw)
 			return;

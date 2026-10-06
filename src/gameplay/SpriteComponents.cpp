@@ -494,7 +494,12 @@ namespace lynx
 					          << " : no animation \"" << s.animation << "\"" << std::endl;
 		}
 
-		for (const AnimGraphState& s : g.states)
+		// Ce qui est branche sur Output Pose (state machine, ou une animation seule).
+		const AnimGraphCompiled compiled = g.Compile();
+		if (compiled.states.empty())
+			std::cout << "[sprite] anim graph " << asset << " : nothing plugged into Output Pose" << std::endl;
+
+		for (const AnimGraphState& s : compiled.states)
 		{
 			anim_state_options options;
 			options.interruptible = s.interruptible;
@@ -513,10 +518,10 @@ namespace lynx
 			AddState(s.name, s.motion, std::move(options));
 		}
 
-		if (!g.entry_state.empty())
-			SetDefaultState(g.entry_state);
+		if (!compiled.entry_state.empty())
+			SetDefaultState(compiled.entry_state);
 
-		for (const AnimGraphTransition& t : g.transitions)
+		for (const AnimGraphTransition& t : compiled.transitions)
 		{
 			// Toutes les conditions (ET). Aucune : toujours vraie.
 			std::vector<anim_manager::condition> parts;

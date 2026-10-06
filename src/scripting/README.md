@@ -189,7 +189,7 @@ Composants fournis : `TagsComponent`, `VelocityComponent`, `LifetimeComponent`,
 | `StaticSpriteComponent` | `"StaticSprite"` | `gameplay/SpriteComponents.h` |
 | `AnimationSpriteComponent` | `"AnimationSprite"` | `gameplay/SpriteComponents.h` |
 | `CameraComponent` | `"Camera"` | `gameplay/CameraComponent.h` |
-| `BoxColliderComponent` | `"BoxCollider"` | `gameplay/BoxColliderComponent.h` |
+| `ColliderComponent` (ancien nom `BoxColliderComponent`) | `"Collider"` (ou `"BoxCollider"`) | `gameplay/BoxColliderComponent.h` |
 | `SoundSourceComponent` | `"SoundSource"` | `gameplay/SoundSourceComponent.h` |
 | `LightComponent` (`PointLightComponent`, `SpotLightComponent`, `DirectionalLightComponent`, `SkyLightComponent`) | `"Light"` (`type: "point" / "spot" / "directional" / "sky"`) | `gameplay/LightComponent.h` |
 | `VelocityComponent`, `LifetimeComponent` | `"Velocity"`, `"Lifetime"` | `gameplay/Components.h` |
@@ -202,8 +202,8 @@ auto& sprite = actor->AddComponent<lynx::StaticSpriteComponent>();
 sprite.texture = "hero.png";
 sprite.size = {2.f, 3.f};
 
-auto& box = actor->AddComponent<lynx::BoxColliderComponent>();
-box.on_begin_overlap = [](lynx::BoxColliderComponent& other) { /* ... */ };
+auto& box = actor->AddComponent<lynx::ColliderComponent>();
+box.on_begin_overlap = [](lynx::ColliderComponent& other) { /* ... */ };
 box.MoveAndCollide({vx * dt, vy * dt, 0.f});
 ```
 
@@ -299,35 +299,64 @@ anim.loadedGraph;                                    // "anim/Boss.animgraph"
 
 ```js
 const cam = parent.addComponent("Camera", { offset: vec3(0, 2, 80), followSpeed: 3 });
-cam.activate();      // devient la camera de la vue (auto au lancement si autoActivate)
+cam.activate();      // devient la camera de la vue de son joueur
 ```
 
 `offset`, `rotation` (degrés, défaut `(0, -90, 0)`), `fov`, `near`, `far`, `followSpeed`
 (0 = colle à l'acteur), `useCameraShake`, `autoActivate`, `active`, `snap()`.
-À l'arrêt du jeu, l'éditeur reprend sa caméra. Si le jeu déplace déjà sa caméra avec
-`LynxGame_UpdateGameplayCamera`, utiliser l'un ou l'autre.
+La caméra de l'acteur **possédé** par un `PlayerController` est affichée dans le viewport de
+ce joueur (split-screen : chacun voit par la caméra de son acteur) ; `unpossess` : retour à
+la caméra par défaut du joueur. Un acteur possédé par personne prend la vue du joueur par
+défaut si `autoActivate` (sauf si ce joueur voit déjà par la caméra de son acteur).
+À l'arrêt du jeu, l'éditeur reprend sa caméra.
 
-### BoxCollider
+### Collider
 
-Boîte 2D alignée sur les axes. Deux boîtes interagissent si `a.layer & b.mask` et
-`b.layer & a.mask`. Une boîte `trigger` ne bloque jamais.
+Boîte de collision 2D alignée sur les axes, qui sert à deux choses :
+
+- **Chevauchement** (`trigger: true`, ou deux colliders qui se chevauchent) : les deux acteurs
+  reçoivent `OnBeginOverlap(other)` puis `OnEndOverlap(other)`.
+- **Blocage** (`trigger: false`, le défaut) : un collider bloquant arrête les autres colliders
+  bloquants et les voxels pleins. `moveAndCollide`, et la vitesse de l'acteur (`velocity`,
+  VelocityComponent) s'arrêtent au contact : l'acteur glisse le long des murs, la vitesse
+  s'annule sur l'axe bloqué. Les deux acteurs reçoivent `OnHit(other, normal)` (`other` vaut
+  `null` pour un voxel ; `normal` repousse l'acteur). Un collider `movable` qui se retrouve dans
+  un collider bloquant (téléport, spawn) en est repoussé ; `movable: false` : un mur fixe.
+
+Deux colliders interagissent si `a.layer & b.mask` et `b.layer & a.mask`.
 
 ```js
-const box = parent.addComponent("BoxCollider", { size: {x: 1, y: 2}, debugDraw: true });
-const r = box.moveAndCollide({x: vx * dt, y: vy * dt, z: 0});   // s'arrete contre voxels et boites
+const box = parent.addComponent("Collider", { size: {x: 1, y: 2}, debugDraw: true });
+parent.velocity = vec3(4, 0, 0);          // s'arrete contre les murs
+const r = box.moveAndCollide({x: vx * dt, y: vy * dt, z: 0});   // ou a la main
 if (r.blockedY) vy = 0;
 box.onBeginOverlap(other => print("touche", other.id));
+box.onHit((other, normal) => print("contre", other ? other.id : "un voxel", normal.y));
 box.overlapping();            // acteurs
 box.overlapsVoxels();
 box.voxelFlags = ["ROCK"];    // voxels bloquants (defaut : voxels pleins)
 
-function OnBeginOverlap(other) { }   // appele aussi dans les scripts de l'acteur
+// Dans une classe d'acteur ou un script attache :
+function OnBeginOverlap(other) { }
 function OnEndOverlap(other) { }
+function OnHit(other, normal) { }
 ```
 
-`size`, `offset`, `trigger`, `layer`, `mask`, `collideWithVoxels`, `voxelFlags`, `debugDraw`,
-`isOverlapping(acteur)`, `onEndOverlap(fn)`. Pas de physique : `moveAndCollide` déplace
-l'acteur en s'arrêtant au contact (X puis Y), sans traverser les murs fins.
+En C++, les mêmes événements sont des méthodes virtuelles de `lynx::Actor` :
+
+```cpp
+class Coin : public lynx::Actor
+{
+    void OnBeginOverlap(lynx::Actor* other) override { /* ramasse */ }
+    void OnEndOverlap(lynx::Actor* other) override { }
+    void OnHit(lynx::Actor* other, const lynx::vec3& normal) override { }
+};
+```
+
+`size`, `offset`, `trigger`, `movable`, `generateOverlapEvents`, `layer`, `mask`,
+`collideWithVoxels`, `voxelFlags`, `debugDraw`, `isOverlapping(acteur)`, `onEndOverlap(fn)`,
+`resolvePenetration()`. Pas de gravité ni de rebond : le blocage arrête le mouvement, sans
+traverser les murs fins.
 
 ### SoundSource
 
@@ -346,9 +375,20 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 ## Acteurs du moteur
 
 `Actor`, `PointLightActor`, `SpotLightActor`, `DirectionalLightActor`, `SkyLightActor`,
-`SpriteActor` et `SoundActor` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
+`SpriteActor`, `SoundActor` et `ColliderActor` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
 `Level.spawn("PointLightActor")`, et une classe JS peut en hériter
 (`class Torch extends PointLightActor { ... }`).
+
+`ColliderActor` : une boîte de collision posée dans le niveau (propriétés `size`, `trigger`,
+`movable`, `layer`, `mask`, `show_in_game`), dessinée dans l'éditeur (vert : trigger, rouge :
+bloquant). Mur ou plateforme invisible quand elle bloque, zone quand c'est un trigger :
+
+```js
+class Checkpoint extends ColliderActor {
+    constructor() { super(); this.trigger = true; }
+    OnBeginOverlap(other) { if (other.hasTag("player")) print("checkpoint !"); }
+}
+```
 
 ## Joueurs (PlayerController)
 
@@ -439,20 +479,30 @@ avec les événements des widgets nommés) : `UI.create("ui/MainMenu.widget")` e
 
 ## Anim Graph (`.animgraph`)
 
-Machine à états d'un `AnimationSprite`, faite dans l'éditeur (Content Browser > New file >
-*Anim Graph*, double-clic pour l'ouvrir) — une version légère de l'AnimGraph d'Unreal :
+Graphe d'animation d'un `AnimationSprite`, fait dans l'éditeur (Content Browser > New file >
+*Anim Graph*, double-clic pour l'ouvrir), comme l'AnimGraph d'Unreal : on part de la **sortie**.
 
+- **Output Pose** : le nœud final, la pose jouée par le sprite. On y branche une **Animation**,
+  un **Blend Space** ou une **State Machine** (clic droit sur le graphe, ou glisser une animation
+  de la colonne de gauche).
+- **State Machine** (double-clic pour l'ouvrir) : `Entry` (l'état de départ), `Any State`, les
+  états et les transitions. Chaque **état** a sa pose (double-clic) : une Animation ou un Blend
+  Space branché sur son Output Pose. Le chemin en haut du graphe (`AnimGraph > Locomotion > Idle`)
+  ou Retour arrière : remonter.
 - **Parameters** (`float`, `bool`, `int`, `trigger`) : valeurs données par le jeu
   (`setFloat`, `setBool`, `setInt`, `setTrigger`). Un trigger est consommé par la transition qui l'utilise.
 - **Animations** : planche horizontale (`texture`, `frames`, `frame time`, `loop`) et
   **notifies** : frame → nom d'une fonction JS de l'acteur.
 - **Blend spaces** : un paramètre float choisit l'animation (échantillon le plus proche en dessous).
-- **States** : jouent une animation ou un blend space ; `next` (à la fin, sans transition),
-  `on enter` / `on exit` (fonctions JS de l'acteur), `interruptible`, `restart on enter`.
+- **States** : `next` (à la fin, sans transition), `on enter` / `on exit` (fonctions JS de
+  l'acteur), `interruptible`, `restart on enter`.
 - **Transitions** : glisser la broche d'un état sur un autre. Toutes leurs conditions doivent
   être vraies : `compare` (`speed > 0.1`), `isTrue`, `isFalse`, `trigger`, `finished`
   (fin de l'animation), `script` (fonction JS de l'acteur qui retourne `true` / `false`).
   `Any State` : transitions testées depuis n'importe quel état (blessure, mort...).
+
+Les fichiers de l'ancienne version (états à la racine + `Entry`) s'ouvrent comme une State
+Machine `Locomotion` branchée sur Output Pose.
 
 Les événements appellent la méthode de la classe JS de l'acteur (ou la fonction d'un script
 attaché) du même nom, et `AnimationSpriteComponent::on_graph_event` en C++ :
@@ -496,7 +546,7 @@ une **Sequence** les enchaîne jusqu'à un échec. Les enfants s'exécutent **de
 (leur hauteur dans l'éditeur ; le numéro dans le titre donne l'ordre). L'arbre recommence quand
 il se termine.
 
-- **Tâches** : `Wait`, `MoveTo` (vers une clé vecteur ou acteur, utilise le BoxCollider s'il y en
+- **Tâches** : `Wait`, `MoveTo` (vers une clé vecteur ou acteur, utilise le Collider s'il y en
   a un, peut piloter un paramètre `speed` de l'Anim Graph), `SetValue`, `ClearValue`,
   `SetAnimParam`, `Log` (`{clé}` = valeur du Blackboard), `CallFunction`, `Script`, `Finish`.
 - **Décorateurs** (conditions / modificateurs d'un nœud) : `Blackboard`, `CallFunction`,

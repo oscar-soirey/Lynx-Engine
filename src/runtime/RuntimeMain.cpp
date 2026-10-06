@@ -663,12 +663,6 @@ int main(int argc, char** argv)
         lynx::gamepad::Poll(false);
         engine->ProgressOneFrame(dt);
 
-        if (gameHooks.update_gameplay_camera)
-        {
-            LYNX_PROFILE_SCOPE("Game camera");
-            gameHooks.update_gameplay_camera(gameplay_cam, dt);
-        }
-
         {
             LYNX_PROFILE_SCOPE("Swap buffers");
             glfwSwapBuffers(win);

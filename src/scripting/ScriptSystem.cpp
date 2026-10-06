@@ -2553,6 +2553,26 @@ namespace lynx
 			return found;
 		}
 
+		bool CallActorHitEvent(Actor* self, Actor* other, const vec3& normal)
+		{
+			if (!g || !self)
+				return false;
+
+			JSValue args[2];
+			args[0] = ActorToJS(g->ctx, other);
+			args[1] = JS_NewObject(g->ctx);
+			JS_SetPropertyStr(g->ctx, args[1], "x", JS_NewFloat64(g->ctx, normal.x));
+			JS_SetPropertyStr(g->ctx, args[1], "y", JS_NewFloat64(g->ctx, normal.y));
+			JS_SetPropertyStr(g->ctx, args[1], "z", JS_NewFloat64(g->ctx, normal.z));
+			bool found = false;
+			JSValue r = CallActorFunction(g->ctx, self, "OnHit", 2, args, &found);
+			JS_FreeValue(g->ctx, r);
+			JS_FreeValue(g->ctx, args[0]);
+			JS_FreeValue(g->ctx, args[1]);
+			RunPendingJobs();
+			return found;
+		}
+
 		void OnEntityDestroyed(uint32_t entity)
 		{
 			if (!g)

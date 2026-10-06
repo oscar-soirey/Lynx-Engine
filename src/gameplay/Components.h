@@ -41,6 +41,9 @@ namespace lynx
 	 *     transform.location += linear  * dt
 	 *     transform.rotation += angular * dt
 	 * damping : freinage par seconde (0 = aucun, 1 = perd ~100% en 1s).
+	 * Si l'acteur a un ColliderComponent bloquant, le mouvement passe par
+	 * MoveAndCollide : il s'arrete contre les murs (OnHit), la vitesse
+	 * s'annule sur l'axe bloque.
 	 */
 	struct LYNX_API VelocityComponent : Component
 	{

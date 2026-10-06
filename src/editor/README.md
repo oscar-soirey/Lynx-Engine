@@ -170,8 +170,11 @@ Fonctions exportées **optionnelles**, décrites dans `core/GameModuleAPI.h` :
 | `LynxGame_SetupScene(scene)` | avant le niveau (et après chaque *Reload Game*) : enregistre les événements de voxels |
 | `LynxGame_OnGameStart()` / `LynxGame_OnGameEnd()` | début / fin de partie : runtime, *Play* / *Stop* de l'éditeur |
 | `LynxGame_OnLevelLoaded(camera)` | niveau (re)créé : démarrage, *Reload Game*, *Stop* |
-| `LynxGame_UpdateGameplayCamera(camera, dt)` | caméra de jeu, chaque frame |
 | `LynxGame_SetCollisionDebugEnabled(enabled)` | overlay de collisions (F4) |
+
+La caméra n'est plus gérée par le jeu : c'est un `CameraComponent` de l'acteur possédé
+par le `PlayerController`, affiché dans le viewport de ce joueur (`LynxGame_UpdateGameplayCamera`
+n'est plus appelée).
 
 Une fonction absente est simplement ignorée. Exemple complet : `src/Module.cpp`
 du projet Blocky.

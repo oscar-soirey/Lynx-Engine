@@ -155,8 +155,28 @@ namespace lynx
 	{
 		SnapToTarget();
 
-		if (auto_activate)
-			Activate();
+		Actor* owner = GetOwner();
+
+		// The actor is possessed : this camera is the view of its player.
+		if (PlayerController* player = owner ? owner->GetController() : nullptr)
+		{
+			ActivateFor(player);
+			return;
+		}
+
+		// Not possessed : the default player only, and only when it does not
+		// already look through the camera of the actor it possesses.
+		if (!auto_activate || !Engine::Get())
+			return;
+
+		PlayerController* player = Engine::Get()->GetDefaultPlayer();
+		if (!player)
+			return;
+		if (Actor* pawn = player->GetPossessedActor())
+			if (pawn->GetComponent<CameraComponent>())
+				return;
+
+		ActivateFor(player);
 	}
 
 	void CameraComponent::EndPlay()

@@ -2764,7 +2764,7 @@ namespace lynx::editor::js_language
 					names.insert(name);
 				if (names.empty())
 					names = { "Actor", "PointLightActor", "SpotLightActor", "DirectionalLightActor", "SkyLightActor",
-					          "SpriteActor", "SoundActor" };
+					          "SpriteActor", "SoundActor", "ColliderActor" };
 				add(std::vector<std::string>(names.begin(), names.end()), Kind::Class, "actor class");
 				return true;
 			}
