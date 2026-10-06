@@ -51,6 +51,8 @@
  * Interfaces du moteur (toujours definies) :
  *   Damageable    TakeDamage(amount, instigator)
  *   Interactable  Interact(instigator), CanInteract(instigator)
+ *   VoxelEvents   OnVoxelContact(type_name, type), OnVoxelContactEnd(type_name, type)
+ *                 (voxel physics, see core/VoxelPhysics.h)
  * (lynx::ApplyDamage / lynx::Interact ci-dessous).
  *
  * Le C++ pur peut aussi utiliser l'heritage multiple et InterfaceCast<T>.

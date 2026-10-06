@@ -213,6 +213,33 @@ namespace lynx::voxels
 			out.indestructible = j.value("indestructible", false);
 			out.on_destroyed = j.value("on_destroyed", std::string());
 
+			// Physics : a preset, then the values written (they win).
+			if (j.contains("physics") && j["physics"].is_object())
+			{
+				const auto& p = j["physics"];
+				VoxelPhysicsProps& ph = out.physics;
+				const std::string preset = p.value("preset", std::string());
+				for (const auto& [name, props] : GetPhysicsPresets())
+					if (name == preset)
+						ph = props;
+				ph.preset = preset;
+
+				const std::string behavior = p.value("behavior", std::string(BehaviorName(ph.behavior)));
+				if (behavior == "powder") ph.behavior = VoxelBehavior::Powder;
+				else if (behavior == "liquid") ph.behavior = VoxelBehavior::Liquid;
+				else if (behavior == "gas") ph.behavior = VoxelBehavior::Gas;
+				else ph.behavior = VoxelBehavior::Static;
+
+				ph.density = p.value("density", ph.density);
+				ph.dispersion = p.value("dispersion", ph.dispersion);
+				ph.friction = p.value("friction", ph.friction);
+				ph.bounciness = p.value("bounciness", ph.bounciness);
+				ph.drag = p.value("drag", ph.drag);
+				ph.buoyancy = p.value("buoyancy", ph.buoyancy);
+				ph.damage = p.value("damage", ph.damage);
+				ph.contact_events = p.value("contact_events", ph.contact_events);
+			}
+
 			return true;
 		}
 	}
@@ -395,6 +422,60 @@ namespace lynx::voxels
 		return true;
 	}
 
+	const char* BehaviorName(VoxelBehavior behavior)
+	{
+		switch (behavior)
+		{
+		case VoxelBehavior::Powder: return "powder";
+		case VoxelBehavior::Liquid: return "liquid";
+		case VoxelBehavior::Gas: return "gas";
+		default: return "static";
+		}
+	}
+
+	const std::vector<std::pair<std::string, VoxelPhysicsProps>>& GetPhysicsPresets()
+	{
+		static const std::vector<std::pair<std::string, VoxelPhysicsProps>> presets = []
+		{
+			using B = VoxelBehavior;
+			auto make = [](const char* name, B b, float density, int dispersion, float friction, float bounciness,
+			               float drag, float buoyancy, float damage, bool events)
+			{
+				VoxelPhysicsProps p;
+				p.preset = name;
+				p.behavior = b;
+				p.density = density;
+				p.dispersion = dispersion;
+				p.friction = friction;
+				p.bounciness = bounciness;
+				p.drag = drag;
+				p.buoyancy = buoyancy;
+				p.damage = damage;
+				p.contact_events = events;
+				return std::make_pair(std::string(name), p);
+			};
+			return std::vector<std::pair<std::string, VoxelPhysicsProps>>{
+				//            name       behavior    dens disp fric  bounce drag buoy dmg  events
+				make("Stone",    B::Static, 2.5f, 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Ice",      B::Static, 0.9f, 0, 0.1f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Rubber",   B::Static, 1.2f, 0, 1.2f, 0.8f, 0.0f, 0.0f, 0.f,  false),
+				make("Mud",      B::Static, 1.7f, 0, 2.5f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Spikes",   B::Static, 2.5f, 0, 1.0f, 0.0f, 0.0f, 0.0f, 20.f, true),
+				make("Sand",     B::Powder, 1.6f, 1, 0.8f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Gravel",   B::Powder, 2.0f, 1, 1.0f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Snow",     B::Powder, 0.5f, 1, 0.4f, 0.0f, 0.0f, 0.0f, 0.f,  false),
+				make("Water",    B::Liquid, 1.0f, 5, 1.0f, 0.0f, 0.5f, 1.1f, 0.f,  true),
+				make("Oil",      B::Liquid, 0.8f, 3, 0.3f, 0.0f, 0.7f, 0.9f, 0.f,  true),
+				make("Lava",     B::Liquid, 3.0f, 1, 1.0f, 0.0f, 0.9f, 0.6f, 40.f, true),
+				make("Acid",     B::Liquid, 1.1f, 4, 1.0f, 0.0f, 0.5f, 1.0f, 15.f, true),
+				make("Smoke",    B::Gas,    0.1f, 3, 1.0f, 0.0f, 0.1f, 0.0f, 0.f,  false),
+				make("Steam",    B::Gas,    0.2f, 4, 1.0f, 0.0f, 0.1f, 0.0f, 2.f,  true),
+				make("Poison gas", B::Gas,  0.3f, 2, 1.0f, 0.0f, 0.1f, 0.0f, 8.f,  true),
+			};
+		}();
+		return presets;
+	}
+
 	std::string SaveToString()
 	{
 		nlohmann::ordered_json list = nlohmann::ordered_json::array();
@@ -438,6 +519,24 @@ namespace lynx::voxels
 				j["indestructible"] = true;
 			if (!t.on_destroyed.empty())
 				j["on_destroyed"] = t.on_destroyed;
+
+			if (!t.physics.IsDefault())
+			{
+				const VoxelPhysicsProps& ph = t.physics;
+				nlohmann::ordered_json p;
+				if (!ph.preset.empty())
+					p["preset"] = ph.preset;
+				p["behavior"] = BehaviorName(ph.behavior);
+				p["density"] = ph.density;
+				p["dispersion"] = ph.dispersion;
+				p["friction"] = ph.friction;
+				p["bounciness"] = ph.bounciness;
+				p["drag"] = ph.drag;
+				p["buoyancy"] = ph.buoyancy;
+				p["damage"] = ph.damage;
+				p["contact_events"] = ph.contact_events;
+				j["physics"] = p;
+			}
 
 			list.push_back(j);
 		}

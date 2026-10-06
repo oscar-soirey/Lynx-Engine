@@ -24,6 +24,7 @@ namespace lynx
 				builtins = true;
 				registry["Damageable"] = { "Damageable", { "TakeDamage" }, {}, false };
 				registry["Interactable"] = { "Interactable", { "Interact", "CanInteract" }, {}, false };
+				registry["VoxelEvents"] = { "VoxelEvents", { "OnVoxelContact", "OnVoxelContactEnd" }, {}, false };
 			}
 			return registry;
 		}

@@ -11,6 +11,7 @@
 #include "Profiler.h"
 #include "Level.h"
 #include "Plugins.h"
+#include "VoxelPhysics.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/EngineActors.h"
 #include "../gameplay/PlayerController.h"
@@ -171,6 +172,9 @@ namespace lynx
 				ecs::Tick(game_dt);
 			}
 
+			// Voxel physics (sand, water, gas... around the cameras).
+			voxel_physics::Tick(game_dt);
+
 			InputTick();
 		}
 
@@ -252,6 +256,8 @@ namespace lynx
 
 		// apres StartGame : les composants voient les acteurs deja initialises
 		ecs::BeginPlay();
+
+		voxel_physics::Reset();
 
 		// Plugins (LynxGame_OnGameStart of their runtime modules).
 		plugins::OnGameStart();

@@ -4,6 +4,7 @@
 #include "core/Level.h"
 #include "core/PostProcess.h"
 #include "core/Plugins.h"
+#include "core/VoxelPhysics.h"
 #include "core/Common.h"
 #include "core/Filesystem.h"
 #include "core/Factory.h"

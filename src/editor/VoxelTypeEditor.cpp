@@ -432,6 +432,107 @@ namespace lynx::editor::voxel_types
 				ImGui::SetTooltip("Event of the game : lynx::voxels::RegisterDestroyedEvent(name, fn).");
 		}
 
+		// Physics (core/VoxelPhysics.h) : a preset, then the details.
+		ImGui::SeparatorText("Physics");
+		{
+			voxels::VoxelPhysicsProps& ph = t.physics;
+			const auto& presets = voxels::GetPhysicsPresets();
+
+			const char* preview = ph.preset.empty() ? (ph.IsDefault() ? "None (static)" : "Custom") : ph.preset.c_str();
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
+			if (ImGui::BeginCombo("Preset", preview))
+			{
+				if (ImGui::Selectable("None (static)", ph.IsDefault()))
+				{
+					ph = voxels::VoxelPhysicsProps{};
+					changed = true;
+				}
+				const char* groups[] = { "Solid surfaces", "Powders", "Liquids", "Gases" };
+				for (int g = 0; g < 4; ++g)
+				{
+					ImGui::SeparatorText(groups[g]);
+					for (const auto& [name, props] : presets)
+					{
+						if (static_cast<int>(props.behavior) != g)
+							continue;
+						if (ImGui::Selectable(name.c_str(), ph.preset == name))
+						{
+							ph = props;
+							// Collision that goes with it : fluids do not block.
+							const uint32_t all = voxels::GetCollisionMask();
+							t.flags &= ~all;
+							if (props.behavior != voxels::VoxelBehavior::Liquid && props.behavior != voxels::VoxelBehavior::Gas)
+								t.flags |= voxels::GetSolidMask();
+							changed = true;
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Fills every value below (and the collision : liquids and gases do not block).");
+
+			bool edited = false;
+			int behavior = static_cast<int>(ph.behavior);
+			const char* behaviors[] = { "Static", "Powder (falls, piles up)", "Liquid (falls, spreads)", "Gas (rises)" };
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
+			if (ImGui::Combo("Behavior", &behavior, behaviors, 4))
+			{
+				ph.behavior = static_cast<voxels::VoxelBehavior>(behavior);
+				edited = true;
+			}
+
+			const float w = ImGui::GetFontSize() * 10.f;
+			auto slider = [&](const char* label, float* v, float min, float max, const char* tip)
+			{
+				ImGui::SetNextItemWidth(w);
+				if (ImGui::SliderFloat(label, v, min, max, "%.2f"))
+					edited = true;
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("%s", tip);
+			};
+
+			if (ph.behavior != voxels::VoxelBehavior::Static)
+			{
+				slider("Density", &ph.density, 0.05f, 5.f, "Heavier sinks in lighter liquids / gases (sand 1.6, water 1, oil 0.8).");
+				if (ph.behavior != voxels::VoxelBehavior::Powder)
+				{
+					ImGui::SetNextItemWidth(w);
+					if (ImGui::SliderInt("Dispersion", &ph.dispersion, 1, 16))
+						edited = true;
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Cells it can move sideways per step : how fast it spreads.");
+				}
+			}
+
+			if (ph.behavior == voxels::VoxelBehavior::Liquid || ph.behavior == voxels::VoxelBehavior::Gas)
+			{
+				slider("Drag", &ph.drag, 0.f, 1.f, "Slows down the actors inside (0 nothing, 1 very thick).");
+				slider("Buoyancy", &ph.buoyancy, 0.f, 2.f, "Pushes the actors inside up (1 cancels gravity, > 1 floats).");
+			}
+			else
+			{
+				slider("Friction", &ph.friction, 0.f, 3.f, "Grip of the characters on it : 1 normal, 0.1 ice, 2.5 mud.");
+				slider("Bounciness", &ph.bounciness, 0.f, 1.f, "Bounce when landing on it (rubber 0.8).");
+			}
+
+			slider("Damage / s", &ph.damage, 0.f, 100.f, "Damageable.TakeDamage(amount, null) to the actors touching it (lava, spikes).");
+			if (ImGui::Checkbox("Contact events", &ph.contact_events))
+				edited = true;
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("VoxelEvents.OnVoxelContact(name, type) / OnVoxelContactEnd to the actors that implement it.");
+
+			if (edited)
+			{
+				ph.preset.clear();   // custom values now
+				changed = true;
+			}
+
+			ImGui::PushTextWrapPos(0.f);
+			ImGui::TextDisabled("Simulated while the game runs, around the cameras. The voxel world comes back after Play.");
+			ImGui::PopTextWrapPos();
+		}
+
 		if (changed)
 			Changed(id, t, scene);
 

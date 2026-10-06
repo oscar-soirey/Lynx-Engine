@@ -3,6 +3,7 @@
 #include "BoxColliderComponent.h"
 #include "EngineActors.h"
 #include "../core/Engine.h"
+#include "../core/VoxelPhysics.h"
 #include "../scripting/Private/ScriptSystem.h"
 
 #include <algorithm>
@@ -237,18 +238,26 @@ namespace lynx
 		if (dt <= 0.f)
 			return;
 
+		// Voxels around : surface (friction, bounce) and fluids (drag, buoyancy).
+		const lynx::voxel_physics::Medium medium = lynx::voxel_physics::GetMedium(this);
+		ground_bounciness_ = medium.ground_bounciness;
+		const float grip = std::clamp(medium.ground_friction, 0.02f, 5.f);
+		const bool swimming = medium.fluid_fraction > 0.3f && medium.buoyancy > 0.f;
+
 		// ---------------------------------------------------- horizontal
-		const float target = move_input_ * move_speed;
+		// Sticky ground (friction > 1) : slower walk.
+		const float target = move_input_ * move_speed * (grounded_ && grip > 1.f ? 1.f / std::sqrt(grip) : 1.f);
 		const bool no_input = std::fabs(move_input_) < kNoInput;
 
 		if (grounded_)
 		{
+			// Ice (friction < 1) : slow to start and to stop.
 			if (no_input)
-				velocity_.x = MoveTowards(velocity_.x, 0.f, ground_deceleration * dt);
+				velocity_.x = MoveTowards(velocity_.x, 0.f, ground_deceleration * grip * dt);
 			else if (std::fabs(velocity_.x) > kNoInput && std::signbit(velocity_.x) != std::signbit(target))
-				velocity_.x = MoveTowards(velocity_.x, target, direction_change_acceleration * dt);
+				velocity_.x = MoveTowards(velocity_.x, target, direction_change_acceleration * grip * dt);
 			else
-				velocity_.x = MoveTowards(velocity_.x, target, ground_acceleration * dt);
+				velocity_.x = MoveTowards(velocity_.x, target, ground_acceleration * std::min(grip, 1.5f) * dt);
 		}
 		else
 		{
@@ -273,6 +282,18 @@ namespace lynx
 			velocity_.y -= gravity * dt;
 		}
 
+		// Inside a liquid / gas : buoyancy (against the gravity) and drag.
+		if (medium.fluid_fraction > 0.f)
+		{
+			velocity_.y += gravity * medium.buoyancy * medium.fluid_fraction * dt;
+			const float keep = std::max(0.f, 1.f - medium.drag * medium.fluid_fraction * 5.f * dt);
+			velocity_.x *= keep;
+			velocity_.y *= keep;
+		}
+		// Swimming : Jump again and again.
+		if (swimming)
+			jump_count_ = 0;
+
 		if (max_fall_speed > 0.f)
 			velocity_.y = std::max(velocity_.y, -max_fall_speed);
 
@@ -286,6 +307,7 @@ namespace lynx
 
 		const bool was_grounded = grounded_;
 		const float contact = ContactDistance();
+		const float fall_speed = velocity_.y;   // before the landing (bounce)
 
 		// ---------------------------------------------------- X
 		const float dx = velocity_.x * dt;
@@ -345,6 +367,15 @@ namespace lynx
 		}
 
 		OnTransformChanged();
+
+		// Bouncy ground (rubber...) : back up.
+		if (grounded_ && !was_grounded && ground_bounciness_ > 0.f && fall_speed < -3.f)
+		{
+			velocity_.y = -fall_speed * std::min(ground_bounciness_, 1.f);
+			grounded_ = false;
+			FireLanded();
+			return;
+		}
 
 		if (grounded_)
 		{

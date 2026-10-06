@@ -39,6 +39,9 @@
  * Evenements (C++ virtuels, et memes noms en JS) : OnLanded(), OnJumped(n)
  * (n = numero du saut, 1 = depuis le sol ; JS : OnJumped()), OnHit (voir Actor).
  *
+ * Voxels physiques (core/VoxelPhysics.h) : adherence du sol (glace, boue),
+ * rebond, et dans un liquide / gaz : trainee, flottaison, nage (Jump).
+ *
  * Unites : monde (comme transform.location), vitesses par seconde.
  */
 
@@ -178,6 +181,8 @@ namespace lynx
 		float jump_hold_timer_ = 0.f;
 		int jump_count_ = 0;
 		bool facing_right_ = true;
+		// Voxel physics (core/VoxelPhysics.h) : surface under the feet.
+		float ground_bounciness_ = 0.f;
 
 		bool playing_ = false;
 	};

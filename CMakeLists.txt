@@ -40,6 +40,7 @@ add_library(Lynx SHARED
 		src/core/Level.cpp
 		src/core/PostProcess.cpp
 		src/core/Plugins.cpp
+		src/core/VoxelPhysics.cpp
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
 		src/core/Profiler.cpp

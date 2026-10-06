@@ -6158,6 +6158,10 @@ namespace editor
         // Editor modules of the plugins.
         lynx::editor::plugins::Tick(dt);
 
+        // Simulate : the voxel physics runs around the editor camera too.
+        if (isSimulating)
+            lynx::voxel_physics::AddFocus(camX, camY);
+
         ImGuiIO& io =
             ImGui::GetIO();
 

@@ -15,7 +15,12 @@
 //               "flags": ["ROCK"],          // game flags (any name), see GetFlagMask()
 //               "emissive": "ffffff",       // optional : emissive color
 //               "indestructible": true,     // optional : attacks cannot destroy it
-//               "on_destroyed": "example"   // optional : event, see RegisterDestroyedEvent()
+//               "on_destroyed": "example",  // optional : event, see RegisterDestroyedEvent()
+//               "physics": {                // optional : see VoxelPhysicsProps (VoxelPhysics.h)
+//                   "preset": "Sand", "behavior": "powder", "density": 1.6,
+//                   "dispersion": 1, "friction": 0.8, "bounciness": 0,
+//                   "drag": 0, "buoyancy": 0, "damage": 0, "contact_events": false
+//               }
 //           }
 //       ]
 //   }
@@ -34,6 +39,54 @@
 
 namespace lynx::voxels
 {
+	/**
+	 * How a voxel type moves while the game runs (VoxelPhysics.h) :
+	 *   Static  never moves (ground, walls) ;
+	 *   Powder  falls, slides down in piles (sand, gravel, snow) ;
+	 *   Liquid  falls and spreads sideways (water, oil, lava) ;
+	 *   Gas     rises and spreads (smoke, steam).
+	 */
+	enum class VoxelBehavior : uint8_t { Static = 0, Powder, Liquid, Gas };
+
+	/** Physical properties of a voxel type (editor : Voxel types > Physics). */
+	struct VoxelPhysicsProps
+	{
+		/** Name of the preset it comes from ("" : custom). */
+		std::string preset;
+		VoxelBehavior behavior = VoxelBehavior::Static;
+		/** Heavier sinks in lighter (sand in water, water under oil). */
+		float density = 1.f;
+		/** Liquid / gas : cells it can move sideways per step (speed of spreading). */
+		int dispersion = 4;
+		/** Surface : 1 normal, 0.1 ice (slides), 2 mud (sticks). Multiplies the ground grip of the characters. */
+		float friction = 1.f;
+		/** Surface : 0 none, 1 a full bounce when landing on it. */
+		float bounciness = 0.f;
+		/** Inside (liquids, gases) : 0 nothing, 1 very thick (slows the actors down). */
+		float drag = 0.f;
+		/** Inside : 0 no effect, 1 cancels gravity, > 1 pushes up. */
+		float buoyancy = 0.f;
+		/** Damage per second to the actors touching it (Damageable.TakeDamage). */
+		float damage = 0.f;
+		/** VoxelEvents.OnVoxelContact / OnVoxelContactEnd to the actors that touch it. */
+		bool contact_events = false;
+
+		/** Inline : usable from the editor / game DLLs (the struct is not exported). */
+		bool IsDefault() const
+		{
+			const VoxelPhysicsProps d;
+			return behavior == d.behavior && density == d.density && dispersion == d.dispersion &&
+			       friction == d.friction && bounciness == d.bounciness && drag == d.drag &&
+			       buoyancy == d.buoyancy && damage == d.damage && contact_events == d.contact_events;
+		}
+	};
+
+	/** Presets of the editor : name -> properties (Sand, Water, Ice...). */
+	LYNX_API const std::vector<std::pair<std::string, VoxelPhysicsProps>>& GetPhysicsPresets();
+
+	/** "static", "powder", "liquid", "gas". */
+	LYNX_API const char* BehaviorName(VoxelBehavior behavior);
+
 	struct VoxelType
 	{
 		std::string name;
@@ -49,6 +102,9 @@ namespace lynx::voxels
 
 		// Name of the event called when the voxel is destroyed ("" = none).
 		std::string on_destroyed;
+
+		// Physics (falling sand, flowing water, slippery ice...).
+		VoxelPhysicsProps physics;
 	};
 
 	// Event called when a voxel is destroyed (voxel cell coordinates).

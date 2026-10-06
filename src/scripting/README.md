@@ -141,6 +141,15 @@ class Coin extends Actor {
   nom, `lynx::interfaces::Call(actor, "Collectible", "OnCollected", { this, 1 })`
   (voir `gameplay/Interface.h`).
 
+## Voxels physiques
+
+Les types de voxels peuvent avoir une physique (éditeur : *Voxel types > Physics*, presets Sand,
+Water, Lava, Smoke, Ice, Rubber...) : poudres, liquides et gaz simulés pendant le jeu autour des
+caméras. `VoxelPhysics.setEnabled(false)`, `setRadius(128)`, `setRate(30)`,
+`addFocus(x, y)` (une zone de plus, à appeler chaque frame).
+Événements : `static interfaces = ["VoxelEvents"]` puis `OnVoxelContact(name, type)` /
+`OnVoxelContactEnd(name, type)` ; les dégâts arrivent par `Damageable.TakeDamage(amount, null)`.
+
 ## Post process
 
 `PostProcess.set("exposure", 0.5)`, `PostProcess.set("tintColor", [1, 0.9, 0.8])`,

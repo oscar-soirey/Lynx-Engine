@@ -7,6 +7,7 @@
 #include "../core/Filesystem.h"
 #include "../core/Level.h"
 #include "../core/PostProcess.h"
+#include "../core/VoxelPhysics.h"
 #include "../core/data/Typename.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/Components.h"
@@ -1162,6 +1163,25 @@ namespace lynx
 		JSValue LevelFindImplementing(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv);
 		void RegisterInterfaceGlobals(JSContext* ctx);
 
+		// ---- VoxelPhysics.setEnabled / setRadius / setRate / addFocus -----
+
+		// magic : 0 setEnabled, 1 setRadius, 2 setRate, 3 addFocus, 4 isEnabled
+		JSValue VoxelPhysicsOp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, int magic)
+		{
+			double a = 0.0, b = 0.0;
+			if (argc > 0 && magic != 0) JS_ToFloat64(ctx, &a, argv[0]);
+			if (argc > 1) JS_ToFloat64(ctx, &b, argv[1]);
+			switch (magic)
+			{
+			case 0: voxel_physics::SetEnabled(argc > 0 ? JS_ToBool(ctx, argv[0]) > 0 : true); break;
+			case 1: voxel_physics::SetRadius(static_cast<int>(a)); break;
+			case 2: voxel_physics::SetRate(static_cast<float>(a)); break;
+			case 3: voxel_physics::AddFocus(static_cast<float>(a), static_cast<float>(b)); break;
+			case 4: return JS_NewBool(ctx, voxel_physics::IsEnabled());
+			}
+			return JS_UNDEFINED;
+		}
+
 		// ---- PostProcess.get / set / reset / params ----------------------
 
 		JSValue PostProcessGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
@@ -1340,6 +1360,14 @@ namespace lynx
 			DefFunc(ctx, post, "reset", PostProcessReset, 0);
 			DefFunc(ctx, post, "params", PostProcessParams, 0);
 			JS_SetPropertyStr(ctx, global, "PostProcess", post);
+
+			JSValue vphys = JS_NewObject(ctx);
+			DefFuncMagic(ctx, vphys, "setEnabled", VoxelPhysicsOp, 1, 0);
+			DefFuncMagic(ctx, vphys, "setRadius", VoxelPhysicsOp, 1, 1);
+			DefFuncMagic(ctx, vphys, "setRate", VoxelPhysicsOp, 1, 2);
+			DefFuncMagic(ctx, vphys, "addFocus", VoxelPhysicsOp, 2, 3);
+			DefFuncMagic(ctx, vphys, "isEnabled", VoxelPhysicsOp, 0, 4);
+			JS_SetPropertyStr(ctx, global, "VoxelPhysics", vphys);
 
 			JSValue engine = JS_NewObject(ctx);
 			DefFunc(ctx, engine, "getTimeDilation", EngineGetTimeDilation, 0);

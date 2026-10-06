@@ -1,4 +1,5 @@
 #include "Components.h"
+#include "../core/VoxelPhysics.h"
 #include "BoxColliderComponent.h"
 
 #include "Actor.h"
@@ -43,6 +44,15 @@ namespace lynx
 		// Avec un collider bloquant : le deplacement s'arrete contre les murs
 		// (et la vitesse s'annule sur l'axe bloque, comme un objet physique).
 		ColliderComponent* box = owner->GetComponent<ColliderComponent>();
+
+		// Inside a liquid / gas voxel : drag (core/VoxelPhysics.h).
+		if (box)
+		{
+			const voxel_physics::Medium medium = voxel_physics::GetMedium(owner);
+			if (medium.fluid_fraction > 0.f && medium.drag > 0.f)
+				linear *= std::max(0.f, 1.f - medium.drag * medium.fluid_fraction * 5.f * dt);
+		}
+
 		if (box && !box->trigger)
 		{
 			box->MoveAndCollide(linear * dt);
