@@ -58,3 +58,20 @@ Process.*         lancement de commandes avec lecture de la sortie, PATH
 
 Pour ajouter une dépendance : un bloc dans `Dependencies::CreateList()`.
 Pour ajouter un modèle au catalogue : une ligne dans `Models::Catalog()`.
+
+## Mise à jour du launcher (LynxUpdater)
+
+`LynxUpdater.exe` (dossier `updater/`) se lance **avant** le launcher, dans le même dossier :
+
+1. il lit la dernière release GitHub dont le tag commence par `launcher` (les tags `v26.x`
+   du moteur sont ignorés, brouillons et pré-releases aussi) ;
+2. il compare avec le tag installé, écrit dans `launcher.version` à côté de l'exécutable ;
+3. plus récent : il télécharge l'archive (`.zip` contenant `LynxLauncher.exe`, ou l'`.exe` seul),
+   remplace les fichiers (l'updater n'est jamais écrasé) puis met `launcher.version` à jour,
+   avec une petite fenêtre de progression ;
+4. dans tous les cas il lance `LynxLauncher.exe`. Sans réseau ou si la mise à jour échoue,
+   l'ancien launcher démarre quand même.
+
+Si `launcher.version` est absent, la version est considérée comme inconnue et la dernière release est installée.
+À chaque release du launcher : compiler avec `-DLYNX_LAUNCHER_TAG=launcher-v-X.Y.Z` (même valeur que le tag GitHub).
+Les raccourcis doivent pointer vers `LynxUpdater.exe`.

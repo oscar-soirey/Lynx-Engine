@@ -1,26 +1,21 @@
 obligé:
 
-ameliorer l'editeur de code javascript :
--police à ./fonts/JetBrainsMono-{Regular/Italic/Bold/BoldItalic}.ttf
--ameliorer la séléction, n'hesite pas a modifier ImTextEdit pour ca
--vrai language server fonctionel (avec detection des erreurs etc...)
--et aussi le curseur de souris de selection de texte s'affiche pas, on garde le curseur par défaut de lynx, je veux juste le selecteur de texte par défaut du windows
-
-quand on survole l'encoche en haut, ca affiche des infos sur le projet (sa date de modification, de création, son path, sa taille, etc...)
-
-a coté du bouton lynxie dans la header bar de la window glfw, met la version du moteur (qui est récuperée par GetEngineVersion() (dans engine.h) (met le en petit, ca doit donner ca : Lynx 2026.0.6 par exemple), modifie GetEngineVersion pour ajouter le point.
-
 la caméra ne doit plus etre gérée par le main du jeu, mais en tant que composant, la camera doit etre affichée dans le viewport du personnage dont l'actor est possédé, en gros la camera est en composant de l'actor possedé par le PlayerController
 
 revenir a la police d'ecriture normale pour Lynxie
 
+menu options de l'editeur (scale de l'ui global, theme, plugins (pour plus tard), etc...
+
+ajouter un menu contextuel dans windows (dans un folder): ouvrir avec Lynx
+
 class Humanoid fonctionel (herite de actor), s'inspirer de Pawn pour les deplacements, ne pas implementer par contre la gestion des input, juste le mouvement
 
-collider components qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
-
-et revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
+revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
 Q : Quelle structure veux-tu pour l'animgraph ?
 R : Graphe de pose Unreal : un nœud Output Pose final, auquel on branche une Animation, un Blend Space ou la State Machine (plus de nœud Entry au niveau racine)
+
+collider component (qui déclenche overlapp et qui peut ausse bloquer physiquement les objets)
+collider components qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
 
 collider actor dans les actors standards du moteur
 

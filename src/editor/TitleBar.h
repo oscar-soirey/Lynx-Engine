@@ -37,7 +37,7 @@ namespace lynx::editor::title_bar
 	 * frame before the other side bars (toolbar). `on_close` : the close button,
 	 * `on_lynxie` : the Lynxie logo on the left.
 	 *
-	 *   [Lynxie]            \  Lynx - Project  /            [_] [#] [X]
+	 *   [Lynxie] Lynx 2026.1.0   \  Lynx - Project  /            [_] [#] [X]
 	 */
 	void Draw(const std::string& title, const std::function<void()>& on_close,
 	          const std::function<void()>& on_lynxie = {});
@@ -50,6 +50,12 @@ namespace lynx::editor::title_bar
 
 	/** Windows hit test of a client point (tests) : 0 client, 1 caption (drag). */
 	int HitTestBar(float x, float y);
+
+	/** Small text after the Lynxie logo ("Lynx 2026.1.0"). Empty : none. */
+	void SetVersionText(const std::string& text);
+
+	/** Content of the tooltip shown when the mouse stays on the title tab (project infos). */
+	void SetTitleTooltip(const std::function<void()>& draw);
 
 	/** A rect of the bar handled by ImGui (not a drag area) for this frame. */
 	void AddInteractive(const ImVec2& min, const ImVec2& max);

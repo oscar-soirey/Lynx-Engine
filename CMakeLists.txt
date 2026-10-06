@@ -88,8 +88,8 @@ target_compile_definitions(Lynx PRIVATE
 target_compile_definitions(Lynx
 		PRIVATE
 		LYNX_VERSION_YEAR=2026
-		LYNX_VERSION_MAJOR=1
-		LYNX_VERSION_MINOR=0
+		LYNX_VERSION_MAJOR=0
+		LYNX_VERSION_MINOR=4
 )
 
 target_link_libraries(Lynx PRIVATE
@@ -166,6 +166,8 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/TextSelection.cpp
 		src/editor/WindowIcon.cpp
 		src/editor/JsonEditor.cpp
+		src/editor/JsLanguage.cpp
+		src/editor/ProjectInfo.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp
@@ -265,6 +267,35 @@ target_link_libraries(LynxLauncher PRIVATE
 
 # Static libstdc++ / libgcc and no console : the launcher runs before MinGW is installed.
 target_link_options(LynxLauncher PRIVATE -static -mwindows)
+
+
+## Lynx updater (starts BEFORE the launcher, same folder : checks the launcher releases
+## on GitHub (tags "launcher*"), updates LynxLauncher.exe if needed, then starts it)
+# Small Win32 program (no ImGui) : a progress window is shown only while an update downloads.
+# The installed launcher version is the tag written in launcher.version next to the exe.
+# Bump LYNX_LAUNCHER_TAG with each launcher release (-DLYNX_LAUNCHER_TAG=launcher-v-0.0.3).
+
+set(LYNX_LAUNCHER_TAG "launcher-v-0.1.1" CACHE STRING "GitHub tag of this launcher build (written in launcher.version)")
+
+add_executable(LynxUpdater src/editor_icon.rc
+		launcher/updater/main.cpp
+		launcher/updater/Updater.cpp
+		launcher/Process.cpp
+)
+
+target_link_libraries(LynxUpdater PRIVATE
+		comctl32    # progress bar
+		shell32
+		advapi32    # registry (Process::RefreshPath)
+)
+
+target_link_options(LynxUpdater PRIVATE -static -mwindows)
+
+# launcher.version next to LynxLauncher.exe (and LynxUpdater.exe : same build folder)
+file(GENERATE OUTPUT "$<TARGET_FILE_DIR:LynxLauncher>/launcher.version" CONTENT "${LYNX_LAUNCHER_TAG}\n")
+
+# Building the launcher also builds the updater
+add_dependencies(LynxLauncher LynxUpdater)
 
 
 ## Package for the game projects (find_package(Lynx), see cmake/LynxConfig.cmake.in)

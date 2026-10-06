@@ -11,6 +11,8 @@
 //   fonts/OpenDyslexic-Bold.otf         **bold** in Lynxie's messages
 //   fonts/OpenDyslexic-Italic.otf       *italic*
 //   fonts/OpenDyslexic-BoldItalic.otf   ***both***
+//   fonts/JetBrainsMono-Regular.ttf     code editors (+ -Bold, -Italic,
+//                                       -BoldItalic : keywords, comments)
 //
 // The characters a font does not have (accents, symbols) come from a fallback
 // merged into it : normal-font.ttf (the old editor font) if it is there,
@@ -42,4 +44,14 @@ namespace lynx::editor::fonts
 
 	// Size Lynxie's text uses inside PushLynxie (same as the bold / italic ones).
 	float LynxieScale();
+
+	// Code editors : JetBrains Mono. Code() : the editor font when the file is
+	// missing ; the others are nullptr when missing.
+	ImFont* Code();
+	ImFont* CodeBold();
+	ImFont* CodeItalic();
+	ImFont* CodeBoldItalic();
+
+	// Size of the code font, relative to the editor font size.
+	float CodeScale();
 }

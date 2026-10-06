@@ -216,10 +216,6 @@ namespace lynx::editor
 
 			ImGui::End();
 
-			// No text selection cursor (I-beam).
-			if (ImGui::GetMouseCursor() == ImGuiMouseCursor_TextInput)
-				ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
-
 			ImGui::Render();
 
 			int width = 0;

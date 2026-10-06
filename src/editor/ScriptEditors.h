@@ -15,6 +15,10 @@
 // - File changed on disk : reloaded if there is no unsaved edit, otherwise a
 //   bar offers "Reload" or "Keep my version".
 // - Brackets ( [ { are closed automatically.
+// - .js : language service (JsLanguage.h) : errors / warnings underlined,
+//   completion (as you type, Ctrl+Space), parameters of the call, hover,
+//   F12 / Ctrl+click : go to definition, F8 : next problem.
+// - Font : JetBrains Mono (fonts/JetBrainsMono-*.ttf).
 // =============================================================================
 
 #include <filesystem>
@@ -23,6 +27,10 @@
 
 namespace lynx::editor::script_editors
 {
+	// Project root : the JavaScript language service reads assets/ (classes of
+	// the other files, input.json actions, widgets...).
+	void SetProjectRoot(const std::filesystem::path& root);
+
 	// Text files the editors open.
 	bool CanOpen(const std::filesystem::path& path);
 

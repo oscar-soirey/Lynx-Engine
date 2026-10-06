@@ -4,6 +4,7 @@
 
 #include <imgui/imgui_internal.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -20,6 +21,14 @@ namespace lynx::editor::fonts
 		ImFont* g_lynxie_italic = nullptr;
 		ImFont* g_lynxie_bold_italic = nullptr;
 		int g_lynxie_pushes = 0;   // PushLynxie calls that pushed a font
+		ImFont* g_code = nullptr;
+		ImFont* g_code_bold = nullptr;
+		ImFont* g_code_italic = nullptr;
+		ImFont* g_code_bold_italic = nullptr;
+
+		// JetBrains Mono at the size of the editor font looks too big next to
+		// the pixel font : a bit smaller.
+		constexpr float kCodeScale = 0.78f;
 
 		// OpenDyslexic draws small letters for its pixel size : 2.5x the
 		// editor font to look as big.
@@ -110,6 +119,15 @@ namespace lynx::editor::fonts
 		if (!g_lynxie)
 			g_lynxie_bold = g_lynxie_italic = g_lynxie_bold_italic = nullptr;
 
+		// Code editors : JetBrains Mono (the 4 styles have the same width).
+		const float code_size = std::floor(size * kCodeScale);
+		g_code = AddFont(Find("JetBrainsMono-Regular.ttf"), code_size, true);
+		g_code_bold = AddFont(Find("JetBrainsMono-Bold.ttf"), code_size, true);
+		g_code_italic = AddFont(Find("JetBrainsMono-Italic.ttf"), code_size, true);
+		g_code_bold_italic = AddFont(Find("JetBrainsMono-BoldItalic.ttf"), code_size, true);
+		if (!g_code)
+			g_code_bold = g_code_italic = g_code_bold_italic = nullptr;
+
 		io.FontDefault = g_editor;
 	}
 
@@ -120,6 +138,12 @@ namespace lynx::editor::fonts
 	ImFont* LynxieBoldItalic() { return g_lynxie_bold_italic; }
 
 	float LynxieScale() { return kLynxieScale; }
+
+	ImFont* Code() { return g_code ? g_code : Editor(); }
+	ImFont* CodeBold() { return g_code_bold; }
+	ImFont* CodeItalic() { return g_code_italic; }
+	ImFont* CodeBoldItalic() { return g_code_bold_italic; }
+	float CodeScale() { return g_code ? kCodeScale : 1.f; }
 
 	void PushLynxie()
 	{

@@ -198,6 +198,7 @@ namespace lynx
 	LYNX_API uint32_t GetViewport();
 
 	//Utility functions
+	// "2026.1.0" : LYNX_VERSION_YEAR.LYNX_VERSION_MAJOR.LYNX_VERSION_MINOR (CMakeLists.txt).
 	LYNX_API std::string GetEngineVersion();
 
 	//apelle un callback apres un certain temps donné

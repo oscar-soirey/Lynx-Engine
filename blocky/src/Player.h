@@ -33,10 +33,6 @@ private:
 
 	void CreateSelectCharacterWidgets();
 
-	lynx::blend_space bs_default{};
-	lynx::animation _Idle{ sprite, "hero/Idle.png", 10 };
-	lynx::animation _Run{sprite, "hero/Run.png", 10, true, 0.1f};
-
 	// Air : _Jump = debut (une fois), puis _Falling = boucle tant qu'on est en l'air
 	lynx::animation _Falling{sprite, "hero/Falling.png", 3, true, 0.1f};
 	lynx::animation _Jump{sprite, "hero/Jump.png", 6, false, 0.1f};
@@ -46,6 +42,10 @@ private:
 	lynx::blend_space bs_attacking{};
 	lynx::animation _Attack{sprite, "hero/Attack.png", 3, false, 0.1f};
 	lynx::animation _WalkAttack{sprite, "hero/Attack.png", 3, false, 0.1f};
+
+	lynx::blend_space bs_default{};
+	lynx::animation _Run{sprite, "hero/Run.png", 10, true, 0.1f};
+	lynx::animation _Idle{ sprite, "hero/Idle.png", 10 };
 
 	bool attack_event_done_=false;
 

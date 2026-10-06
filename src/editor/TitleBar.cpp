@@ -33,6 +33,9 @@ namespace lynx::editor::title_bar
 		float g_height = 0.f;
 		std::vector<ImRect> g_interactive;      // being filled this frame
 		std::vector<ImRect> g_interactive_last; // the one the hit test uses
+		std::string g_version;                   // "Lynx 2026.1.0", next to Lynxie
+		std::function<void()> g_title_tooltip;   // content of the tooltip of the tab
+		double g_tab_hover_start = -1.0;
 
 		bool IsMaximized()
 		{
@@ -252,6 +255,16 @@ namespace lynx::editor::title_bar
 		return 1;
 	}
 
+	void SetVersionText(const std::string& text)
+	{
+		g_version = text;
+	}
+
+	void SetTitleTooltip(const std::function<void()>& draw)
+	{
+		g_title_tooltip = draw;
+	}
+
 	void AddInteractive(const ImVec2& min, const ImVec2& max)
 	{
 		g_interactive.push_back(ImRect(min, max));
@@ -303,6 +316,17 @@ namespace lynx::editor::title_bar
 					ImGui::SetTooltip("Lynxie : ask a question about the engine or the level");
 				if (clicked && on_lynxie)
 					on_lynxie();
+
+				// Engine version, small, after the logo (drag area : not interactive).
+				if (!g_version.empty())
+				{
+					const float size = std::floor(ImGui::GetFontSize() * 0.62f);
+					ImFont* font = ImGui::GetFont();
+					const ImVec2 text_size = font->CalcTextSizeA(size, FLT_MAX, 0.f, g_version.c_str());
+					const ImVec2 pos(ImGui::GetItemRectMax().x + std::floor(height * 0.22f),
+					                 std::floor(origin.y + (height - text_size.y) * 0.5f));
+					dl->AddText(font, size, pos, ImGui::GetColorU32(ImGuiCol_TextDisabled), g_version.c_str());
+				}
 			}
 
 			// Title : a dark tab hanging from the top, in the middle (drag area too)
@@ -343,6 +367,35 @@ namespace lynx::editor::title_bar
 				dl->PathStroke(IM_COL32(255, 255, 255, 40), ImDrawFlags_Closed, 1.f);
 				const ImU32 cream = focused ? IM_COL32(244, 229, 172, 255) : IM_COL32(200, 192, 160, 255);
 				dl->AddText(ImVec2(std::floor(cx - text_size.x * 0.5f), std::floor(y0 + (tab_h - text_size.y) * 0.5f)), cream, title.c_str());
+
+				// Hover (a moment, not while dragging the window) : the tooltip of the project.
+				// (The tab is a caption area : Windows sends no mouse move to the
+				// client there, so the cursor is read from the system.)
+				ImVec2 mouse = ImGui::GetMousePos();
+				bool mouse_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+				if (g_window)
+				{
+					double mx = 0.0, my = 0.0;
+					glfwGetCursorPos(g_window, &mx, &my);
+					mouse = ImVec2(viewport->Pos.x + static_cast<float>(mx), viewport->Pos.y + static_cast<float>(my));
+					mouse_down = glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+				}
+				const bool over_tab = g_title_tooltip && mouse.y >= y0 && mouse.y < y1 &&
+				                      mouse.x >= x0 + slant * (mouse.y - y0) / tab_h &&
+				                      mouse.x < x1 - slant * (mouse.y - y0) / tab_h && !mouse_down;
+				if (!over_tab)
+					g_tab_hover_start = -1.0;
+				else if (g_tab_hover_start < 0.0)
+					g_tab_hover_start = ImGui::GetTime();
+				else if (ImGui::GetTime() - g_tab_hover_start > 0.35)
+				{
+					ImGui::SetNextWindowPos(ImVec2(cx, y1 + 6.f), ImGuiCond_Always, ImVec2(0.5f, 0.f));
+					if (ImGui::BeginTooltip())
+					{
+						g_title_tooltip();
+						ImGui::EndTooltip();
+					}
+				}
 			}
 
 			// Buttons on the right (Windows layout)

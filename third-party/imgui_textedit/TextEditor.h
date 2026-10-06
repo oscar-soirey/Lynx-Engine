@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <cassert>
+#include <initializer_list>
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
@@ -268,6 +270,63 @@ public:
 	static const Palette& GetLightPalette();
 	static const Palette& GetRetroBluePalette();
 
+	// -------------------------------------------------------------------------
+	// Lynx additions (lynx_textedit.patch)
+	// -------------------------------------------------------------------------
+
+	// Fonts of the text (monospace, same advance in every style) : keywords
+	// in bold, comments in italic. nullptr : the current ImGui font. `scale` :
+	// size relative to the current ImGui font size.
+	void SetFonts(ImFont* aRegular, ImFont* aBold = nullptr, ImFont* aItalic = nullptr, ImFont* aBoldItalic = nullptr,
+	              float aScale = 1.0f);
+
+	// Underlined ranges (wavy : error / warning / info, dotted : hint), with
+	// markers in the scrollbar. The host shows their messages (hover).
+	enum class DiagnosticSeverity { Error, Warning, Info, Hint };
+	struct Diagnostic
+	{
+		Coordinates mStart;
+		Coordinates mEnd;          // == mStart : one character
+		DiagnosticSeverity mSeverity = DiagnosticSeverity::Error;
+		std::string mMessage;
+	};
+	void SetDiagnostics(const std::vector<Diagnostic>& aDiagnostics) { mDiagnostics = aDiagnostics; }
+	const std::vector<Diagnostic>& GetDiagnostics() const { return mDiagnostics; }
+
+	// The word under the cursor / selected : its other occurrences are
+	// highlighted, and marked in the scrollbar. Matching brackets too.
+	void SetHighlightOccurrences(bool aValue) { mHighlightOccurrences = aValue; }
+	void SetHighlightBrackets(bool aValue) { mHighlightBrackets = aValue; }
+
+	// Built-in tooltips (identifiers of the language definition, error
+	// markers). Off when the host shows its own (language service).
+	void SetBuiltinTooltips(bool aValue) { mBuiltinTooltips = aValue; }
+
+	// Geometry of the last Render : place popups next to the text.
+	bool IsTextHovered() const { return mTextHovered; }          // mouse over the text area (not the scrollbars)
+	bool IsFocused() const { return mFocused; }
+	bool GetMouseCoordinates(Coordinates& aOut) const;           // character under the mouse (false : not over the text)
+	ImVec2 CoordinatesToScreenPos(const Coordinates& aPosition) const;   // top left of the character
+	float GetLineHeight() const { return mCharAdvance.y; }
+	ImVec2 GetVisibleTextMin() const { return mVisibleMin; }    // text area on the screen
+	ImVec2 GetVisibleTextMax() const { return mVisibleMax; }
+
+	// Text access
+	std::string GetTextRange(const Coordinates& aStart, const Coordinates& aEnd) const { return GetText(aStart, aEnd); }
+	std::string GetLineText(int aLine) const;
+	int GetLineIndexOf(const Coordinates& aPosition) const { return GetCharacterIndex(aPosition); }   // byte in the line
+	int GetColumnOf(int aLine, int aIndex) const { return GetCharacterColumn(aLine, aIndex); }
+	unsigned GetTextVersion() const { return mTextVersion; }    // changes with every edit
+
+	// Replaces [aStart, aEnd) with aText : one undo step, the cursor goes after it.
+	void ReplaceRange(const Coordinates& aStart, const Coordinates& aEnd, const std::string& aText);
+
+	// Keys the host handles this frame (completion list open...) : the editor ignores them.
+	void SuppressKeys(std::initializer_list<ImGuiKey> aKeys) { mSuppressedKeys.insert(mSuppressedKeys.end(), aKeys); }
+
+	// Underline of a range this frame (Ctrl + hover : link to a definition).
+	void SetLinkUnderline(const Coordinates& aStart, const Coordinates& aEnd) { mLinkStart = aStart; mLinkEnd = aEnd; mHasLink = true; }
+
 private:
 	typedef std::vector<std::pair<std::regex, PaletteIndex>> RegexList;
 
@@ -350,6 +409,18 @@ private:
 	void HandleMouseInputs();
 	void Render();
 
+	// Lynx additions
+	enum class FontStyle { Regular, Bold, Italic, BoldItalic };
+	FontStyle GetGlyphStyle(const Glyph& aGlyph) const;
+	ImFont* TextFont() const;
+	float TextFontSize() const;
+	bool KeyPressed(ImGuiKey aKey) const;
+	bool SelectionExtent(int aLine, float& aX0, float& aX1) const;
+	void UpdateOccurrences();
+	bool FindMatchingBracket(const Coordinates& aAt, Coordinates& aOpen, Coordinates& aClose) const;
+	Coordinates ScreenPosToCoordinatesFrom(const ImVec2& aOrigin, const ImVec2& aPosition) const;
+	void DrawScrollbarMarkers();
+
 	float mLineSpacing;
 	Lines mLines;
 	EditorState mState;
@@ -388,4 +459,27 @@ private:
 	uint64_t mStartTime;
 
 	float mLastClick;
+
+	// Lynx additions
+	ImFont* mFonts[4] = { nullptr, nullptr, nullptr, nullptr };
+	float mFontScale = 1.0f;
+	ImFont* mRenderFont = nullptr;
+	float mRenderFontSize = 0.0f;
+	std::vector<Diagnostic> mDiagnostics;
+	bool mHighlightOccurrences = true;
+	bool mHighlightBrackets = true;
+	bool mBuiltinTooltips = true;
+	bool mTextHovered = false;
+	bool mFocused = false;
+	ImVec2 mOrigin;                 // screen position of the first line (scroll included)
+	ImVec2 mVisibleMin, mVisibleMax;
+	unsigned mTextVersion = 0;
+	std::vector<ImGuiKey> mSuppressedKeys;
+	Coordinates mLinkStart, mLinkEnd;
+	bool mHasLink = false;
+	// occurrences of the word under the cursor / selected
+	std::string mOccurrenceWord;
+	unsigned mOccurrenceVersion = ~0u;
+	std::vector<Coordinates> mOccurrences;
+	int mOccurrenceLength = 0;      // in columns
 };

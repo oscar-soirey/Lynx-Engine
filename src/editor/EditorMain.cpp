@@ -86,6 +86,7 @@
 #include "FileIcons.h"
 #include "SpriteVoxelizer.h"
 #include "WindowIcon.h"
+#include "ProjectInfo.h"
 #include "EditorFonts.h"
 #include "ShipGame.h"
 #include "commands/ScriptRunner.h"
@@ -201,369 +202,6 @@ static bool EditorWindowCheckbox(const char* label, bool* value,
     return changed;
 }
 
-
-
-// =============================================================================
-// Custom mouse cursors (editor + game)
-// -----------------------------------------------------------------------------
-// Each image is read with lynx::fs::ReadBinary, loaded by HRL
-// (HRL_CreateTexture), then its pixels are read back from OpenGL
-// (HRL_GL_GetTextureGLID + glGetTexImage) to build a GLFW cursor.
-// Must be called AFTER HRL_Init / HRL_InitContext.
-//
-// Every image is optional : a missing file falls back to the standard system
-// cursor of the same kind (hand, text caret, resize). If NO image is found
-// at all, the system cursors are left untouched.
-// 32x32 is a good size (some systems refuse very large cursors).
-// =============================================================================
-
-enum CursorKind
-{
-    kCursorArrow = 0,
-    kCursorSelect,      // hand / "you can click or select this"
-    kCursorText,        // text selection (I-beam)
-    kCursorLoading,     // busy (long blocking operations)
-    kCursorResizeEW,    // resize left <-> right
-    kCursorResizeNS,    // resize up <-> down
-    kCursorResizeNWSE,  // resize diagonal, top-left <-> bottom-right
-    kCursorResizeNESW,  // resize diagonal, top-right <-> bottom-left
-    kCursorKindCount
-};
-
-#ifdef GLFW_RESIZE_NWSE_CURSOR
-constexpr int kShapeNWSE = GLFW_RESIZE_NWSE_CURSOR;
-constexpr int kShapeNESW = GLFW_RESIZE_NESW_CURSOR;
-#else
-constexpr int kShapeNWSE = 0;   // GLFW < 3.4 : no diagonal standard cursor
-constexpr int kShapeNESW = 0;
-#endif
-
-struct CursorDef
-{
-    const char* file;
-    int hotspotX;       // pixel that "clicks", -1 = center of the image
-    int hotspotY;
-    int fallbackShape;  // GLFW standard cursor used when the file is missing
-};
-
-// Tweak the hotspots here. (0,0) = top-left corner, like an arrow.
-static const CursorDef kCursorDefs[kCursorKindCount] =
-{
-    /* Arrow      */ { "cur/cursor.png",             0,  0, 0                    },
-    /* Select     */ { "cur/cursor_select.png",      0,  0, GLFW_HAND_CURSOR     },
-    /* Text       */ { "cur/cursor_text.png",       -1, -1, GLFW_IBEAM_CURSOR    },
-    /* Loading    */ { "cur/cursor_loading.png",    -1, -1, 0                    },
-    /* ResizeEW   */ { "cur/cursor_resize_h.png",   -1, -1, GLFW_HRESIZE_CURSOR  },
-    /* ResizeNS   */ { "cur/cursor_resize_v.png",   -1, -1, GLFW_VRESIZE_CURSOR  },
-    /* ResizeNWSE */ { "cur/cursor_resize_nwse.png",-1, -1, kShapeNWSE           },
-    /* ResizeNESW */ { "cur/cursor_resize_nesw.png",-1, -1, kShapeNESW           },
-};
-
-// Set to true if the cursors show up upside down.
-constexpr bool kCursorFlipY = true;
-
-// Size of the cursors : 1.0 = size of the png, 2.0 = twice bigger...
-// For the best quality, prefer a bigger png (48x48, 64x64) and keep 1.0.
-constexpr float kCursorScale = 1.3f;
-
-// true  : sharp pixels (pixel art)       false : smooth (bilinear)
-constexpr bool kCursorScaleNearest = true;
-
-// Some systems refuse or clip bigger cursors.
-constexpr int kCursorMaxSize = 128;
-
-static GLFWcursor* cursors[kCursorKindCount] = {};
-static GLFWwindow* cursorWindow = nullptr;
-static bool customCursorsEnabled = false;
-static int currentCursorKind = -1;
-static int busyCursorDepth = 0;
-
-static void SetCursorKind(int kind)
-{
-    if (!customCursorsEnabled || !cursorWindow)
-        return;
-
-    if (kind == currentCursorKind)
-        return;
-
-    currentCursorKind = kind;
-
-    GLFWcursor* cursor =
-        cursors[kind] ? cursors[kind] : cursors[kCursorArrow];
-
-    glfwSetCursor(cursorWindow, cursor);
-}
-
-// Shows the "loading" cursor during a long blocking operation (save, play /
-// stop, game reload...). The cursor is changed immediately, because the
-// main loop does not run while the operation is in progress.
-struct BusyCursorScope
-{
-    int previous;
-
-    BusyCursorScope()
-        : previous(currentCursorKind)
-    {
-        ++busyCursorDepth;
-        SetCursorKind(kCursorLoading);
-    }
-
-    ~BusyCursorScope()
-    {
-        --busyCursorDepth;
-
-        if (previous >= 0)
-            SetCursorKind(previous);
-    }
-};
-
-static std::vector<unsigned char> ScaleCursorPixels(
-    const std::vector<unsigned char>& src,
-    int w,
-    int h,
-    int new_w,
-    int new_h)
-{
-    std::vector<unsigned char> dst(static_cast<size_t>(new_w) * new_h * 4);
-
-    auto pixel = [&](int x, int y) -> const unsigned char*
-    {
-        x = std::clamp(x, 0, w - 1);
-        y = std::clamp(y, 0, h - 1);
-        return &src[(static_cast<size_t>(y) * w + x) * 4];
-    };
-
-    for (int y = 0; y < new_h; ++y)
-    {
-        for (int x = 0; x < new_w; ++x)
-        {
-            unsigned char* out =
-                &dst[(static_cast<size_t>(y) * new_w + x) * 4];
-
-            const float fx = (x + 0.5f) * w / new_w - 0.5f;
-            const float fy = (y + 0.5f) * h / new_h - 0.5f;
-
-            if (kCursorScaleNearest)
-            {
-                const unsigned char* p =
-                    pixel(static_cast<int>(std::floor(fx + 0.5f)),
-                          static_cast<int>(std::floor(fy + 0.5f)));
-
-                std::copy(p, p + 4, out);
-                continue;
-            }
-
-            // Bilinear, weighted by alpha so transparent pixels do not
-            // darken the edges of the cursor.
-            const int x0 = static_cast<int>(std::floor(fx));
-            const int y0 = static_cast<int>(std::floor(fy));
-            const float tx = fx - x0;
-            const float ty = fy - y0;
-
-            float r = 0.f, g = 0.f, b = 0.f, a = 0.f;
-
-            for (int j = 0; j < 2; ++j)
-            {
-                for (int i = 0; i < 2; ++i)
-                {
-                    const float weight =
-                        (i ? tx : 1.f - tx) * (j ? ty : 1.f - ty);
-
-                    const unsigned char* p = pixel(x0 + i, y0 + j);
-                    const float wa = weight * p[3];
-
-                    r += wa * p[0];
-                    g += wa * p[1];
-                    b += wa * p[2];
-                    a += wa;
-                }
-            }
-
-            if (a > 0.f)
-            {
-                out[0] = static_cast<unsigned char>(r / a + 0.5f);
-                out[1] = static_cast<unsigned char>(g / a + 0.5f);
-                out[2] = static_cast<unsigned char>(b / a + 0.5f);
-            }
-            else
-            {
-                out[0] = out[1] = out[2] = 0;
-            }
-
-            out[3] = static_cast<unsigned char>(std::min(a, 255.f) + 0.5f);
-        }
-    }
-
-    return dst;
-}
-
-static GLFWcursor* CreateCursorFromImageFile(const CursorDef& def)
-{
-    const auto file =
-        lynx::fs::ReadBinary(
-            def.file
-        );
-
-    if (file.empty())
-        return nullptr;
-
-    // NOTE : HRL_CreateTexture takes the encoded image (png...) in memory.
-    const HRL_id texture =
-        HRL_CreateTexture(
-            reinterpret_cast<const char*>(file.data()),
-            file.size()
-        );
-
-    if (texture == HRL_INVALID_ID)
-    {
-        std::cerr << "[CURSOR] HRL_CreateTexture failed for "
-                  << def.file << "\n";
-        return nullptr;
-    }
-
-    const GLuint gl_id =
-        static_cast<GLuint>(HRL_GL_GetTextureGL_ID(texture));
-
-    if (gl_id == 0)
-    {
-        std::cerr << "[CURSOR] No OpenGL id for " << def.file << "\n";
-        return nullptr;
-    }
-
-    // Read the pixels back, keeping HRL's GL state untouched.
-    GLint previous_binding = 0;
-    GLint previous_pack_alignment = 4;
-
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_binding);
-    glGetIntegerv(GL_PACK_ALIGNMENT, &previous_pack_alignment);
-
-    GLint w = 0;
-    GLint h = 0;
-
-    glBindTexture(GL_TEXTURE_2D, gl_id);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
-
-    std::vector<unsigned char> pixels;
-
-    if (w > 0 && h > 0)
-    {
-        pixels.resize(static_cast<size_t>(w) * h * 4);
-
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glGetTexImage(
-            GL_TEXTURE_2D,
-            0,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            pixels.data()
-        );
-    }
-
-    glPixelStorei(GL_PACK_ALIGNMENT, previous_pack_alignment);
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_binding));
-
-    if (pixels.empty())
-    {
-        std::cerr << "[CURSOR] " << def.file << " is empty\n";
-        return nullptr;
-    }
-
-    if (kCursorFlipY)
-    {
-        const size_t row = static_cast<size_t>(w) * 4;
-
-        for (int y = 0; y < h / 2; ++y)
-        {
-            std::swap_ranges(
-                pixels.begin() + y * row,
-                pixels.begin() + (y + 1) * row,
-                pixels.begin() + (h - 1 - y) * row
-            );
-        }
-    }
-
-    // Enlarge the cursor (the OS shows a cursor at its pixel size).
-    float applied_scale = 1.f;
-
-    if (kCursorScale != 1.f)
-    {
-        applied_scale = kCursorScale;
-
-        const float biggest = static_cast<float>(std::max(w, h));
-
-        if (biggest * applied_scale > kCursorMaxSize)
-            applied_scale = kCursorMaxSize / biggest;
-
-        const int new_w =
-            std::max(1, static_cast<int>(std::lround(w * applied_scale)));
-        const int new_h =
-            std::max(1, static_cast<int>(std::lround(h * applied_scale)));
-
-        pixels = ScaleCursorPixels(pixels, w, h, new_w, new_h);
-
-        w = new_w;
-        h = new_h;
-    }
-
-    GLFWimage image;
-    image.width = w;
-    image.height = h;
-    image.pixels = pixels.data();
-
-    const int hotX =
-        (def.hotspotX < 0)
-            ? w / 2
-            : static_cast<int>(std::lround(def.hotspotX * applied_scale));
-
-    const int hotY =
-        (def.hotspotY < 0)
-            ? h / 2
-            : static_cast<int>(std::lround(def.hotspotY * applied_scale));
-
-    GLFWcursor* cursor =
-        glfwCreateCursor(&image, hotX, hotY);
-
-    if (!cursor)
-        std::cerr << "[CURSOR] glfwCreateCursor failed for " << def.file << "\n";
-
-    return cursor;
-}
-
-static void LoadCustomCursor(GLFWwindow* win)
-{
-    cursorWindow = win;
-
-    GLFWcursor* loaded[kCursorKindCount] = {};
-    bool any_loaded = false;
-
-    for (int i = 0; i < kCursorKindCount; ++i)
-    {
-        loaded[i] = CreateCursorFromImageFile(kCursorDefs[i]);
-
-        if (loaded[i])
-            any_loaded = true;
-        else
-            std::cerr << "[CURSOR] " << kCursorDefs[i].file
-                      << " not found, default cursor used\n";
-    }
-
-    // Nothing found : keep the system cursors (and let ImGui manage them).
-    if (!any_loaded)
-        return;
-
-    for (int i = 0; i < kCursorKindCount; ++i)
-    {
-        if (loaded[i])
-            cursors[i] = loaded[i];
-        else if (kCursorDefs[i].fallbackShape != 0)
-            cursors[i] = glfwCreateStandardCursor(kCursorDefs[i].fallbackShape);
-    }
-
-    customCursorsEnabled = true;
-
-    SetCursorKind(kCursorArrow);
-}
 
 
 // =============================================================================
@@ -707,21 +345,12 @@ void InitImGui(GLFWwindow* window)
     io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // ImGui's GLFW backend calls glfwSetCursor(arrow) every frame, which would
-    // erase our image. We pick the cursor ourselves (UpdateEditorMouseCursor).
-    if (customCursorsEnabled)
-        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
 
     // Fonts : fonts/VCR-OSD-MONO.ttf for the editor, fonts/OpenDyslexic-*.otf
     // for Lynxie (see EditorFonts.h).
     lynx::editor::fonts::Load(24.0f);
 
     ImGui::StyleColorsDark();
-
-    // Slightly taller toolbar buttons, window title bars and dock tabs
-    // (Details, Commands, Scripts...). All of them are FontSize + FramePadding.y * 2,
-    // so this one value drives them. ImGui's default is 3.
-    ImGui::GetStyle().FramePadding.y = 5.f;
 
     ImGui_ImplGlfw_InitForOpenGL(
         window,
@@ -860,12 +489,6 @@ void BeginImGuiFrame()
 
 void EndImGuiFrame()
 {
-    // No text selection cursor (I-beam) in the editor : text fields, code
-    // editor... keep the arrow. Read by the GLFW backend / our cursor code
-    // at the next frame.
-    if (ImGui::GetMouseCursor() == ImGuiMouseCursor_TextInput)
-        ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
-
     LYNX_PROFILE_SCOPE("ImGui render");
 
     ImGui::Render();
@@ -896,10 +519,6 @@ HRL_id gizmo;
 
 lynx::Actor* editing_actor = nullptr;
 
-// Every selected actor. `editing_actor` stays the primary one (the last one
-// clicked : Details and the gizmo follow it) and is always part of this list.
-static std::vector<lynx::Actor*> selected_actors;
-
 
 // Last gizmo values we know about (what the gizmo reported right after we
 // synced it, or on the previous frame). A drag is detected by comparing the
@@ -929,44 +548,11 @@ static void SyncGizmoFromTransform(const lynx::transform& t)
 }
 
 
-static bool IsActorSelected(const lynx::Actor* actor)
-{
-    return actor &&
-           std::find(selected_actors.begin(), selected_actors.end(), actor) != selected_actors.end();
-}
-
-
-// The actor becomes the primary one : Details and the gizmo follow it.
-static void MakeActorPrimary(lynx::Actor* actor)
-{
-    editing_actor = actor;
-    editing_object = HRL_INVALID_ID;
-
-    if (!actor)
-    {
-        HRL_SetGizmoVisible(
-            gizmo,
-            HRL_FALSE
-        );
-
-        return;
-    }
-
-    SyncGizmoFromTransform(actor->transform);
-
-    HRL_SetGizmoVisible(
-        gizmo,
-        HRL_TRUE
-    );
-}
-
-
 void SetObjectSelected(HRL_id object)
 {
     if (object == HRL_INVALID_ID)
     {
         editing_actor = nullptr;
-        selected_actors.clear();
 
         HRL_SetGizmoVisible(
             gizmo,
@@ -981,12 +567,8 @@ void SetObjectSelected(HRL_id object)
         if (!editing_actor)
         {
             printf("nullptr\n");
-            selected_actors.clear();
             return;
         }
-
-        selected_actors.clear();
-        selected_actors.push_back(editing_actor);
 
         SyncGizmoFromTransform(editing_actor->transform);
 
@@ -998,84 +580,27 @@ void SetObjectSelected(HRL_id object)
 }
 
 
-// Selects this actor only.
 void SetActorSelected(lynx::Actor* actor)
 {
-    selected_actors.clear();
+    editing_actor = actor;
+    editing_object = HRL_INVALID_ID;
 
-    if (actor)
-        selected_actors.push_back(actor);
-
-    MakeActorPrimary(actor);
-}
-
-
-// Shift+click : adds the actor to the selection, or removes it if it is
-// already selected.
-static void ToggleActorSelected(lynx::Actor* actor)
-{
-    if (!actor)
-        return;
-
-    auto it = std::find(selected_actors.begin(), selected_actors.end(), actor);
-
-    if (it == selected_actors.end())
+    if (!editing_actor)
     {
-        selected_actors.push_back(actor);
-        MakeActorPrimary(actor);
-        return;
-    }
-
-    selected_actors.erase(it);
-
-    if (editing_actor == actor)
-    {
-        MakeActorPrimary(
-            selected_actors.empty() ? nullptr : selected_actors.back()
+        HRL_SetGizmoVisible(
+            gizmo,
+            HRL_FALSE
         );
-    }
-}
 
-
-static void ToggleObjectSelected(HRL_id object)
-{
-    if (object == HRL_INVALID_ID)
-        return;
-
-    ToggleActorSelected((lynx::Actor*)HRL_GetMeshUserHandle(object));
-}
-
-
-// Replaces the whole selection (range, rubber band). Cheap when nothing
-// changed : the rubber band calls it every frame.
-static void SetActorSelection(
-    const std::vector<lynx::Actor*>& actors,
-    lynx::Actor* primary = nullptr)
-{
-    std::vector<lynx::Actor*> list;
-
-    for (lynx::Actor* actor : actors)
-    {
-        if (actor && std::find(list.begin(), list.end(), actor) == list.end())
-            list.push_back(actor);
-    }
-
-    if (list.empty())
-    {
-        SetActorSelected(nullptr);
         return;
     }
 
-    if (!primary || std::find(list.begin(), list.end(), primary) == list.end())
-        primary = list.back();
+    SyncGizmoFromTransform(editing_actor->transform);
 
-    if (list == selected_actors && editing_actor == primary)
-        return;
-
-    selected_actors = list;
-
-    if (editing_actor != primary)
-        MakeActorPrimary(primary);
+    HRL_SetGizmoVisible(
+        gizmo,
+        HRL_TRUE
+    );
 }
 
 
@@ -1423,100 +948,6 @@ static lynx::Actor* FindEditorActor(
         return nullptr;
 
     return editor_level->GetActorFromID(object_id.c_str());
-}
-
-
-// Once per frame : the selection forgets the actors that no longer exist, and
-// is emptied when the primary actor was deselected somewhere else.
-static void PruneActorSelection()
-{
-    if (!editing_actor)
-    {
-        selected_actors.clear();
-        return;
-    }
-
-    if (!IsActorSelected(editing_actor))
-        selected_actors.push_back(editing_actor);
-
-    if (selected_actors.size() < 2 || !editor_level)
-        return;
-
-    const auto& alive_list = editor_level->GetActors();
-    const std::unordered_set<const lynx::Actor*> alive(alive_list.begin(), alive_list.end());
-
-    selected_actors.erase(
-        std::remove_if(
-            selected_actors.begin(),
-            selected_actors.end(),
-            [&](lynx::Actor* actor)
-            {
-                return actor != editing_actor && alive.count(actor) == 0;
-            }),
-        selected_actors.end());
-}
-
-
-// Deletes these actors as ONE undoable action (Delete key, Outliner menu).
-static void DeleteActorsWithUndo(
-    lynx::Level* level,
-    std::vector<lynx::Actor*> targets)
-{
-    if (!level)
-        return;
-
-    targets.erase(
-        std::remove(targets.begin(), targets.end(), nullptr),
-        targets.end());
-
-    if (targets.empty())
-        return;
-
-    std::vector<EditorActorSnapshot> snapshots;
-    snapshots.reserve(targets.size());
-
-    for (lynx::Actor* actor : targets)
-        snapshots.push_back(CaptureActorSnapshot(actor));
-
-    PushEditorUndo([snapshots]()
-    {
-        if (!editor_level)
-            return;
-
-        std::vector<lynx::Actor*> restored;
-
-        for (const EditorActorSnapshot& snapshot : snapshots)
-        {
-            if (!snapshot.object_id.empty() &&
-                FindEditorActor(snapshot.object_id))
-            {
-                continue;
-            }
-
-            if (lynx::Actor* actor =
-                    RestoreActorSnapshot(editor_level, snapshot))
-            {
-                restored.push_back(actor);
-            }
-        }
-
-        if (!restored.empty())
-            SetActorSelection(restored, restored.back());
-    });
-
-    editing_actor = nullptr;
-    editing_object = HRL_INVALID_ID;
-    selected_actors.clear();
-
-    HRL_SetGizmoVisible(
-        gizmo,
-        HRL_FALSE
-    );
-
-    for (lynx::Actor* actor : targets)
-        level->DestroyActor(actor);
-
-    MarkEditorDirty();
 }
 
 
@@ -2407,7 +1838,6 @@ static void SaveEditor()
     if (!editor_level)
         return;
 
-    BusyCursorScope busy_cursor;
 
     ClearBrushPreview();
 
@@ -2793,166 +2223,14 @@ static void OutlinerNewFolder(lynx::Level* level, const std::string& parent)
     OutlinerStartRename(folder);
 }
 
-// Selection by dragging (rubber band) : left button held on the free space of
-// a window, a rectangle follows the mouse and the items it touches are selected.
-// One instance per window. The window must be the current one.
-struct SelectionBand
-{
-    bool active = false;
-    bool moved = false;      // the mouse moved enough to be a drag, not a click
-    bool additive = false;   // Shift / Ctrl held at the start : keeps the old selection
-    ImVec2 start = ImVec2(0.f, 0.f);   // window content coordinates (follows the scroll)
-
-    // `begin` : the press that starts the band (mouse over the free space).
-    // Returns true while a band is being dragged ; `rect` is then the screen
-    // rectangle to test the items against. `released_plain` is set on the frame
-    // a press ends without having moved (a simple click on the free space).
-    bool Update(bool begin, ImRect& rect, bool& released_plain)
-    {
-        released_plain = false;
-
-        const ImGuiIO& io = ImGui::GetIO();
-        ImGuiWindow* window = ImGui::GetCurrentWindow();
-        const ImVec2 origin(window->Pos.x - window->Scroll.x, window->Pos.y - window->Scroll.y);
-
-        if (begin)
-        {
-            active = true;
-            moved = false;
-            additive = io.KeyShift || io.KeyCtrl;
-            start = ImVec2(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
-        }
-
-        if (!active)
-            return false;
-
-        if (!io.MouseDown[ImGuiMouseButton_Left])
-        {
-            released_plain = !moved;
-            active = false;
-            return false;
-        }
-
-        // Scrolls when the mouse goes above / below the window.
-        const ImRect inner = window->InnerRect;
-        float over = 0.f;
-        if (io.MousePos.y < inner.Min.y)
-            over = io.MousePos.y - inner.Min.y;
-        else if (io.MousePos.y > inner.Max.y)
-            over = io.MousePos.y - inner.Max.y;
-        if (over != 0.f)
-        {
-            const float speed = std::min(std::fabs(over) * 8.f, 900.f);
-            ImGui::SetScrollY(ImGui::GetScrollY() + (over < 0.f ? -speed : speed) * io.DeltaTime);
-        }
-
-        const ImVec2 a(start.x + origin.x, start.y + origin.y);
-        const ImVec2 b(std::clamp(io.MousePos.x, inner.Min.x, inner.Max.x),
-                       std::clamp(io.MousePos.y, inner.Min.y, inner.Max.y));
-
-        if (!moved && (std::fabs(b.x - a.x) > 4.f || std::fabs(b.y - a.y) > 4.f))
-            moved = true;
-
-        if (!moved)
-            return false;
-
-        rect = ImRect(ImVec2(std::min(a.x, b.x), std::min(a.y, b.y)),
-                      ImVec2(std::max(a.x, b.x), std::max(a.y, b.y)));
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->AddRectFilled(rect.Min, rect.Max, ImGui::GetColorU32(ImGuiCol_Header, 0.35f));
-        draw->AddRect(rect.Min, rect.Max, ImGui::GetColorU32(ImGuiCol_HeaderActive));
-        return true;
-    }
-};
-
-// Moves actors to a folder ("" = root) as ONE undoable action.
-static void OutlinerMoveActors(lynx::Level* level, const std::vector<lynx::Actor*>& actors, const std::string& folder)
-{
-    bool any = false;
-    for (lynx::Actor* actor : actors)
-        if (actor && actor->outliner_folder != folder)
-            any = true;
-    if (!any)
-        return;
-
-    PushOutlinerUndo(level);
-    for (lynx::Actor* actor : actors)
-        if (actor)
-            actor->outliner_folder = folder;
-    OutlinerDeclare(level, folder);
-    MarkEditorDirty();
-}
-
 static void OutlinerMoveActor(lynx::Level* level, lynx::Actor* actor, const std::string& folder)
 {
-    OutlinerMoveActors(level, { actor }, folder);
-}
-
-// Row of an actor in the tree (screen Y of its line).
-struct OutlinerRow
-{
-    lynx::Actor* actor;
-    float y0;
-    float y1;
-};
-
-static std::vector<OutlinerRow> outliner_rows;            // last finished frame (Shift range)
-static std::vector<OutlinerRow> outliner_rows_building;   // being filled by the current frame
-static lynx::Actor* outliner_anchor = nullptr;            // where a Shift range starts
-static SelectionBand outliner_band;
-static std::vector<lynx::Actor*> outliner_band_base;
-
-// Click on a row : plain = only this actor, Ctrl = add / remove, Shift = range
-// from the last clicked row (Ctrl+Shift adds the range to the selection).
-static void OutlinerClickActor(lynx::Actor* actor)
-{
-    const ImGuiIO& io = ImGui::GetIO();
-
-    if (io.KeyShift)
-    {
-        lynx::Actor* anchor = outliner_anchor ? outliner_anchor : editing_actor;
-
-        auto index_of = [](lynx::Actor* wanted)
-        {
-            for (size_t i = 0; i < outliner_rows.size(); ++i)
-                if (outliner_rows[i].actor == wanted)
-                    return static_cast<int>(i);
-            return -1;
-        };
-
-        int from = index_of(anchor);
-        int to = index_of(actor);
-
-        if (from >= 0 && to >= 0)
-        {
-            if (from > to)
-                std::swap(from, to);
-
-            std::vector<lynx::Actor*> range;
-            if (io.KeyCtrl)
-                range = selected_actors;
-            for (int i = from; i <= to; ++i)
-                range.push_back(outliner_rows[static_cast<size_t>(i)].actor);
-
-            SetActorSelection(range, actor);
-            return;      // the anchor stays where it was
-        }
-
-        ToggleActorSelected(actor);
-        outliner_anchor = actor;
+    if (!actor || actor->outliner_folder == folder)
         return;
-    }
-
-    if (io.KeyCtrl)
-    {
-        ToggleActorSelected(actor);
-        outliner_anchor = actor;
-        return;
-    }
-
-    SetActorSelected(actor);
-    outliner_anchor = actor;
+    PushOutlinerUndo(level);
+    actor->outliner_folder = folder;
+    OutlinerDeclare(level, folder);
+    MarkEditorDirty();
 }
 
 // Actor menu : "Move to" > folders.
@@ -2960,23 +2238,18 @@ static void OutlinerMoveToMenu(lynx::Level* level, lynx::Actor* actor)
 {
     if (!ImGui::BeginMenu("Move to folder"))
         return;
-    // On a selected actor, the whole selection moves.
-    const std::vector<lynx::Actor*> targets =
-        IsActorSelected(actor) ? selected_actors : std::vector<lynx::Actor*>{ actor };
     if (ImGui::MenuItem("(root)", nullptr, actor->outliner_folder.empty()))
-        OutlinerMoveActors(level, targets, "");
+        OutlinerMoveActor(level, actor, "");
     for (const std::string& f : OutlinerAllFolders(level))
         if (ImGui::MenuItem(f.c_str(), nullptr, actor->outliner_folder == f))
-            OutlinerMoveActors(level, targets, f);
+            OutlinerMoveActor(level, actor, f);
     ImGui::Separator();
     if (ImGui::MenuItem("New folder"))
     {
         PushOutlinerUndo(level);
         const std::string folder = OutlinerUniqueChild(level, actor->outliner_folder, "New Folder");
         OutlinerDeclare(level, folder);
-        for (lynx::Actor* target : targets)
-            if (target)
-                target->outliner_folder = folder;
+        actor->outliner_folder = folder;
         MarkEditorDirty();
         OutlinerStartRename(folder);
     }
@@ -2993,19 +2266,7 @@ static void OutlinerDropTarget(lynx::Level* level, const std::string& folder)
         lynx::Actor* actor = *static_cast<lynx::Actor* const*>(p->Data);
         const auto& alive = level->GetActors();
         if (std::find(alive.begin(), alive.end(), actor) != alive.end())
-        {
-            // Dragging a selected actor moves the whole selection.
-            std::vector<lynx::Actor*> moving;
-            if (IsActorSelected(actor))
-            {
-                for (lynx::Actor* selected : selected_actors)
-                    if (std::find(alive.begin(), alive.end(), selected) != alive.end())
-                        moving.push_back(selected);
-            }
-            else
-                moving.push_back(actor);
-            OutlinerMoveActors(level, moving, folder);
-        }
+            OutlinerMoveActor(level, actor, folder);
     }
     if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("LYNX_OUTLINER_FOLDER"))
     {
@@ -3026,8 +2287,6 @@ static void DrawOutlinerTree(lynx::Level* level, DrawActor& draw_actor)
 {
     const auto& actors = level->GetActors();
     const std::set<std::string> folders = OutlinerAllFolders(level);
-
-    outliner_rows_building.clear();
 
     if (ImGui::SmallButton("+ Folder"))
         OutlinerNewFolder(level, "");
@@ -3110,7 +2369,6 @@ static void DrawOutlinerTree(lynx::Level* level, DrawActor& draw_actor)
     // The free space below : drop here = back to the root.
     const ImVec2 rest = ImGui::GetContentRegionAvail();
     ImGui::InvisibleButton("##outliner_root", ImVec2(std::max(1.f, rest.x), std::max(ImGui::GetTextLineHeight(), rest.y)));
-    const bool root_press = ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     OutlinerDropTarget(level, "");
     if (ImGui::BeginPopupContextItem("##outliner_root_menu"))
     {
@@ -3118,29 +2376,6 @@ static void DrawOutlinerTree(lynx::Level* level, DrawActor& draw_actor)
             OutlinerNewFolder(level, "");
         ImGui::EndPopup();
     }
-
-    // Rubber band : left button held on the free space, drag over the rows.
-    // (A drag that starts on a row moves the actor onto a folder instead.)
-    {
-        const ImGuiIO& io = ImGui::GetIO();
-        if (root_press)
-            outliner_band_base = (io.KeyShift || io.KeyCtrl) ? selected_actors : std::vector<lynx::Actor*>{};
-
-        ImRect rect;
-        bool plain = false;
-        if (outliner_band.Update(root_press, rect, plain))
-        {
-            std::vector<lynx::Actor*> picked = outliner_band_base;
-            for (const OutlinerRow& row : outliner_rows_building)
-                if (row.y1 > rect.Min.y && row.y0 < rect.Max.y &&
-                    std::find(picked.begin(), picked.end(), row.actor) == picked.end())
-                    picked.push_back(row.actor);
-            SetActorSelection(picked, editing_actor);
-        }
-        else if (plain && !outliner_band.additive)
-            SetActorSelected(nullptr);      // a click on the free space deselects
-    }
-    outliner_rows.swap(outliner_rows_building);
 
     // Rename popup
     if (outliner_rename_open)
@@ -3222,11 +2457,6 @@ static lynx::editor::sprite_voxels::Host SpriteVoxelHost()
 
 static char content_browser_search[128] = {};
 static int content_browser_item_count = 0;
-
-// Selection of several items (Shift range, Ctrl toggle, rubber band).
-static std::filesystem::path content_browser_anchor;             // where a Shift range starts
-static SelectionBand content_browser_band;
-static std::vector<std::filesystem::path> content_browser_band_base;
 
 // Navigation history (like a web browser) : the back / forward buttons of the
 // mouse, and the arrows of the header.
@@ -3661,20 +2891,6 @@ static void DrawContentBrowser(lynx::Level* level)
     }
     content_browser_item_count = static_cast<int>(shown.size());
 
-    // A new folder or a new search : the old selection is no longer on screen,
-    // and Delete must not touch items the user cannot see.
-    {
-        static std::filesystem::path selection_folder;
-        static std::string selection_search;
-        if (selection_folder != content_browser_current_path || selection_search != content_browser_search)
-        {
-            cba::ClearSelection();
-            content_browser_anchor.clear();
-            selection_folder = content_browser_current_path;
-            selection_search = content_browser_search;
-        }
-    }
-
     // The grid scrolls under the header.
     ImGui::BeginChild("##ContentGrid", ImVec2(0.f, 0.f), ImGuiChildFlags_None);
     ImGui::SetWindowFontScale(0.62f);
@@ -3706,14 +2922,8 @@ static void DrawContentBrowser(lynx::Level* level)
     const int row_count =
         (static_cast<int>(shown.size()) + columns - 1) / columns;
 
-    // Screen position of the first tile drawn : the position of every tile
-    // (even the ones not drawn) follows from it, for the rubber band.
-    bool grid_origin_known = false;
-    ImVec2 grid_origin(0.f, 0.f);
-    const float row_step = item_height + ImGui::GetStyle().ItemSpacing.y;
-
     ImGuiListClipper clipper;
-    clipper.Begin(row_count, row_step);
+    clipper.Begin(row_count, item_height + ImGui::GetStyle().ItemSpacing.y);
 
     while (clipper.Step())
     for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
@@ -3747,15 +2957,7 @@ static void DrawContentBrowser(lynx::Level* level)
 
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool selected = cba::IsSelected(entry.path());
-
-        if (!grid_origin_known)
-        {
-            grid_origin_known = true;
-            grid_origin = ImVec2(
-                cell_pos.x - static_cast<float>(column) * (item_width + item_spacing),
-                cell_pos.y - static_cast<float>(row) * row_step);
-        }
+        const bool selected = cba::state.selected == entry.path();
 
         // Double-click on a text file (.js, .py, .json, .xml, .txt...) : opens
         // it in a script editor window (one window per file). A single click
@@ -3797,41 +2999,10 @@ static void DrawContentBrowser(lynx::Level* level)
         DrawAssetTile(draw_list, cell_min, cell_max, thumb_min, image_size, item_width,
                       hovered, active, selected, entry.path(), is_directory, filename);
 
-        const ImGuiIO& click_io = ImGui::GetIO();
-
-        if (clicked && click_io.KeyShift)
-        {
-            // Range from the last clicked item to this one (Ctrl+Shift : adds it).
-            size_t from = index;
-            for (size_t k = 0; k < shown.size(); ++k)
-            {
-                if (shown[k]->path() == content_browser_anchor)
-                {
-                    from = k;
-                    break;
-                }
-            }
-
-            std::vector<std::filesystem::path> range;
-            if (click_io.KeyCtrl)
-                range = cba::state.selection;
-            for (size_t k = std::min(from, index); k <= std::max(from, index); ++k)
-                range.push_back(shown[k]->path());
-
-            cba::SetSelection(range, entry.path());
-        }
-        else if (clicked && click_io.KeyCtrl)
-        {
-            cba::ToggleSelected(entry.path());
-            content_browser_anchor = entry.path();
-        }
-        else if (clicked && is_directory)
+        if (clicked && is_directory)
             content_browser_current_path = entry.path();   // listed again at the next frame
         else if (clicked)
-        {
-            cba::SelectOnly(entry.path());
-            content_browser_anchor = entry.path();
-        }
+            cba::state.selected = entry.path();
 
         if (!is_directory &&
             ImGui::BeginDragDropSource(
@@ -3860,62 +3031,6 @@ static void DrawContentBrowser(lynx::Level* level)
         ImGui::TextDisabled("Empty folder  (right click : new folder / new file)");
     else if (shown.empty())
         ImGui::TextDisabled("Nothing matches \"%s\"", content_browser_search);
-
-    // Rubber band : left button held on the free space of the grid, drag over
-    // the tiles. (A drag that starts on a tile drags the file instead.)
-    if (grid_origin_known)
-    {
-        const ImGuiIO& io = ImGui::GetIO();
-        ImGuiWindow* grid_window = ImGui::GetCurrentWindow();
-
-        const bool band_press =
-            ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-            ImGui::IsWindowHovered() &&
-            !ImGui::IsAnyItemHovered() &&
-            grid_window->InnerRect.Contains(io.MousePos) &&
-            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
-
-        if (band_press)
-            content_browser_band_base = (io.KeyShift || io.KeyCtrl) ? cba::state.selection : std::vector<std::filesystem::path>{};
-
-        ImRect rect;
-        bool plain = false;
-        if (content_browser_band.Update(band_press, rect, plain))
-        {
-            std::vector<std::filesystem::path> picked = content_browser_band_base;
-
-            for (size_t k = 0; k < shown.size(); ++k)
-            {
-                const float x = grid_origin.x + static_cast<float>(k % static_cast<size_t>(columns)) * (item_width + item_spacing);
-                const float y = grid_origin.y + static_cast<float>(k / static_cast<size_t>(columns)) * row_step;
-                const ImRect tile(ImVec2(x, y), ImVec2(x + item_width, y + item_height));
-
-                if (tile.Overlaps(rect) &&
-                    std::find(picked.begin(), picked.end(), shown[k]->path()) == picked.end())
-                {
-                    picked.push_back(shown[k]->path());
-                }
-            }
-
-            cba::SetSelection(picked, picked.empty() ? std::filesystem::path() : picked.back());
-        }
-        else if (plain && !content_browser_band.additive)
-            cba::ClearSelection();       // a click on the free space deselects
-    }
-
-    // Ctrl+A : every item of the folder.
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-        !ImGui::GetIO().WantTextInput &&
-        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
-        ImGui::GetIO().KeyCtrl &&
-        ImGui::IsKeyPressed(ImGuiKey_A, false))
-    {
-        std::vector<std::filesystem::path> all;
-        all.reserve(shown.size());
-        for (const auto* shown_entry : shown)
-            all.push_back(shown_entry->path());
-        cba::SetSelection(all, all.empty() ? std::filesystem::path() : all.back());
-    }
 
     // Right click on the empty area, keyboard shortcuts, popups.
     cba::BackgroundContextMenu();
@@ -4547,8 +3662,8 @@ static std::unordered_set<unsigned long long> brushPaintedVoxels;
 static bool brushPainting = false;
 
 static bool gizmoUndoActive = false;
-// Transform of every selected actor when the gizmo drag started.
-static std::vector<std::pair<std::string, lynx::transform>> gizmoUndoActors;
+static std::string gizmoUndoActorId;
+static lynx::transform gizmoUndoTransform{};
 
 struct VoxelChange
 {
@@ -5104,7 +4219,6 @@ static void TogglePlayMode()
     if (!editor_engine)
         return;
 
-    BusyCursorScope busy_cursor;
 
     if (!isPlaying)
     {
@@ -5115,7 +4229,6 @@ static void TogglePlayMode()
         // Clear editor selection and hide the gizmo in game mode.
         editing_object = HRL_INVALID_ID;
         editing_actor = nullptr;
-        selected_actors.clear();
 
         HRL_SetGizmoVisible(
             gizmo,
@@ -6054,7 +5167,6 @@ namespace editor
     void BeginRestoreAfterPlay()
     {
         editing_actor = nullptr;
-        selected_actors.clear();
         editing_object = HRL_INVALID_ID;
         dragging_object = false;
 
@@ -6064,7 +5176,7 @@ namespace editor
         );
 
         gizmoUndoActive = false;
-        gizmoUndoActors.clear();
+        gizmoUndoActorId.clear();
 
         // Undo entries refer to actors by ID and the restored level has the same
         // IDs, so the undo history is kept. editor_dirty is left untouched : the
@@ -6144,7 +5256,6 @@ namespace editor
 
         // 3. Forget every actor pointer.
         editing_actor = nullptr;
-        selected_actors.clear();
         editing_object = HRL_INVALID_ID;
         dragging_object = false;
 
@@ -6154,7 +5265,7 @@ namespace editor
         );
 
         gizmoUndoActive = false;
-        gizmoUndoActors.clear();
+        gizmoUndoActorId.clear();
 
         // 4. Undo entries refer to actors by ID : after the reload an ID could
         //    point to a brand new actor, so the history is dropped.
@@ -6221,16 +5332,10 @@ namespace editor
             if (object != HRL_INVALID_ID)
             {
                 editing_object = object;
-
-                // Shift+click : adds / removes the actor to the selection.
-                if (io.KeyShift)
-                    ToggleObjectSelected(object);
-                else
-                    SetObjectSelected(object);
+                SetObjectSelected(object);
             }
-            else if (!io.KeyShift)
+            else
             {
-                // Clicking the void deselects (not while adding with Shift).
                 editing_object = HRL_INVALID_ID;
                 SetObjectSelected(HRL_INVALID_ID);
             }
@@ -6273,62 +5378,6 @@ namespace editor
                 camZ -
                 static_cast<float>(yoffset) * std::max(2.f, camZ * 0.08f)
             );
-    }
-
-
-    // Picks the cursor image for this frame. ImGui tells which kind of cursor
-    // it wants (arrow, text caret, resize...) ; we show our image for it.
-    static void UpdateEditorMouseCursor(GLFWwindow* win)
-    {
-        static bool cursor_hidden = false;
-
-        const ImGuiIO& io = ImGui::GetIO();
-        const ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
-
-        const bool want_hidden =
-            (imgui_cursor == ImGuiMouseCursor_None);
-
-        if (want_hidden != cursor_hidden)
-        {
-            cursor_hidden = want_hidden;
-
-            glfwSetInputMode(
-                win,
-                GLFW_CURSOR,
-                cursor_hidden ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_NORMAL
-            );
-        }
-
-        if (cursor_hidden)
-            return;
-
-        int kind = kCursorArrow;
-
-        switch (imgui_cursor)
-        {
-        // ImGuiMouseCursor_TextInput : arrow (no text selection cursor).
-        case ImGuiMouseCursor_ResizeEW:  kind = kCursorResizeEW;   break;
-        case ImGuiMouseCursor_ResizeNS:  kind = kCursorResizeNS;   break;
-        case ImGuiMouseCursor_ResizeNWSE:kind = kCursorResizeNWSE; break;
-        case ImGuiMouseCursor_ResizeNESW:kind = kCursorResizeNESW; break;
-        case ImGuiMouseCursor_Hand:      kind = kCursorSelect;     break;
-        default:                         break;
-        }
-
-        if (busyCursorDepth > 0)
-        {
-            kind = kCursorLoading;
-        }
-        else if (kind == kCursorArrow &&
-                 !isPlaying &&
-                 io.KeyCtrl &&
-                 SceneAcceptsMouse(io.WantCaptureMouse))
-        {
-            // Ctrl + click selects an object in the viewport.
-            kind = kCursorSelect;
-        }
-
-        SetCursorKind(kind);
     }
 
 
@@ -6416,8 +5465,6 @@ namespace editor
                 : brushVoxelType;
 
 
-        if (customCursorsEnabled)
-            UpdateEditorMouseCursor(win);
 
 
         // --------------------------------------------------------
@@ -6536,8 +5583,6 @@ namespace editor
         // Gizmo
         // --------------------------------------------------------
 
-        PruneActorSelection();
-
         if (!isPlaying &&
             editing_actor &&
             SceneAcceptsMouse(io.WantCaptureMouse))
@@ -6562,55 +5607,11 @@ namespace editor
                 if (!gizmoUndoActive)
                 {
                     gizmoUndoActive = true;
-                    gizmoUndoActors.clear();
-
-                    for (lynx::Actor* selected : selected_actors)
-                    {
-                        if (selected)
-                        {
-                            gizmoUndoActors.emplace_back(
-                                selected->object_id_,
-                                selected->transform
-                            );
-                        }
-                    }
+                    gizmoUndoActorId = editing_actor->object_id_;
+                    gizmoUndoTransform = editing_actor->transform;
                 }
 
                 dragging_object = true;
-
-                // The other selected actors follow the gizmo : same movement,
-                // same rotation, same scale ratio.
-                for (lynx::Actor* other : selected_actors)
-                {
-                    if (!other || other == editing_actor)
-                        continue;
-
-                    if (pos_changed)
-                    {
-                        other->transform.location.x += pos[0] - gizmoLastPos[0];
-                        other->transform.location.y += pos[1] - gizmoLastPos[1];
-                        other->transform.location.z += pos[2] - gizmoLastPos[2];
-                    }
-
-                    if (rot_changed)
-                    {
-                        other->transform.rotation.x += rot[0] - gizmoLastRot[0];
-                        other->transform.rotation.y += rot[1] - gizmoLastRot[1];
-                        other->transform.rotation.z += rot[2] - gizmoLastRot[2];
-                    }
-
-                    if (scale_changed)
-                    {
-                        auto ratio = [](float now, float before)
-                        {
-                            return before != 0.f ? now / before : 1.f;
-                        };
-
-                        other->transform.scale.x *= ratio(scl[0], gizmoLastScale[0]);
-                        other->transform.scale.y *= ratio(scl[1], gizmoLastScale[1]);
-                        other->transform.scale.z *= ratio(scl[2], gizmoLastScale[2]);
-                    }
-                }
 
                 if (pos_changed)
                 {
@@ -6646,36 +5647,27 @@ namespace editor
                 GLFW_MOUSE_BUTTON_LEFT
             ) != GLFW_PRESS)
         {
-            PushEditorUndo([saved = gizmoUndoActors]()
+            const std::string actor_id =
+                gizmoUndoActorId;
+
+            const lynx::transform previous_transform =
+                gizmoUndoTransform;
+
+            PushEditorUndo([actor_id, previous_transform]()
             {
-                std::vector<lynx::Actor*> restored;
+                lynx::Actor* actor =
+                    FindEditorActor(actor_id);
 
-                for (const auto& [actor_id, previous_transform] : saved)
-                {
-                    lynx::Actor* actor =
-                        FindEditorActor(actor_id);
-
-                    if (!actor)
-                        continue;
-
-                    actor->transform = previous_transform;
-                    restored.push_back(actor);
-                }
-
-                if (restored.empty())
+                if (!actor)
                     return;
 
-                SetActorSelection(restored);
-
-                // The gizmo follows the restored transform of the primary actor.
-                if (editing_actor)
-                    SyncGizmoFromTransform(editing_actor->transform);
-
+                actor->transform = previous_transform;
+                SetActorSelected(actor);
                 MarkEditorDirty();
             });
 
             gizmoUndoActive = false;
-            gizmoUndoActors.clear();
+            gizmoUndoActorId.clear();
         }
 
 
@@ -6911,7 +5903,6 @@ namespace editor
                         GLFW_KEY_F2
                     ) == GLFW_PRESS)
                 {
-                    BusyCursorScope busy_cursor;
 
                     auto world_save_data =
                         lynx::fs::ReadBinary(
@@ -7234,6 +6225,24 @@ namespace editor
             HandleActorPlacementDrag(level);
 
         // Title bar of the window (Windows : replaces the native one), above the toolbar.
+        // Engine version after Lynxie ; the tab shows the project infos when hovered.
+        {
+            static std::string shown_module = "\x01";
+            if (shown_module != currentProject.module_path.string())
+            {
+                shown_module = currentProject.module_path.string();
+                lynx::editor::project_info::Project info;
+                info.name = currentProject.name;
+                info.root = currentProject.root;
+                info.assets_dir = currentProject.assets_dir;
+                info.build_dir = currentProject.build_dir;
+                info.module_path = currentProject.module_path;
+                info.engine_version = lynx::GetEngineVersion();
+                lynx::editor::project_info::SetProject(info);
+                lynx::editor::title_bar::SetVersionText("Lynx " + info.engine_version);
+                lynx::editor::title_bar::SetTitleTooltip(lynx::editor::project_info::DrawTooltip);
+            }
+        }
         lynx::editor::title_bar::Draw(
             "Lynx - " + (currentProject.name.empty() ? std::string("Project") : currentProject.name),
             [] { show_close_confirmation = true; },
@@ -7283,10 +6292,8 @@ namespace editor
 
 
         // --------------------------------------------------------
-        // Delete selected actors
+        // Delete selected actor
         // --------------------------------------------------------
-
-        PruneActorSelection();
 
         if (!isPlaying &&
             editing_actor &&
@@ -7297,8 +6304,41 @@ namespace editor
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
-            // Every selected actor, as one undoable action.
-            DeleteActorsWithUndo(level, selected_actors);
+            lynx::Actor* actor_to_delete = editing_actor;
+            const EditorActorSnapshot deleted_snapshot =
+                CaptureActorSnapshot(actor_to_delete);
+
+            PushEditorUndo([deleted_snapshot]()
+            {
+                if (!editor_level)
+                    return;
+
+                if (!deleted_snapshot.object_id.empty() &&
+                    FindEditorActor(deleted_snapshot.object_id))
+                {
+                    return;
+                }
+
+                lynx::Actor* restored =
+                    RestoreActorSnapshot(
+                        editor_level,
+                        deleted_snapshot
+                    );
+
+                if (restored)
+                    SetActorSelected(restored);
+            });
+
+            editing_actor = nullptr;
+            editing_object = HRL_INVALID_ID;
+
+            HRL_SetGizmoVisible(
+                gizmo,
+                HRL_FALSE
+            );
+
+            level->DestroyActor(actor_to_delete);
+            MarkEditorDirty();
         }
 
 
@@ -7330,7 +6370,7 @@ namespace editor
                     label += std::to_string(i);
 
                     const bool selected =
-                        IsActorSelected(actor);
+                        editing_actor == actor;
 
                     // Small icon of the class.
                     DrawActorTypePreview(typeName, ImGui::GetTextLineHeight());
@@ -7341,27 +6381,15 @@ namespace editor
                             selected
                         ))
                     {
-                        // Click, Ctrl+click (add / remove), Shift+click (range).
-                        OutlinerClickActor(actor);
+                        SetActorSelected(actor);
                     }
 
-                    // Where this row is on screen (rubber band, Shift range).
-                    outliner_rows_building.push_back({
-                        actor,
-                        ImGui::GetItemRectMin().y,
-                        ImGui::GetItemRectMax().y
-                    });
-
                     // Drag onto a folder (or the empty space : root).
-                    // On a selected actor, the whole selection is dragged.
                     if (ImGui::BeginDragDropSource())
                     {
                         lynx::Actor* dragged = actor;
                         ImGui::SetDragDropPayload("LYNX_OUTLINER_ACTOR", &dragged, sizeof(dragged));
-                        if (selected && selected_actors.size() > 1)
-                            ImGui::Text("%d actors", static_cast<int>(selected_actors.size()));
-                        else
-                            ImGui::TextUnformatted(label.substr(0, label.find("##")).c_str());
+                        ImGui::TextUnformatted(label.substr(0, label.find("##")).c_str());
                         ImGui::EndDragDropSource();
                     }
 
@@ -7638,22 +6666,43 @@ namespace editor
                         lynx::editor::sprite_voxels::MenuItem(actor);
                         ImGui::Separator();
 
-                        // On a selected actor, the whole selection is deleted.
-                        const bool delete_selection =
-                            IsActorSelected(actor) && selected_actors.size() > 1;
-                        const std::string delete_label =
-                            delete_selection
-                                ? "Delete " + std::to_string(selected_actors.size()) + " actors"
-                                : std::string("Delete");
-
-                        if (ImGui::MenuItem(delete_label.c_str()))
+                        if (ImGui::MenuItem("Delete"))
                         {
-                            DeleteActorsWithUndo(
-                                level,
-                                delete_selection
-                                    ? selected_actors
-                                    : std::vector<lynx::Actor*>{ actor }
-                            );
+                            const EditorActorSnapshot deleted_snapshot =
+                                CaptureActorSnapshot(actor);
+
+                            PushEditorUndo([deleted_snapshot]()
+                            {
+                                if (!editor_level ||
+                                    (!deleted_snapshot.object_id.empty() &&
+                                     FindEditorActor(deleted_snapshot.object_id)))
+                                {
+                                    return;
+                                }
+
+                                lynx::Actor* restored =
+                                    RestoreActorSnapshot(
+                                        editor_level,
+                                        deleted_snapshot
+                                    );
+
+                                if (restored)
+                                    SetActorSelected(restored);
+                            });
+
+                            if (editing_actor == actor)
+                            {
+                                editing_actor = nullptr;
+                                editing_object = HRL_INVALID_ID;
+
+                                HRL_SetGizmoVisible(
+                                    gizmo,
+                                    HRL_FALSE
+                                );
+                            }
+
+                            level->DestroyActor(actor);
+                            MarkEditorDirty();
 
                             ImGui::CloseCurrentPopup();
                         }
@@ -9525,7 +8574,6 @@ int main(int argc, char** argv)
 
 
     // Needs HRL (texture loading) : after HRL_InitContext, before editor::Init.
-    LoadCustomCursor(win);
 
     HRL_SetDebugLineThickness(
         3.f
@@ -9784,6 +8832,9 @@ int main(int argc, char** argv)
         currentProject.root / "input.json"
     );
 
+    // Code editors : the JavaScript language service reads the project.
+    lynx::editor::script_editors::SetProjectRoot(currentProject.root);
+
     // Commands (Python scripts, AI through MCP) : registry, local server,
     // script runner. The python/ folder (lynx_editor module, MCP server) is
     // copied next to the editor by CMake.
@@ -9880,7 +8931,6 @@ int main(int argc, char** argv)
 
     auto reload_game_module = [&]() -> bool
     {
-        BusyCursorScope busy_cursor;
 
         std::cout << "[RELOAD] Reloading "
                   << currentProject.module_path.filename().string()
@@ -10269,6 +9319,7 @@ int main(int argc, char** argv)
     lynx::editor::splash::Close();
 
     lynx::editor::game_build::Shutdown();
+    lynx::editor::project_info::Shutdown();
     lynx::editor::commands_window::Shutdown();
     git_window::Shutdown();
     lynx::editor::script_runner::Shutdown();

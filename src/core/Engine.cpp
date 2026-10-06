@@ -557,6 +557,22 @@ namespace lynx
 	}
 
 
+	// LYNX_VERSION_* : CMakeLists.txt (target Lynx). "2026.1.0"
+#ifndef LYNX_VERSION_YEAR
+#define LYNX_VERSION_YEAR 0
+#endif
+#ifndef LYNX_VERSION_MAJOR
+#define LYNX_VERSION_MAJOR 0
+#endif
+#ifndef LYNX_VERSION_MINOR
+#define LYNX_VERSION_MINOR 0
+#endif
+	std::string GetEngineVersion()
+	{
+		return std::to_string(LYNX_VERSION_YEAR) + "." + std::to_string(LYNX_VERSION_MAJOR) + "." +
+		       std::to_string(LYNX_VERSION_MINOR);
+	}
+
 	void AsyncFunc(float time, const std::function<void()>& callback)
 	{
 		//engine_->async_registered_.emplace(time, callback);
