@@ -240,6 +240,7 @@ struct SceneViewportState
 {
     bool visible = false;   // the Viewport window shows the scene this frame
     bool hovered = false;   // the mouse is over the image (or dragging from it)
+    bool blocked = false;   // the current click started on a panel / popup : not for the scene
     float x = 0.f;          // image position, window pixels
     float y = 0.f;
     float w = 0.f;          // image size, window pixels
@@ -255,7 +256,7 @@ static SceneViewportState sceneViewport;
 static bool SceneAcceptsMouse(bool imgui_wants_mouse)
 {
     if (sceneViewport.visible)
-        return sceneViewport.hovered;
+        return sceneViewport.hovered && !sceneViewport.blocked;
 
     return !imgui_wants_mouse;
 }
@@ -7003,11 +7004,14 @@ namespace editor
                     pos.x + size.x,
                     pos.y + size.y
                 );
-                sceneViewport.hovered = ImGui::IsMouseHoveringRect(
-                    pos,
-                    viewportMax,
-                    false
-                );
+                // Only when no other window (panel, menu, popup, tooltip
+                // window...) is drawn over the image at the cursor.
+                // AllowWhenBlockedByActiveItem : a drag from Place Actors /
+                // the Content Browser still drops here.
+                sceneViewport.hovered =
+                    ImGui::IsMouseHoveringRect(pos, viewportMax, false) &&
+                    (ImGui::IsItemActive() ||
+                     ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem));
 
                 // Camera mode : 2D / 3D buttons at the top right (editor
                 // camera : hidden while playing, shown while simulating).
@@ -7048,6 +7052,25 @@ namespace editor
                         sceneViewport.hovered = false;
                 }
 
+                // A click that starts on a panel / menu / popup over the
+                // viewport (or outside it) is not for the scene, even when the
+                // mouse then moves over the image with the button held : no
+                // brush stroke, picking or rubber band until every button is
+                // released.
+                {
+                    bool any_down = false;
+                    bool clicked_outside = false;
+                    for (int b = 0; b < 3; ++b)
+                    {
+                        any_down |= ImGui::IsMouseDown(b);
+                        clicked_outside |= ImGui::IsMouseClicked(b) && !sceneViewport.hovered;
+                    }
+                    if (clicked_outside)
+                        sceneViewport.blocked = true;
+                    else if (!any_down)
+                        sceneViewport.blocked = false;
+                }
+
                 // ImGui sizes are logical pixels; HRL renders into a physical
                 // framebuffer. Resize the scene to exactly match the image.
                 int windowW = 0, windowH = 0;
@@ -7073,7 +7096,7 @@ namespace editor
                 // Right click on an actor (without moving) : its menu (Convert to voxels...).
                 static lynx::Actor* menu_actor = nullptr;
                 const ImGuiIO& vio = ImGui::GetIO();
-                if (!isPlaying && sceneViewport.hovered &&
+                if (!isPlaying && SceneAcceptsMouse(true) &&
                     ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
                     vio.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
                 {
