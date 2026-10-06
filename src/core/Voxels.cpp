@@ -1,5 +1,6 @@
 #include "Voxels.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <unordered_map>
@@ -295,10 +296,15 @@ namespace lynx::voxels
 			HRL_SetVoxelTypeColor(scene, type, t.color[0], t.color[1], t.color[2], t.color[3]);
 			HRL_SetVoxelTypeCollisionFlags(scene, type, t.flags);
 
+			// Not emissive : black (a type edited in the editor may have been emissive before).
 			if (t.emissive)
 			{
 				HRL_SetVoxelTypeEmissiveColor(
 					scene, type, t.emissive_color[0], t.emissive_color[1], t.emissive_color[2]);
+			}
+			else
+			{
+				HRL_SetVoxelTypeEmissiveColor(scene, type, 0.f, 0.f, 0.f);
 			}
 		}
 	}
@@ -316,6 +322,129 @@ namespace lynx::voxels
 			return nullptr;
 
 		return &g_types[type - 1];
+	}
+
+
+	// -------------------------------------------------------------------------
+	// Editing
+	// -------------------------------------------------------------------------
+
+	namespace
+	{
+		std::string ColorHex(const float* rgb)
+		{
+			char text[8];
+			auto channel = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.f, 1.f) * 255.f)); };
+			std::snprintf(text, sizeof(text), "%02x%02x%02x", channel(rgb[0]), channel(rgb[1]), channel(rgb[2]));
+			return text;
+		}
+	}
+
+	uint32_t GetCollisionMask()
+	{
+		return kCollisionAll;
+	}
+
+	uint32_t GetSolidMask()
+	{
+		return kCollisionSolid;
+	}
+
+	std::vector<std::string> GetFlagNames()
+	{
+		std::vector<std::string> names;
+		for (const auto& f : g_flags)
+			names.push_back(f.first);
+		return names;
+	}
+
+	uint32_t DeclareFlag(const char* name)
+	{
+		if (!name || !*name)
+			return 0;
+		if (const uint32_t collision = CollisionFlag(name))
+			return collision;
+		uint32_t mask = 0;
+		std::string error;
+		if (!GameFlagMask(name, g_flags, mask, error))
+			return 0;
+		return mask;
+	}
+
+	bool SetType(uint8_t type, const VoxelType& value)
+	{
+		if (type == 0 || type > g_types.size())
+			return false;
+		g_types[type - 1] = value;
+		return true;
+	}
+
+	uint8_t AddType(const VoxelType& value)
+	{
+		if (g_types.size() >= 255)
+			return 0;
+		g_types.push_back(value);
+		return static_cast<uint8_t>(g_types.size());
+	}
+
+	bool RemoveLastType()
+	{
+		if (g_types.empty())
+			return false;
+		g_types.pop_back();
+		return true;
+	}
+
+	std::string SaveToString()
+	{
+		nlohmann::ordered_json list = nlohmann::ordered_json::array();
+
+		for (const VoxelType& t : g_types)
+		{
+			nlohmann::ordered_json j;
+			j["name"] = t.name;
+			j["color"] = ColorHex(t.color);
+
+			const uint32_t collision = t.flags & kCollisionAll;
+			if (collision == kCollisionSolid)
+				j["collision"] = "SOLID";
+			else if (collision == 0)
+				j["collision"] = "NONE";
+			else
+			{
+				nlohmann::ordered_json sides = nlohmann::ordered_json::array();
+				for (const char* side : { "LEFT", "RIGHT", "TOP", "BOTTOM", "INSIDE" })
+					if (collision & CollisionFlag(side))
+						sides.push_back(side);
+				j["collision"] = sides;
+			}
+
+			nlohmann::ordered_json flags = nlohmann::ordered_json::array();
+			for (const auto& [name, mask] : g_flags)
+				if (t.flags & mask)
+					flags.push_back(name);
+			if (!flags.empty())
+				j["flags"] = flags;
+
+			if (t.emissive)
+			{
+				const bool white = t.emissive_color[0] >= 1.f && t.emissive_color[1] >= 1.f && t.emissive_color[2] >= 1.f;
+				if (white)
+					j["emissive"] = true;
+				else
+					j["emissive"] = ColorHex(t.emissive_color);
+			}
+			if (t.indestructible)
+				j["indestructible"] = true;
+			if (!t.on_destroyed.empty())
+				j["on_destroyed"] = t.on_destroyed;
+
+			list.push_back(j);
+		}
+
+		nlohmann::ordered_json doc;
+		doc["voxels"] = list;
+		return doc.dump(4) + "\n";
 	}
 
 

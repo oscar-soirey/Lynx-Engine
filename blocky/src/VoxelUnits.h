@@ -28,24 +28,11 @@ namespace units
     // ont ete reglees. Ce n'est PAS le reglage runtime : cette constante ne
     // bouge jamais. Si ton gameplay etait cale sur une autre taille de voxel,
     // modifie uniquement cette valeur.
-    inline constexpr float kGameUnit = 0.3f;
+    inline constexpr float kGameUnit = 1.f;
 
     // Taille actuelle d'un voxel en unites monde (reglage "Physical voxel size").
     inline float VoxelSizeWorld()
     {
-        float x0 = 0.f;
-        float y0 = 0.f;
-        float x1 = 0.f;
-        float y1 = 0.f;
-
-        if (HRL_VoxelToWorldCoordinates(lynx::GetScene(), 0.f, 0.f, &x0, &y0) == HRL_TRUE &&
-            HRL_VoxelToWorldCoordinates(lynx::GetScene(), 1.f, 0.f, &x1, &y1) == HRL_TRUE &&
-            x1 > x0)
-        {
-            return x1 - x0;
-        }
-
-        // Scene invalide : conversion neutre (1 unite de jeu = 1 voxel).
         return kGameUnit;
     }
 

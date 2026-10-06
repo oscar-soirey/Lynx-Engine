@@ -196,6 +196,35 @@ namespace lynx
 		void ForceState(const std::string& state) { manager_.force_state(state); }
 		const std::string& GetCurrentState() const { return manager_.current_state(); }
 
+		// ---------------------------------------------------------------
+		// Anim Graph (.animgraph fait dans l'editeur, voir AnimGraph.h)
+		// ---------------------------------------------------------------
+
+		/** Asset du graphe ("" = aucun). Le changer recharge le graphe. */
+		std::string graph;
+
+		/**
+		 * Remplace la machine a etats par celle du graphe (parametres,
+		 * animations, blend spaces, etats, transitions). false si le
+		 * fichier est illisible (la machine a etats est alors vide).
+		 */
+		bool LoadGraph(const std::string& asset);
+
+		/** Vide la machine a etats (animations, blend spaces, etats, transitions). */
+		void ClearStateMachine();
+
+		/** Graphe charge ("" = aucun). */
+		const std::string& GetLoadedGraph() const { return loaded_graph_; }
+
+		/** Composants (niveau courant) qui jouent le graphe `asset` : debug de l'editeur. */
+		static std::vector<AnimationSpriteComponent*> GetWithGraph(const std::string& asset);
+
+		/**
+		 * Evenements du graphe (notifies, entree / sortie d'etat), en plus de
+		 * la fonction JS du meme nom sur l'acteur.
+		 */
+		std::function<void(const std::string& event)> on_graph_event;
+
 	protected:
 		void OnAttach() override;
 		void BeginPlay() override;
@@ -220,6 +249,9 @@ namespace lynx
 		};
 		std::vector<FrameEvent> single_events_;
 		std::function<void()> single_finished_;
+
+		void FireGraphEvent(const std::string& event);
+		std::string loaded_graph_;
 
 		// StateMachine (unique_ptr : adresses stables pour l'anim_manager)
 		std::map<std::string, std::unique_ptr<animation>> animations_;

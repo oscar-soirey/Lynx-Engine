@@ -85,6 +85,33 @@ namespace lynx::voxels
 
 	LYNX_API bool IsIndestructible(uint8_t type);
 
+	// -------------------------------------------------------------------------
+	// Editing (editor : the "Color Picking" window)
+	// -------------------------------------------------------------------------
+
+	// Collision bits of VoxelType::flags (low bits) and the "SOLID" set.
+	LYNX_API uint32_t GetCollisionMask();
+	LYNX_API uint32_t GetSolidMask();
+
+	// Game flags known so far (declared in voxels.json, or by DeclareFlag).
+	LYNX_API std::vector<std::string> GetFlagNames();
+
+	// Mask of a game flag, created if needed (0 : more than 27 flags).
+	LYNX_API uint32_t DeclareFlag(const char* name);
+
+	// Replaces a type (1..GetTypeCount()). Call ApplyToScene() to see it.
+	LYNX_API bool SetType(uint8_t type, const VoxelType& value);
+
+	// Adds a type at the end : its id, 0 when there are already 255.
+	LYNX_API uint8_t AddType(const VoxelType& value);
+
+	// Removes the last type (the others keep their id : the levels store ids).
+	LYNX_API bool RemoveLastType();
+
+	// Content of voxels.json for the current types (comments are not kept).
+	LYNX_API std::string SaveToString();
+
+
 	// Bit mask of a flag name : "ROCK" (game flag declared in voxels.json),
 	// or a collision flag "LEFT", "RIGHT", "TOP", "BOTTOM", "INSIDE".
 	// 0 when the name is unknown.

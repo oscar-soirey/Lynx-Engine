@@ -60,6 +60,9 @@ add_library(Lynx SHARED
 		src/gameplay/SoundSourceComponent.cpp
 		src/gameplay/LightComponent.cpp
 		src/gameplay/EngineActors.cpp
+		src/gameplay/AnimGraph.cpp
+		src/gameplay/BehaviorTree.cpp
+		src/scripting/AIBindings.cpp
 
 		src/audio/AudioDecoder.cpp
 		src/audio/Audio2D.cpp
@@ -72,8 +75,6 @@ add_library(Lynx SHARED
 		src/widgets/CommonWidgets.cpp
 		src/widgets/UserWidget.cpp
 		src/widgets/WidgetSystem.cpp
-		src/widgets/WidgetContainers.cpp
-		src/widgets/WidgetScene.cpp
 
 		src/scripting/ScriptSystem.cpp
 		src/scripting/ComponentBindings.cpp
@@ -158,6 +159,11 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/ShipGame.cpp
 		src/editor/SplashScreen.cpp
 		src/editor/WidgetEditor.cpp
+		src/editor/GraphEditors.cpp
+		src/editor/VoxelTypeEditor.cpp
+		src/editor/TitleBar.cpp
+		src/editor/FileIcons.cpp
+		src/editor/SpriteVoxelizer.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp

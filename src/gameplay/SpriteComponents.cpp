@@ -3,6 +3,9 @@
 #include "Actor.h"
 #include "../core/Engine.h"
 #include "../core/RessourceManager.h"
+#include "AnimGraph.h"
+#include "Private/ECS.h"
+#include "../scripting/Private/ScriptSystem.h"
 
 #include <hrl/hrl.h>
 
@@ -410,6 +413,172 @@ namespace lynx
 		SpriteComponent::OnAttach();
 	}
 
+	// ---- Anim Graph ---------------------------------------------------------
+
+	void AnimationSpriteComponent::ClearStateMachine()
+	{
+		manager_ = anim_manager();
+		blend_spaces_.clear();
+		animations_.clear();
+	}
+
+	void AnimationSpriteComponent::FireGraphEvent(const std::string& event)
+	{
+		if (event.empty())
+			return;
+		if (on_graph_event)
+			on_graph_event(event);
+		scripting::CallActorEvent(GetOwner(), event.c_str(), nullptr);
+	}
+
+	std::vector<AnimationSpriteComponent*> AnimationSpriteComponent::GetWithGraph(const std::string& asset)
+	{
+		std::vector<Actor*> actors;
+		ecs::CollectActorsWith(detail::ComponentTypeId<AnimationSpriteComponent>(), actors);
+
+		std::vector<AnimationSpriteComponent*> out;
+		for (Actor* a : actors)
+			if (auto* c = a ? a->GetComponent<AnimationSpriteComponent>() : nullptr)
+				if (!c->loaded_graph_.empty() && (asset.empty() || c->loaded_graph_ == asset))
+					out.push_back(c);
+		return out;
+	}
+
+	bool AnimationSpriteComponent::LoadGraph(const std::string& asset)
+	{
+		graph = asset;
+		loaded_graph_ = asset;   // pas de nouvel essai a chaque frame en cas d'erreur
+		ClearStateMachine();
+
+		if (asset.empty())
+			return true;
+
+		AnimGraphAsset g;
+		std::string error;
+		if (!g.LoadFromAsset(asset, &error))
+		{
+			std::cout << "[sprite] anim graph " << asset << " : " << error << std::endl;
+			return false;
+		}
+
+		mode = Mode::StateMachine;
+
+		for (const AnimGraphParameter& p : g.parameters)
+		{
+			if (p.type == "bool")
+				manager_.set_bool(p.name, p.default_value != 0.f);
+			else if (p.type == "int")
+				manager_.set_int(p.name, static_cast<int>(p.default_value));
+			else if (p.type != "trigger")
+				manager_.set_float(p.name, p.default_value);
+		}
+
+		for (const AnimGraphAnimation& a : g.animations)
+		{
+			animation& anim = AddAnimation(a.name, a.texture, a.frames, a.loop, a.frame_time);
+			for (const AnimGraphNotify& n : a.notifies)
+			{
+				const std::string event = n.event;
+				anim.add_event(n.frame, [this, event] { FireGraphEvent(event); });
+			}
+		}
+
+		std::map<std::string, std::string> variables;   // blend space -> variable
+		for (const AnimGraphBlendSpace& b : g.blend_spaces)
+		{
+			AddBlendSpace(b.name);
+			variables[b.name] = b.variable;
+			for (const AnimGraphSample& s : b.samples)
+				if (!AddBlendSample(b.name, s.position, s.animation))
+					std::cout << "[sprite] " << asset << " : blend space " << b.name
+					          << " : no animation \"" << s.animation << "\"" << std::endl;
+		}
+
+		for (const AnimGraphState& s : g.states)
+		{
+			anim_state_options options;
+			options.interruptible = s.interruptible;
+			options.restart_on_enter = s.restart_on_enter;
+			options.next_state = s.next;
+			if (auto it = variables.find(s.motion); it != variables.end())
+				options.variable = it->second;
+
+			const std::string on_enter = s.on_enter;
+			const std::string on_exit = s.on_exit;
+			if (!on_enter.empty())
+				options.on_enter = [this, on_enter] { FireGraphEvent(on_enter); };
+			if (!on_exit.empty())
+				options.on_exit = [this, on_exit] { FireGraphEvent(on_exit); };
+
+			AddState(s.name, s.motion, std::move(options));
+		}
+
+		if (!g.entry_state.empty())
+			SetDefaultState(g.entry_state);
+
+		for (const AnimGraphTransition& t : g.transitions)
+		{
+			// Toutes les conditions (ET). Aucune : toujours vraie.
+			std::vector<anim_manager::condition> parts;
+			for (const AnimGraphCondition& c : t.conditions)
+			{
+				const std::string param = c.param;
+				const float value = c.value;
+
+				if (c.kind == "isTrue")
+					parts.push_back([param](const anim_manager& m) { return m.get_bool(param); });
+				else if (c.kind == "isFalse")
+					parts.push_back([param](const anim_manager& m) { return !m.get_bool(param); });
+				else if (c.kind == "trigger")
+					parts.push_back([param](const anim_manager& m) { return m.has_trigger(param); });
+				else if (c.kind == "finished")
+					parts.push_back([](const anim_manager& m) { return m.is_current_finished(); });
+				else if (c.kind == "script")
+				{
+					const std::string function = c.function;
+					parts.push_back([this, function](const anim_manager&)
+					{
+						return scripting::CallActorPredicate(GetOwner(), function.c_str());
+					});
+				}
+				else
+				{
+					const std::string op = c.op;
+					parts.push_back([param, op, value](const anim_manager& m)
+					{
+						const float v = m.get_float(param);
+						if (op == ">") return v > value;
+						if (op == ">=") return v >= value;
+						if (op == "<") return v < value;
+						if (op == "<=") return v <= value;
+						if (op == "==") return v == value;
+						if (op == "!=") return v != value;
+						return false;
+					});
+				}
+			}
+
+			anim_manager::condition all = nullptr;
+			if (!parts.empty())
+			{
+				all = [parts](const anim_manager& m)
+				{
+					for (const auto& p : parts)
+						if (!p(m))
+							return false;
+					return true;
+				};
+			}
+
+			if (t.from.empty())
+				manager_.add_any_transition(t.to, std::move(all), t.priority);
+			else
+				manager_.add_transition(t.from, t.to, std::move(all), t.priority, t.wait_finished);
+		}
+
+		return true;
+	}
+
 	void AnimationSpriteComponent::BeginPlay()
 	{
 		if (mode == Mode::Single && auto_play && !started_)
@@ -435,6 +604,10 @@ namespace lynx
 				single_->set_loop(loop);
 			}
 		}
+
+		// Champ graph modifie (JS, C++, Details) : le graphe est recharge.
+		if (graph != loaded_graph_)
+			LoadGraph(graph);
 
 		if (mode != applied_mode_)
 			ApplyMode();

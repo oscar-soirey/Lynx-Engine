@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sprite : marche / course (blend space sur "speed"), et "Hurt" sur le trigger "hurt". -->
+<AnimGraph version="1" entry="Locomotion">
+  <Parameter name="speed" type="float" default="0"/>
+  <Parameter name="hurt" type="trigger"/>
+  <Animation name="Idle" texture="idle.png" frames="4" frame_time="0.1" loop="true"/>
+  <Animation name="Run" texture="run.png" frames="6" frame_time="0.1" loop="true"/>
+  <Animation name="Hit" texture="hit.png" frames="3" frame_time="0.05" loop="false">
+    <Notify frame="2" event="OnHitFrame"/>
+  </Animation>
+  <BlendSpace name="Move" variable="speed">
+    <Sample position="0" animation="Idle"/>
+    <Sample position="1" animation="Run"/>
+  </BlendSpace>
+  <State id="1" name="Locomotion" motion="Move"/>
+  <State id="2" name="Hurt" motion="Hit" next="Locomotion" on_enter="OnHurtEnter" on_exit="OnHurtExit"/>
+  <Transition id="3" from="*" to="Hurt" priority="10"><Condition kind="trigger" param="hurt"/></Transition>
+  <Transition id="4" from="Hurt" to="Locomotion" wait_finished="true"/>
+</AnimGraph>

@@ -1173,6 +1173,9 @@ namespace lynx
 
 			// Engine.createPlayer..., UI, UserWidget
 			script_detail::RegisterGameplayGlobals(ctx);
+
+			// BTTask, BTDecorator, BTService, BT, Blackboard
+			script_detail::RegisterAIGlobals(ctx);
 		}
 
 
@@ -1853,6 +1856,7 @@ namespace lynx
 			// "class Boss extends Enemy" (Boss.js lu avant Enemy.js) heriterait
 			// de l'ancienne version d'Enemy.
 			script_detail::ForgetWidgetClasses(ctx);
+			script_detail::ForgetAIClasses(ctx);
 			{
 				JSValue global = JS_GetGlobalObject(ctx);
 
@@ -1953,6 +1957,8 @@ namespace lynx
 							RegisterScriptClass(ctx, n, cls, file.path);
 						else if (script_detail::IsWidgetClassConstructor(ctx, cls))
 							script_detail::RegisterWidgetClass(ctx, n, cls, file.path);
+						else if (script_detail::IsAIClassConstructor(ctx, cls))
+							script_detail::RegisterAIClass(ctx, n, cls, file.path);
 
 						JS_FreeValue(ctx, cls);
 					}
@@ -2493,6 +2499,9 @@ namespace lynx
 			// Joueurs, widgets, leurs callbacks et les classes de widgets.
 			script_detail::ShutdownGameplayBindings(g->ctx);
 
+			// Noeuds JS des Behavior Trees, classes BTTask...
+			script_detail::ShutdownAIBindings(g->ctx);
+
 			// Classes (constructeurs, prototypes)
 			FreeClassValues();
 			g->classes_loaded = false;
@@ -2710,7 +2719,7 @@ namespace lynx
 			std::string prelude =
 				"const __stub = new Proxy(function(){}, { get: (t, k) => k === Symbol.toPrimitive ? (() => 0) : __stub,"
 				" apply: () => __stub, construct: () => __stub });\n"
-				"for (const n of ['print','console','Level','Input','Engine','UI','vec3','vec2','parent','Actor']) globalThis[n] = __stub;\n"
+				"for (const n of ['print','console','Level','Input','Engine','UI','BT','vec3','vec2','parent','Actor']) globalThis[n] = __stub;\n"
 				"globalThis.Actor = class Actor {};\n";
 			for (const std::string& base : WordsAfter(code, "extends"))
 				prelude += "if (typeof globalThis['" + base + "'] !== 'function' || globalThis['" + base + "'] === __stub) "

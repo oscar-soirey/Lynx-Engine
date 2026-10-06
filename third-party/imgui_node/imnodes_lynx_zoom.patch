@@ -1,0 +1,292 @@
+--- a/imgui_node/imnodes.h	2026-10-05 22:43:23.623710916 -0400
++++ b/imgui_node/imnodes.h	2026-10-05 22:43:23.626857389 -0400
+@@ -153,13 +153,19 @@
+         const bool* Modifier;
+     } MultipleSelectModifier;
+ 
+-    // Holding alt mouse button pans the node area, by default middle mouse button will be used
++    // Holding alt mouse button pans the node area. [LYNX] Default : the right mouse button (a right
++    // click without moving still opens the context menus of the application).
+     // Set based on ImGuiMouseButton values
+     int AltMouseButton;
+ 
+     // Panning speed when dragging an element and mouse is outside the main editor view.
+     float AutoPanningSpeed;
+ 
++    // [LYNX ZOOM] The mouse wheel zooms around the mouse cursor (ZoomMin..ZoomMax, 1 = 100%).
++    bool  ZoomWithMouseWheel;
++    float ZoomMin;
++    float ZoomMax;
++
+     ImNodesIO();
+ };
+ 
+@@ -258,6 +264,11 @@
+ void                  EditorContextSet(ImNodesEditorContext*);
+ ImVec2                EditorContextGetPanning();
+ void                  EditorContextResetPanning(const ImVec2& pos);
++// [LYNX ZOOM] Zoom of the editor (1 = 100%). `screen_pivot` : the point of the screen that stays in
++// place (default : the top left corner of the canvas). Every "screen space" function of the API
++// works in real screen pixels whatever the zoom ; grid space does not change with the zoom.
++float                 EditorContextGetZoom();
++void                  EditorContextSetZoom(float zoom, const ImVec2& screen_pivot = ImVec2(-FLT_MAX, -FLT_MAX));
+ void                  EditorContextMoveToNode(const int node_id);
+ 
+ ImNodesIO& GetIO();
+--- a/imgui_node/imnodes_internal.h	2026-10-05 22:43:23.625343239 -0400
++++ b/imgui_node/imnodes_internal.h	2026-10-05 22:43:23.626877081 -0400
+@@ -253,6 +253,8 @@
+ 
+     // ui related fields
+     ImVec2 Panning;
++    // [LYNX ZOOM] screen pixels per grid unit
++    float Zoom;
+     ImVec2 AutoPanningDelta;
+     // Minimum and maximum extents of all content in grid space. Valid after final
+     // ImNodes::EndNode() call.
+@@ -283,7 +285,7 @@
+     float  MiniMapScaling;
+ 
+     ImNodesEditorContext()
+-        : Nodes(), Pins(), Links(), Panning(0.f, 0.f), SelectedNodeIndices(), SelectedLinkIndices(),
++        : Nodes(), Pins(), Links(), Panning(0.f, 0.f), Zoom(1.f), SelectedNodeIndices(), SelectedLinkIndices(),
+           SelectedNodeOffsets(), PrimaryNodeOffset(0.f, 0.f), ClickInteraction(),
+           MiniMapEnabled(false), MiniMapSizeFraction(0.0f), MiniMapNodeHoveringCallback(NULL),
+           MiniMapNodeHoveringCallbackUserData(NULL), MiniMapScaling(0.0f)
+@@ -304,9 +306,22 @@
+     ImVector<int> OccludedPinIndices;
+ 
+     // Canvas extents
++    // [LYNX ZOOM] Between BeginNodeEditor and EndNodeEditor, "screen space" is a virtual space :
++    // real = origin + (virtual - origin) * zoom. The ImGui mouse is moved into it for the scope,
++    // and the vertices drawn in the scope are scaled back to the screen in EndNodeEditor.
+     ImVec2 CanvasOriginScreenSpace;
+     ImRect CanvasRectScreenSpace;
+ 
++    // [LYNX ZOOM] state of the scope
++    float  ZoomScale;
++    bool   ZoomMouseMoved;
++    ImVec2 RealMousePos;
++    ImVec2 RealMousePosPrev;
++    ImVec2 RealMouseDelta;
++    ImVec2 RealMouseClickedPos[5];
++    int    ZoomVtxStart;
++    int    ZoomCmdStart;
++
+     // Debug helpers
+     ImNodesScope CurrentScope;
+ 
+--- a/imgui_node/imnodes.cpp	2026-10-05 22:43:23.622156909 -0400
++++ b/imgui_node/imnodes.cpp	2026-10-05 22:43:23.626793696 -0400
+@@ -564,6 +564,19 @@
+     return GetScreenSpacePinCoordinates(parent_node_rect, pin.AttributeRect, pin.Type);
+ }
+ 
++// [LYNX ZOOM] real screen <-> virtual screen space of the canvas
++static inline ImVec2 ZoomRealToVirtual(const ImNodesEditorContext& editor, const ImVec2& p)
++{
++    const ImVec2 o = GImNodes->CanvasOriginScreenSpace;
++    return ImVec2(o.x + (p.x - o.x) / editor.Zoom, o.y + (p.y - o.y) / editor.Zoom);
++}
++
++static inline ImVec2 ZoomVirtualToReal(const ImNodesEditorContext& editor, const ImVec2& p)
++{
++    const ImVec2 o = GImNodes->CanvasOriginScreenSpace;
++    return ImVec2(o.x + (p.x - o.x) * editor.Zoom, o.y + (p.y - o.y) * editor.Zoom);
++}
++
+ bool MouseInCanvas()
+ {
+     // This flag should be true either when hovering or clicking something in the canvas.
+@@ -723,6 +736,14 @@
+ 
+     const bool mouse_not_in_canvas = !MouseInCanvas();
+ 
++    // [LYNX] Panning (right button) starts anywhere in the canvas, over a node too.
++    if (editor.ClickInteraction.Type == ImNodesClickInteractionType_None && GImNodes->AltMouseClicked &&
++        !mouse_not_in_canvas && ImGui::IsWindowHovered())
++    {
++        editor.ClickInteraction.Type = ImNodesClickInteractionType_Panning;
++        return;
++    }
++
+     if (editor.ClickInteraction.Type != ImNodesClickInteractionType_None ||
+         any_ui_element_hovered || mouse_not_in_canvas || !ImGui::IsWindowHovered())
+     {
+@@ -2139,7 +2160,8 @@
+ 
+ ImNodesIO::ImNodesIO()
+     : EmulateThreeButtonMouse(), LinkDetachWithModifierClick(),
+-      AltMouseButton(ImGuiMouseButton_Middle), AutoPanningSpeed(1000.0f)
++      AltMouseButton(ImGuiMouseButton_Right), AutoPanningSpeed(1000.0f), ZoomWithMouseWheel(true),
++      ZoomMin(0.25f), ZoomMax(2.5f)
+ {
+ }
+ 
+@@ -2149,7 +2171,8 @@
+       PinCircleRadius(4.f), PinQuadSideLength(7.f), PinTriangleSideLength(9.5),
+       PinLineThickness(1.f), PinHoverRadius(10.f), PinOffset(0.f), MiniMapPadding(8.0f, 8.0f),
+       MiniMapOffset(4.0f, 4.0f), GridMajorLinesEvery(0),
+-      Flags(ImNodesStyleFlags_NodeOutline | ImNodesStyleFlags_GridLines), Colors()
++      // [LYNX] the nodes always snap to the grid
++      Flags(ImNodesStyleFlags_NodeOutline | ImNodesStyleFlags_GridLines | ImNodesStyleFlags_GridSnapping), Colors()
+ {
+ #ifndef IMGUI_DISABLE_PIXEL_STYLE
+     // [PIXEL STYLE] Same look as the ImGui pixel widgets (see StylePixel()).
+@@ -2220,6 +2243,23 @@
+     editor.Panning = pos;
+ }
+ 
++float EditorContextGetZoom()
++{
++    const ImNodesEditorContext& editor = EditorContextGet();
++    return editor.Zoom;
++}
++
++void EditorContextSetZoom(float zoom, const ImVec2& screen_pivot)
++{
++    ImNodesEditorContext& editor = EditorContextGet();
++    const float z0 = editor.Zoom;
++    const float z1 = ImClamp(zoom, GImNodes->Io.ZoomMin, GImNodes->Io.ZoomMax);
++    const ImVec2 pivot = screen_pivot.x == -FLT_MAX ? GImNodes->CanvasOriginScreenSpace : screen_pivot;
++    const ImVec2 m = pivot - GImNodes->CanvasOriginScreenSpace;
++    editor.Panning = m / z1 - (m / z0 - editor.Panning);
++    editor.Zoom = z1;
++}
++
+ void EditorContextMoveToNode(const int node_id)
+ {
+     ImNodesEditorContext& editor = EditorContextGet();
+@@ -2529,8 +2569,55 @@
+         // rendered into the parent window draw list.
+         DrawListSet(ImGui::GetWindowDrawList());
+ 
++        // [LYNX ZOOM] Mouse wheel : zoom around the mouse.
++        {
++            ImGuiIO&     io = ImGui::GetIO();
++            const ImVec2 origin = GImNodes->CanvasOriginScreenSpace;
++            if (GImNodes->Io.ZoomWithMouseWheel && io.MouseWheel != 0.f && ImGui::IsWindowHovered() &&
++                !ImGui::IsAnyItemActive() && ImGui::IsMousePosValid(&io.MousePos))
++            {
++                const float z0 = editor.Zoom;
++                const float z1 = ImClamp(
++                    z0 * ImPow(1.15f, io.MouseWheel), GImNodes->Io.ZoomMin, GImNodes->Io.ZoomMax);
++                const ImVec2 m = io.MousePos - origin;
++                // The grid point under the mouse stays under the mouse.
++                editor.Panning = m / z1 - (m / z0 - editor.Panning);
++                editor.Zoom = z1;
++                io.MouseWheel = 0.f;
++                GImNodes->AltMouseScrollDelta = 0.f;
++            }
++
++            // The mouse in the virtual space of the canvas, for the whole scope (ImGui items of
++            // the nodes, imnodes interactions). Restored by EndNodeEditor.
++            const float z = editor.Zoom;
++            GImNodes->ZoomScale = z;
++            GImNodes->RealMousePos = io.MousePos;
++            GImNodes->RealMousePosPrev = io.MousePosPrev;
++            GImNodes->RealMouseDelta = io.MouseDelta;
++            for (int i = 0; i < 5; ++i)
++                GImNodes->RealMouseClickedPos[i] = io.MouseClickedPos[i];
++            GImNodes->ZoomMouseMoved = z != 1.f;
++            if (GImNodes->ZoomMouseMoved)
++            {
++                if (ImGui::IsMousePosValid(&io.MousePos))
++                    io.MousePos = ZoomRealToVirtual(editor, io.MousePos);
++                if (ImGui::IsMousePosValid(&io.MousePosPrev))
++                    io.MousePosPrev = ZoomRealToVirtual(editor, io.MousePosPrev);
++                io.MouseDelta = io.MouseDelta / z;
++                for (int i = 0; i < 5; ++i)
++                    io.MouseClickedPos[i] = ZoomRealToVirtual(editor, io.MouseClickedPos[i]);
++            }
++            GImNodes->MousePos = io.MousePos;
++
++            // Items are culled / hit tested against the virtual extent of the canvas.
++            const ImVec2 size = ImGui::GetWindowSize() / z;
++            ImGui::PushClipRect(origin, origin + size, false);
++            GImNodes->ZoomVtxStart = GImNodes->CanvasDrawList->VtxBuffer.Size;
++            GImNodes->ZoomCmdStart = GImNodes->CanvasDrawList->CmdBuffer.Size - 1;
++        }
++
+         {
+-            const ImVec2 canvas_size = ImGui::GetWindowSize();
++            const ImVec2 canvas_size = ImGui::GetWindowSize() / editor.Zoom;
+             GImNodes->CanvasRectScreenSpace = ImRect(
+                 EditorSpaceToScreenSpace(ImVec2(0.f, 0.f)), EditorSpaceToScreenSpace(canvas_size));
+ 
+@@ -2684,6 +2771,46 @@
+     // Finally, merge the draw channels
+     GImNodes->CanvasDrawList->ChannelsMerge();
+ 
++    // [LYNX ZOOM] What was drawn in the virtual space goes back to the screen, scaled around the
++    // origin of the canvas ; the clip rects too (inside the real canvas).
++    {
++        ImDrawList*  dl = GImNodes->CanvasDrawList;
++        const float  z = GImNodes->ZoomScale;
++        const ImVec2 o = GImNodes->CanvasOriginScreenSpace;
++        if (z != 1.f)
++        {
++            for (int i = GImNodes->ZoomVtxStart; i < dl->VtxBuffer.Size; ++i)
++            {
++                ImVec2& p = dl->VtxBuffer[i].pos;
++                p = ImVec2(o.x + (p.x - o.x) * z, o.y + (p.y - o.y) * z);
++            }
++            const ImVec4 real_clip =
++                dl->_ClipRectStack.Size >= 2 ? dl->_ClipRectStack[dl->_ClipRectStack.Size - 2]
++                                             : ImVec4(-FLT_MAX, -FLT_MAX, FLT_MAX, FLT_MAX);
++            for (int i = ImMax(0, GImNodes->ZoomCmdStart); i < dl->CmdBuffer.Size; ++i)
++            {
++                ImVec4& c = dl->CmdBuffer[i].ClipRect;
++                c = ImVec4(
++                    ImMax(real_clip.x, o.x + (c.x - o.x) * z),
++                    ImMax(real_clip.y, o.y + (c.y - o.y) * z),
++                    ImMin(real_clip.z, o.x + (c.z - o.x) * z),
++                    ImMin(real_clip.w, o.y + (c.w - o.y) * z));
++            }
++        }
++        ImGui::PopClipRect();
++
++        ImGuiIO& io = ImGui::GetIO();
++        if (GImNodes->ZoomMouseMoved)
++        {
++            io.MousePos = GImNodes->RealMousePos;
++            io.MousePosPrev = GImNodes->RealMousePosPrev;
++            io.MouseDelta = GImNodes->RealMouseDelta;
++            for (int i = 0; i < 5; ++i)
++                io.MouseClickedPos[i] = GImNodes->RealMouseClickedPos[i];
++            GImNodes->ZoomMouseMoved = false;
++        }
++    }
++
+     // pop style
+     ImGui::EndChild();      // end scrolling region
+     ImGui::PopStyleColor(); // pop child window background color
+@@ -2785,7 +2912,7 @@
+     const int             node_idx = ObjectPoolFind(editor.Nodes, node_id);
+     IM_ASSERT(node_idx != -1); // invalid node_id
+     const ImNodeData& node = editor.Nodes.Pool[node_idx];
+-    return node.Rect.GetSize();
++    return node.Rect.GetSize() * editor.Zoom; // [LYNX ZOOM] real screen pixels
+ }
+ 
+ void BeginNodeTitleBar()
+@@ -3005,7 +3132,8 @@
+ {
+     ImNodesEditorContext& editor = EditorContextGet();
+     ImNodeData&           node = ObjectPoolFindOrCreateObject(editor.Nodes, node_id);
+-    node.Origin = ScreenSpaceToGridSpace(editor, screen_space_pos);
++    // [LYNX ZOOM] real screen pixels
++    node.Origin = ScreenSpaceToGridSpace(editor, ZoomRealToVirtual(editor, screen_space_pos));
+ }
+ 
+ void SetNodeEditorSpacePos(const int node_id, const ImVec2& editor_space_pos)
+@@ -3035,7 +3163,8 @@
+     const int             node_idx = ObjectPoolFind(editor.Nodes, node_id);
+     IM_ASSERT(node_idx != -1);
+     ImNodeData& node = editor.Nodes.Pool[node_idx];
+-    return GridSpaceToScreenSpace(editor, node.Origin);
++    // [LYNX ZOOM] real screen pixels
++    return ZoomVirtualToReal(editor, GridSpaceToScreenSpace(editor, node.Origin));
+ }
+ 
+ ImVec2 GetNodeEditorSpacePos(const int node_id)

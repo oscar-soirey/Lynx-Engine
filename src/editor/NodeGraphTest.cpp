@@ -94,11 +94,10 @@ namespace lynx::editor::node_graph_test
 
 		ImNodesContext* g_context = nullptr;
 		Graph g_graph;
-		bool g_minimap = true;
-		bool g_snap = false;
 		bool g_initialized = false;
 		float g_time = 0.f;
 		ImVec2 g_popup_pos;
+		std::vector<std::pair<int, ImVec2>> g_pending_screen;
 		bool g_focused = false;
 
 		Node* FindNode(int id)
@@ -311,20 +310,9 @@ namespace lynx::editor::node_graph_test
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Take the colors of the current ImGui theme again.");
 			ImGui::SameLine();
-			ImGui::Checkbox("Mini-map", &g_minimap);
-			ImGui::SameLine();
-			if (ImGui::Checkbox("Snap to grid", &g_snap))
-			{
-				ImNodesStyle& style = ImNodes::GetStyle();
-				if (g_snap)
-					style.Flags |= ImNodesStyleFlags_GridSnapping;
-				else
-					style.Flags &= ~ImNodesStyleFlags_GridSnapping;
-			}
-			ImGui::SameLine();
 			ImGui::TextDisabled("%d nodes, %d links", static_cast<int>(g_graph.nodes.size()),
 			                    static_cast<int>(g_graph.links.size()));
-			ImGui::TextDisabled("Right click : add a node. Drag a pin : link. Delete : remove. Middle mouse : pan.");
+			ImGui::TextDisabled("Right click : add a node. Drag a pin : link. Delete : remove. Right drag : pan. Wheel : zoom.");
 		}
 	}
 
@@ -367,9 +355,30 @@ namespace lynx::editor::node_graph_test
 
 		ImNodes::BeginNodeEditor();
 
-		// Right click on the canvas : add a node there.
-		if (ImNodes::IsEditorHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
-		    !ImGui::IsAnyItemHovered())
+		// New nodes : where the right click was (snapped to the grid).
+		for (const auto& [id, screen] : g_pending_screen)
+		{
+			ImNodes::SetNodeScreenSpacePos(id, screen);
+			ImNodes::SnapNodeToGrid(id);
+		}
+		g_pending_screen.clear();
+
+		for (const auto& [id, pos] : g_graph.pending_positions)
+			ImNodes::SetNodeGridSpacePos(id, pos);
+		g_graph.pending_positions.clear();
+
+		for (Node& node : g_graph.nodes)
+			DrawNode(node);
+
+		for (const LinkData& link : g_graph.links)
+			ImNodes::Link(link.id, link.from, link.to);
+
+		ImNodes::EndNodeEditor();
+
+		// Right click (without moving : a right drag pans) on the canvas : add a node there.
+		// After EndNodeEditor : the mouse is in screen pixels again (zoom).
+		if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+		    ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
 		{
 			g_popup_pos = ImGui::GetMousePos();
 			ImGui::OpenPopup("##AddNode");
@@ -382,29 +391,14 @@ namespace lynx::editor::node_graph_test
 			{
 				if (ImGui::MenuItem(KindName(static_cast<Kind>(k))))
 				{
-					// Placed where the right click was (not at a grid position).
+					// Placed (next frame, once drawn) where the right click was.
 					const int id = AddNode(static_cast<Kind>(k), ImVec2(0.f, 0.f));
 					g_graph.pending_positions.pop_back();
-					ImNodes::SetNodeScreenSpacePos(id, g_popup_pos);
+					g_pending_screen.emplace_back(id, g_popup_pos);
 				}
 			}
 			ImGui::EndPopup();
 		}
-
-		for (const auto& [id, pos] : g_graph.pending_positions)
-			ImNodes::SetNodeGridSpacePos(id, pos);
-		g_graph.pending_positions.clear();
-
-		for (Node& node : g_graph.nodes)
-			DrawNode(node);
-
-		for (const LinkData& link : g_graph.links)
-			ImNodes::Link(link.id, link.from, link.to);
-
-		if (g_minimap)
-			ImNodes::MiniMap(0.18f, ImNodesMiniMapLocation_BottomRight);
-
-		ImNodes::EndNodeEditor();
 
 		// --- Changes made by the user ------------------------------------------
 		int start = 0, end = 0;

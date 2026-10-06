@@ -153,12 +153,18 @@ struct ImNodesIO
         const bool* Modifier;
     } MultipleSelectModifier;
 
-    // Holding alt mouse button pans the node area, by default middle mouse button will be used
+    // Holding alt mouse button pans the node area. [LYNX] Default : the right mouse button (a right
+    // click without moving still opens the context menus of the application).
     // Set based on ImGuiMouseButton values
     int AltMouseButton;
 
     // Panning speed when dragging an element and mouse is outside the main editor view.
     float AutoPanningSpeed;
+
+    // [LYNX ZOOM] The mouse wheel zooms around the mouse cursor (ZoomMin..ZoomMax, 1 = 100%).
+    bool  ZoomWithMouseWheel;
+    float ZoomMin;
+    float ZoomMax;
 
     ImNodesIO();
 };
@@ -258,6 +264,11 @@ void                  EditorContextFree(ImNodesEditorContext*);
 void                  EditorContextSet(ImNodesEditorContext*);
 ImVec2                EditorContextGetPanning();
 void                  EditorContextResetPanning(const ImVec2& pos);
+// [LYNX ZOOM] Zoom of the editor (1 = 100%). `screen_pivot` : the point of the screen that stays in
+// place (default : the top left corner of the canvas). Every "screen space" function of the API
+// works in real screen pixels whatever the zoom ; grid space does not change with the zoom.
+float                 EditorContextGetZoom();
+void                  EditorContextSetZoom(float zoom, const ImVec2& screen_pivot = ImVec2(-FLT_MAX, -FLT_MAX));
 void                  EditorContextMoveToNode(const int node_id);
 
 ImNodesIO& GetIO();

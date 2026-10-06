@@ -79,6 +79,11 @@
 #include "ProfilerWindow.h"
 #include "ScriptEditors.h"
 #include "WidgetEditor.h"
+#include "GraphEditors.h"
+#include "VoxelTypeEditor.h"
+#include "TitleBar.h"
+#include "FileIcons.h"
+#include "SpriteVoxelizer.h"
 #include "NodeGraphTest.h"
 #include "EditorFonts.h"
 #include "ShipGame.h"
@@ -869,6 +874,7 @@ void EndImGuiFrame()
 void ShutdownImGui()
 {
     lynx::editor::node_graph_test::Shutdown();   // ImNodes context, before ImGui's
+    lynx::editor::graph_editors::Shutdown();     // Anim Graph / Behavior Tree editors (ImNodes)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -2454,6 +2460,324 @@ static void DropCallback(
 // Git window (status, commit, pull / push, history).
 #include "GitWindow.inl"
 
+// What the "Convert to voxels" dialog needs from the editor (undo, actors...).
+static lynx::editor::sprite_voxels::Host SpriteVoxelHost()
+{
+    lynx::editor::sprite_voxels::Host host;
+    host.scene = scene;
+    host.push_undo = [](std::function<void()> undo) { PushEditorUndo(std::move(undo)); };
+    host.mark_dirty = [] { MarkEditorDirty(); };
+    host.find_actor = [](const std::string& id) { return FindEditorActor(id); };
+    host.is_alive = [](lynx::Actor* actor)
+    {
+        if (!editor_level || !actor)
+            return false;
+        const auto& actors = editor_level->GetActors();
+        return std::find(actors.begin(), actors.end(), actor) != actors.end();
+    };
+    host.save_voxel_types = [] { lynx::editor::voxel_types::Save(); };
+    host.delete_actor = [](lynx::Actor* actor) -> std::function<void()>
+    {
+        if (!actor || !editor_level)
+            return {};
+        const EditorActorSnapshot snapshot = CaptureActorSnapshot(actor);
+        if (editing_actor == actor)
+        {
+            editing_actor = nullptr;
+            editing_object = HRL_INVALID_ID;
+            HRL_SetGizmoVisible(gizmo, HRL_FALSE);
+        }
+        editor_level->DestroyActor(actor);
+        return [snapshot]()
+        {
+            if (!editor_level || (!snapshot.object_id.empty() && FindEditorActor(snapshot.object_id)))
+                return;
+            if (lynx::Actor* restored = RestoreActorSnapshot(editor_level, snapshot))
+                SetActorSelected(restored);
+        };
+    };
+    return host;
+}
+
+static char content_browser_search[128] = {};
+static int content_browser_item_count = 0;
+
+// Navigation history (like a web browser) : the back / forward buttons of the
+// mouse, and the arrows of the header.
+static std::vector<std::filesystem::path> content_browser_back;
+static std::vector<std::filesystem::path> content_browser_forward;
+static std::filesystem::path content_browser_last_path;
+
+// Called once per frame : a folder change made anywhere (click, breadcrumb,
+// up, rename...) becomes a step of the history.
+static void ContentBrowserTrackHistory()
+{
+    if (content_browser_current_path == content_browser_last_path)
+        return;
+    if (!content_browser_last_path.empty())
+    {
+        content_browser_back.push_back(content_browser_last_path);
+        if (content_browser_back.size() > 100)
+            content_browser_back.erase(content_browser_back.begin());
+        content_browser_forward.clear();
+    }
+    content_browser_last_path = content_browser_current_path;
+}
+
+// -1 : back, +1 : forward. Folders deleted since are skipped.
+static void ContentBrowserGo(int direction)
+{
+    std::vector<std::filesystem::path>& from = direction < 0 ? content_browser_back : content_browser_forward;
+    std::vector<std::filesystem::path>& to = direction < 0 ? content_browser_forward : content_browser_back;
+    while (!from.empty())
+    {
+        std::filesystem::path target = from.back();
+        from.pop_back();
+        std::error_code error;
+        const bool inside = target == content_browser_root || IsPathInside(target, content_browser_root);
+        if (!inside || !std::filesystem::is_directory(target, error))
+            continue;
+        to.push_back(content_browser_current_path);
+        content_browser_current_path = target;
+        content_browser_last_path = target;     // not a new step
+        return;
+    }
+}
+
+// Header of the Content Browser :
+//
+//    (Lynxie)  [Assets] / maps / caves                       12 items
+//     /\_/\    [^] [search............................] [x]  [+ New]
+//  ---(   )---------------------------------------------------------- folders
+//
+// Lynxie stands on the line above the folders (click : opens her chat).
+static void DrawContentBrowserHeader(const std::filesystem::path& relative_current)
+{
+    namespace cba = content_browser_actions;
+    namespace icons = lynx::editor::icons;
+
+    ImGui::SetWindowFontScale(0.8f);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float row_h = ImGui::GetFrameHeight();
+    const float header_h = row_h * 2.f + style.ItemSpacing.y;
+    // Lynxie is taller than the two rows : the rows sit at her feet, on the line.
+    const float lynxie_h = std::floor((header_h + style.ItemSpacing.y) * 1.45f);
+    const float lynxie_w = lynx::editor::lynxie_icon::WidthFor(lynxie_h);
+    const ImVec2 top = ImGui::GetCursorScreenPos();
+    const float line_y = top.y + lynxie_h;
+    const ImVec2 start(top.x, line_y - header_h - style.ItemSpacing.y * 0.5f - 1.f);
+
+    // Lynxie (her feet on the line)
+    ImGui::SetCursorScreenPos(ImVec2(start.x, line_y - lynxie_h));
+    if (ImGui::InvisibleButton("##BrowserLynxie", ImVec2(lynxie_w, lynxie_h)))
+    {
+        editorWindows.commands = true;
+        SaveEditorWindowVisibility();
+        lynx::editor::commands_window::ShowLynxie();
+    }
+    {
+        const bool hovered = ImGui::IsItemHovered();
+        ImVec4 tint = style.Colors[ImGuiCol_Text];
+        if (!hovered)
+            tint.w *= 0.85f;
+        const float hop = hovered ? -2.f : 0.f;   // a little jump when hovered
+        lynx::editor::lynxie_icon::DrawAt(ImGui::GetWindowDrawList(),
+                                         ImVec2(start.x, line_y - lynxie_h + hop), lynxie_h,
+                                         ImGui::ColorConvertFloat4ToU32(tint));
+        if (hovered)
+            ImGui::SetTooltip("Lynxie : ask about your assets, the engine, the level...");
+    }
+
+    const float left = start.x + lynxie_w + style.ItemSpacing.x * 2.f;
+
+    // Row 1 : path
+    ImGui::SetCursorScreenPos(ImVec2(left, start.y));
+    if (icons::ButtonWithLabel("Assets##BrowserRoot", icons::Icon::Folder))
+        content_browser_current_path = content_browser_root;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", content_browser_root.generic_string().c_str());
+
+    std::filesystem::path breadcrumb_path;
+    int breadcrumb_index = 0;
+    for (const auto& part : relative_current)
+    {
+        if (part.empty() || part == ".")
+            continue;
+        breadcrumb_path /= part;
+        ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("/");
+        ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
+
+        const std::string label = part.string() + "##Breadcrumb" + std::to_string(breadcrumb_index++);
+        if (ImGui::Button(label.c_str()))
+            content_browser_current_path = content_browser_root / breadcrumb_path;
+    }
+
+    // Number of items, on the right
+    {
+        char count[32];
+        std::snprintf(count, sizeof(count), "%d item%s", content_browser_item_count,
+                      content_browser_item_count == 1 ? "" : "s");
+        const float w = ImGui::CalcTextSize(count).x;
+        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        if (ImGui::GetItemRectMax().x + style.ItemSpacing.x * 2.f + w < right)
+        {
+            ImGui::SameLine(right - w - ImGui::GetWindowPos().x);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", count);
+        }
+    }
+
+    // Row 2 : up, search, new
+    ImGui::SetCursorScreenPos(ImVec2(left, start.y + row_h + style.ItemSpacing.y));
+    ImGui::BeginDisabled(content_browser_back.empty());
+    if (ImGui::ArrowButton("##BrowserBack", ImGuiDir_Left))
+        ContentBrowserGo(-1);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Back (mouse back button)");
+    ImGui::SameLine(0.f, 2.f);
+    ImGui::BeginDisabled(content_browser_forward.empty());
+    if (ImGui::ArrowButton("##BrowserForward", ImGuiDir_Right))
+        ContentBrowserGo(+1);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Forward (mouse forward button)");
+    ImGui::SameLine(0.f, 2.f);
+
+    const bool at_root = content_browser_current_path == content_browser_root;
+    ImGui::BeginDisabled(at_root);
+    if (ImGui::ArrowButton("##BrowserUp", ImGuiDir_Up))
+    {
+        const std::filesystem::path parent = content_browser_current_path.parent_path();
+        if (IsPathInside(parent, content_browser_root))
+            content_browser_current_path = parent;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Parent folder");
+
+    ImGui::SameLine();
+    const float new_w = ImGui::CalcTextSize("+ New").x + style.FramePadding.x * 2.f;
+    const float clear_w = content_browser_search[0] ? row_h + style.ItemSpacing.x : 0.f;
+    const float search_w = std::max(60.f, ImGui::GetContentRegionAvail().x - new_w - clear_w - style.ItemSpacing.x);
+    ImGui::AlignTextToFramePadding();
+    icons::Draw(icons::Icon::Search);
+    ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
+    ImGui::SetNextItemWidth(search_w - ImGui::GetFontSize() - style.ItemSpacing.x * 0.5f);
+    ImGui::InputTextWithHint("##BrowserSearch", "Search in this folder", content_browser_search,
+                             sizeof(content_browser_search));
+    if (content_browser_search[0])
+    {
+        ImGui::SameLine();
+        if (icons::Button("##BrowserClearSearch", icons::Icon::Clear))
+            content_browser_search[0] = 0;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Clear the search");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+ New"))
+        ImGui::OpenPopup("##BrowserNew");
+    if (ImGui::BeginPopup("##BrowserNew"))
+    {
+        cba::NewFileMenu(content_browser_current_path);
+        ImGui::EndPopup();
+    }
+
+    // The line Lynxie stands on
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float x0 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
+    const float x1 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+    dl->AddLine(ImVec2(x0, line_y), ImVec2(x1, line_y), ImGui::GetColorU32(ImGuiCol_Separator), 2.f);
+
+    ImGui::SetCursorScreenPos(ImVec2(start.x, line_y + style.ItemSpacing.y));
+    ImGui::Dummy(ImVec2(1.f, 0.f));
+    ImGui::SetWindowFontScale(0.62f);
+}
+
+// One cell of the Content Browser grid (drawn over its invisible button).
+static void DrawAssetTile(ImDrawList* draw_list, const ImVec2& cell_min, const ImVec2& cell_max,
+                          const ImVec2& thumb_min, float image_size, float item_width,
+                          bool hovered, bool active, bool selected,
+                          const std::filesystem::path& path, bool is_directory, const std::string& filename)
+{
+        // Tile : nothing at rest (the window background shows through), a
+        // soft highlight when hovered / pressed, the selection color when selected.
+        if (hovered || active || selected)
+        {
+            ImVec4 color = ImGui::GetStyleColorVec4(
+                active   ? ImGuiCol_HeaderActive :
+                selected ? ImGuiCol_Header :
+                           ImGuiCol_HeaderHovered);
+            if (!selected && !active)
+                color.w *= 0.55f;
+
+            draw_list->AddRectFilled(cell_min, cell_max, ImGui::ColorConvertFloat4ToU32(color),
+                                     ImGui::GetStyle().FrameRounding);
+            if (selected)
+                draw_list->AddRect(cell_min, cell_max, ImGui::GetColorU32(ImGuiCol_HeaderActive),
+                                   ImGui::GetStyle().FrameRounding, 0, 2.f);
+        }
+
+        // Icon of the asset type (colored pixel art, 32 px : drawn at x2).
+        {
+            const lynx::editor::file_icons::Kind kind =
+                lynx::editor::file_icons::ForFile(path, is_directory);
+
+            const float icon_size =
+                std::max(32.f, std::floor(image_size * 0.8f / 32.f) * 32.f);
+
+            // A small hop when hovered.
+            const float hop = hovered && !active ? -2.f : 0.f;
+
+            lynx::editor::file_icons::DrawAt(
+                draw_list,
+                kind,
+                ImVec2(
+                    std::floor(thumb_min.x + (image_size - icon_size) * 0.5f),
+                    std::floor(thumb_min.y + (image_size - icon_size) * 0.5f + hop)
+                ),
+                icon_size
+            );
+
+            if (hovered && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+                ImGui::SetItemTooltip("%s\n%s", filename.c_str(), lynx::editor::file_icons::Describe(kind));
+        }
+
+        // Asset name under the image, clipped/wrapped to the cell width.
+        const ImVec2 text_size =
+            ImGui::CalcTextSize(filename.c_str(), nullptr, false, item_width - 8.f);
+
+        const float text_x =
+            cell_min.x + (item_width - std::min(text_size.x, item_width - 8.f)) * 0.5f;
+
+        draw_list->AddText(
+            ImGui::GetFont(),
+            ImGui::GetFontSize(),
+            ImVec2(text_x, cell_min.y + image_size + 9.f),
+            ImGui::GetColorU32(ImGuiCol_Text),
+            filename.c_str(),
+            nullptr,
+            item_width - 8.f
+        );
+
+}
+
+// Back / forward buttons of the mouse over the Content Browser (call inside it).
+static void ContentBrowserMouseHistory()
+{
+    ContentBrowserTrackHistory();
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+    {
+        if (ImGui::IsMouseClicked(3))
+            ContentBrowserGo(-1);
+        if (ImGui::IsMouseClicked(4))
+            ContentBrowserGo(+1);
+    }
+}
+
 static void DrawContentBrowser(lynx::Level* level)
 {
     namespace cba = content_browser_actions;
@@ -2467,6 +2791,10 @@ static void DrawContentBrowser(lynx::Level* level)
 
     content_browser_focused =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+
+    // History : folder changes of the last frame, then the side buttons of the
+    // mouse (back = button 4, forward = button 5) over the window.
+    ContentBrowserMouseHistory();
     ImGui::SetWindowFontScale(0.62f);
 
     const ImVec2 window_pos =
@@ -2510,53 +2838,8 @@ static void DrawContentBrowser(lynx::Level* level)
             relative_current.clear();
     }
 
-    if (ImGui::Button("Assets"))
-    {
-        content_browser_current_path =
-            content_browser_root;
-    }
-
-    std::filesystem::path breadcrumb_path;
-    int breadcrumb_index = 0;
-
-    for (const auto& part : relative_current)
-    {
-        breadcrumb_path /= part;
-
-        ImGui::SameLine();
-        ImGui::TextUnformatted(">>");
-        ImGui::SameLine();
-
-        std::string label = part.string();
-        label += "##Breadcrumb";
-        label += std::to_string(breadcrumb_index++);
-
-        if (ImGui::Button(label.c_str()))
-        {
-            content_browser_current_path =
-                content_browser_root / breadcrumb_path;
-        }
-    }
-
-    ImGui::Separator();
-
-    if (content_browser_current_path != content_browser_root &&
-        ImGui::Button(".."))
-    {
-        const std::filesystem::path parent =
-            content_browser_current_path.parent_path();
-
-        if (IsPathInside(parent, content_browser_root))
-            content_browser_current_path = parent;
-    }
-
-    ImGui::SameLine();
-    ImGui::TextDisabled(
-        "%s",
-        content_browser_current_path.generic_string().c_str()
-    );
-
-    ImGui::Separator();
+    // Header : Lynxie on the line above the folders, path, search, New.
+    DrawContentBrowserHeader(relative_current);
 
     // The folder is listed (and sorted) only when it changes, or twice a
     // second : listing a big folder every frame (assets/ with hundreds of
@@ -2630,6 +2913,34 @@ static void DrawContentBrowser(lynx::Level* level)
         entries.swap(sorted);
     }
 
+    // Search : the entries whose name contains the text (any case).
+    std::vector<const std::filesystem::directory_entry*> shown;
+    shown.reserve(entries.size());
+    {
+        std::string needle = content_browser_search;
+        std::transform(needle.begin(), needle.end(), needle.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        for (const auto& entry : entries)
+        {
+            if (!needle.empty())
+            {
+                std::string name = entry.path().filename().string();
+                std::transform(name.begin(), name.end(), name.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (name.find(needle) == std::string::npos)
+                    continue;
+            }
+            shown.push_back(&entry);
+        }
+    }
+    content_browser_item_count = static_cast<int>(shown.size());
+
+    // The grid scrolls under the header.
+    ImGui::BeginChild("##ContentGrid", ImVec2(0.f, 0.f), ImGuiChildFlags_None);
+    ImGui::SetWindowFontScale(0.62f);
+    content_browser_focused = content_browser_focused ||
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+
     // --------------------------------------------------------
     // Asset grid
     // --------------------------------------------------------
@@ -2653,7 +2964,7 @@ static void DrawContentBrowser(lynx::Level* level)
 
     // Only the visible rows are drawn (a folder can hold hundreds of files).
     const int row_count =
-        (static_cast<int>(entries.size()) + columns - 1) / columns;
+        (static_cast<int>(shown.size()) + columns - 1) / columns;
 
     ImGuiListClipper clipper;
     clipper.Begin(row_count, item_height + ImGui::GetStyle().ItemSpacing.y);
@@ -2663,10 +2974,10 @@ static void DrawContentBrowser(lynx::Level* level)
     for (int column = 0; column < columns; ++column)
     {
         const size_t index = static_cast<size_t>(row) * static_cast<size_t>(columns) + static_cast<size_t>(column);
-        if (index >= entries.size())
+        if (index >= shown.size())
             break;
 
-        const std::filesystem::directory_entry& entry = entries[index];
+        const std::filesystem::directory_entry& entry = *shown[index];
 
         if (column > 0)
             ImGui::SameLine(0.f, item_spacing);
@@ -2702,6 +3013,9 @@ static void DrawContentBrowser(lynx::Level* level)
             // .widget : Widget Editor (UMG-like designer).
             if (lynx::editor::widget_editor::CanOpen(entry.path()))
                 lynx::editor::widget_editor::Open(entry.path());
+            // .animgraph / .bt : node editors.
+            else if (lynx::editor::graph_editors::CanOpen(entry.path()))
+                lynx::editor::graph_editors::Open(entry.path());
             else if (lynx::editor::script_editors::CanOpen(entry.path()))
                 lynx::editor::script_editors::Open(entry.path());
         }
@@ -2724,75 +3038,10 @@ static void DrawContentBrowser(lynx::Level* level)
             thumb_x + image_size,
             thumb_y + image_size
         );
+        (void)thumb_max;
 
-        // Tile : colors of the theme (frame / hovered / pressed, selection).
-        const ImU32 bg_color = ImGui::GetColorU32(
-            active  ? ImGuiCol_ButtonActive :
-            hovered ? ImGuiCol_ButtonHovered :
-                      ImGuiCol_FrameBg);
-
-        draw_list->AddRectFilled(
-            cell_min,
-            cell_max,
-            bg_color,
-            ImGui::GetStyle().FrameRounding
-        );
-
-        draw_list->AddRect(
-            cell_min,
-            cell_max,
-            ImGui::GetColorU32(selected ? ImGuiCol_SliderGrab : ImGuiCol_Border),
-            ImGui::GetStyle().FrameRounding,
-            0,
-            selected ? 2.f : 1.f
-        );
-
-        // Icon of the asset type, tinted by type (pixel art : a multiple of 16 px).
-        {
-            using lynx::editor::icons::Icon;
-
-            const Icon icon =
-                lynx::editor::icons::ForFile(entry.path().string().c_str(), is_directory);
-
-            const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-            const ImVec4 tint =
-                icon == Icon::Folder    ? ImVec4(0.80f, 0.58f, 0.12f, 1.f) :
-                icon == Icon::FileCode  ? ImVec4(0.20f, 0.42f, 0.78f, 1.f) :
-                icon == Icon::FileImage ? ImVec4(0.25f, 0.58f, 0.25f, 1.f) :
-                icon == Icon::FileSound ? ImVec4(0.55f, 0.30f, 0.70f, 1.f) :
-                                          text;
-
-            const float icon_size =
-                std::max(16.f, std::floor(image_size * 0.75f / 16.f) * 16.f);
-
-            lynx::editor::icons::DrawAt(
-                draw_list,
-                icon,
-                ImVec2(
-                    std::floor(thumb_min.x + (image_size - icon_size) * 0.5f),
-                    std::floor(thumb_min.y + (image_size - icon_size) * 0.5f)
-                ),
-                icon_size,
-                ImGui::ColorConvertFloat4ToU32(tint)
-            );
-        }
-
-        // Asset name under the image, clipped/wrapped to the cell width.
-        const ImVec2 text_size =
-            ImGui::CalcTextSize(filename.c_str(), nullptr, false, item_width - 8.f);
-
-        const float text_x =
-            cell_pos.x + (item_width - std::min(text_size.x, item_width - 8.f)) * 0.5f;
-
-        draw_list->AddText(
-            ImGui::GetFont(),
-            ImGui::GetFontSize(),
-            ImVec2(text_x, cell_pos.y + image_size + 9.f),
-            ImGui::GetColorU32(ImGuiCol_Text),
-            filename.c_str(),
-            nullptr,
-            item_width - 8.f
-        );
+        DrawAssetTile(draw_list, cell_min, cell_max, thumb_min, image_size, item_width,
+                      hovered, active, selected, entry.path(), is_directory, filename);
 
         if (clicked && is_directory)
             content_browser_current_path = entry.path();   // listed again at the next frame
@@ -2824,11 +3073,15 @@ static void DrawContentBrowser(lynx::Level* level)
 
     if (entries.empty())
         ImGui::TextDisabled("Empty folder  (right click : new folder / new file)");
+    else if (shown.empty())
+        ImGui::TextDisabled("Nothing matches \"%s\"", content_browser_search);
 
     // Right click on the empty area, keyboard shortcuts, popups.
     cba::BackgroundContextMenu();
     cba::Shortcuts();
     cba::Popups();
+
+    ImGui::EndChild();
 
     ImGui::SetWindowFontScale(0.8f);
     ImGui::End();
@@ -4855,11 +5108,18 @@ namespace editor
         );
 
 
+        // Custom title bar (Windows) : before ImGui, which chains its own window procedure.
+        lynx::editor::title_bar::Install(win);
+
         InitImGui(win);
         LoadEditorWindowVisibility();
 
         // Widget Editor : textures / fonts / nested widgets with the asset picker.
         lynx::editor::widget_editor::SetAssetFieldDrawer([](std::string& value)
+        {
+            return DrawAssetPathField(value);
+        });
+        lynx::editor::graph_editors::SetAssetFieldDrawer([](std::string& value)
         {
             return DrawAssetPathField(value);
         });
@@ -5365,7 +5625,8 @@ namespace editor
 
         const bool javascript_editor_handles_shortcuts =
             lynx::editor::script_editors::HasKeyboardFocus() ||
-            lynx::editor::widget_editor::HasFocus();
+            lynx::editor::widget_editor::HasFocus() ||
+            lynx::editor::graph_editors::HasFocus();
 
 
         if (ctrl_s &&
@@ -6008,6 +6269,44 @@ namespace editor
                     // Renderer + widgets of the game (DPI scale).
                     editor_engine->SetRenderSize(renderW, renderH);
                 }
+
+                // Right click on an actor (without moving) : its menu (Convert to voxels...).
+                static lynx::Actor* menu_actor = nullptr;
+                const ImGuiIO& vio = ImGui::GetIO();
+                if (!isPlaying && sceneViewport.hovered &&
+                    ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+                    vio.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
+                {
+                    double scene_x = 0.0, scene_y = 0.0;
+                    MouseToScene(vio.MousePos.x, vio.MousePos.y, scene_x, scene_y);
+                    const HRL_id object = HRL_GL_GetHoveredObject(scene, (int)scene_x, (int)scene_y, nullptr);
+                    lynx::Actor* actor = object != HRL_INVALID_ID
+                        ? static_cast<lynx::Actor*>(HRL_GetMeshUserHandle(object))
+                        : nullptr;
+                    if (actor && editor_level)
+                    {
+                        SetActorSelected(actor);
+                        menu_actor = actor;
+                        ImGui::OpenPopup("##ViewportActorMenu");
+                    }
+                }
+                if (ImGui::BeginPopup("##ViewportActorMenu"))
+                {
+                    const auto& actors = editor_level ? editor_level->GetActors() : std::vector<lynx::Actor*>{};
+                    if (menu_actor && std::find(actors.begin(), actors.end(), menu_actor) != actors.end())
+                    {
+                        const std::string title = menu_actor->GetTypeName() +
+                            (menu_actor->object_id_.empty() ? std::string() : " [" + menu_actor->object_id_ + "]");
+                        ImGui::TextDisabled("%s", title.c_str());
+                        ImGui::Separator();
+                        lynx::editor::sprite_voxels::MenuItem(menu_actor);
+                    }
+                    else
+                    {
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
             }
         }
 
@@ -6029,6 +6328,17 @@ namespace editor
         // scene image from the surrounding ImGui panels.
         if (!isPlaying)
             HandleActorPlacementDrag(level);
+
+        // Title bar of the window (Windows : replaces the native one), above the toolbar.
+        lynx::editor::title_bar::Draw(
+            "Lynx - " + (currentProject.name.empty() ? std::string("Project") : currentProject.name),
+            [] { show_close_confirmation = true; },
+            []
+            {
+                editorWindows.commands = true;
+                SaveEditorWindowVisibility();
+                lynx::editor::commands_window::ShowLynxie();
+            });
 
         DrawToolbar();
 
@@ -6058,6 +6368,7 @@ namespace editor
         if (!isPlaying &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             !lynx::editor::widget_editor::HasFocus() &&
+            !lynx::editor::graph_editors::HasFocus() &&
             io.KeyCtrl &&
             ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
             !io.WantTextInput &&
@@ -6077,6 +6388,7 @@ namespace editor
             !content_browser_focused &&
             !lynx::editor::node_graph_test::HasFocus() &&
             !lynx::editor::widget_editor::HasFocus() &&
+            !lynx::editor::graph_editors::HasFocus() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
@@ -6431,6 +6743,10 @@ namespace editor
                         }
 
 
+                        // Sprite -> voxels (dialog with the options).
+                        lynx::editor::sprite_voxels::MenuItem(actor);
+                        ImGui::Separator();
+
                         if (ImGui::MenuItem("Delete"))
                         {
                             const EditorActorSnapshot deleted_snapshot =
@@ -6504,6 +6820,9 @@ namespace editor
 
             // Widget editors (one window per open .widget).
             lynx::editor::widget_editor::DrawAll(central_dock_id);
+
+            // Anim Graph / Behavior Tree editors (one window per open file).
+            lynx::editor::graph_editors::DrawAll(central_dock_id);
 
 
             // --------------------------------------------------------
@@ -6984,34 +7303,9 @@ namespace editor
         if (editorWindows.colorPicking)
         {
 
-        ImGui::Begin(
-            "Color Picking"
-        );
-
-
-        ImVec2 viewportSize =
-            ImGui::GetContentRegionAvail();
-
-
-        float col[4] =
-        {
-            1.f,
-            1.f,
-            1.f,
-            1.f
-        };
-
-
-        ImGui::ColorEdit4(
-            "Couleur",
-            col,
-            ImGuiColorEditFlags_Float
-        );
-
-
-        ImGui::Text("");
-
-
+        // Color and properties of the voxel type of the brush.
+        if (ImGui::Begin("Color Picking", &editorWindows.colorPicking))
+            lynx::editor::voxel_types::DrawEditor(brushVoxelType, scene);
         ImGui::End();
 
 
@@ -7371,169 +7665,15 @@ namespace editor
 
 
             // ----------------------------------------------------
-            // Empty voxel
+            // Voxel types : swatches, "+" (new type), right click menu
             // ----------------------------------------------------
 
-            ImGui::PushID(0);
-
-
-            if (ImGui::ColorButton(
-                    "##VoxelEmpty",
-                    ImVec4(
-                        0.f,
-                        0.f,
-                        0.f,
-                        1.f
-                    ),
-                    ImGuiColorEditFlags_NoTooltip,
-                    ImVec2(
-                        40.f,
-                        40.f
-                    )
-                ))
+            bool editVoxelType = false;
+            lynx::editor::voxel_types::DrawPalette(brushVoxelType, scene, editVoxelType);
+            if (editVoxelType)
             {
-                brushVoxelType = 0;
-            }
-
-
-            if (brushVoxelType == 0)
-            {
-                ImVec2 min =
-                    ImGui::GetItemRectMin();
-
-
-                ImVec2 max =
-                    ImGui::GetItemRectMax();
-
-
-                ImGui::GetWindowDrawList()->AddRect(
-                    ImVec2(
-                        min.x - 2.f,
-                        min.y - 2.f
-                    ),
-                    ImVec2(
-                        max.x + 2.f,
-                        max.y + 2.f
-                    ),
-                    IM_COL32(
-                        255,
-                        255,
-                        255,
-                        255
-                    ),
-                    2.f,
-                    0,
-                    2.f
-                );
-            }
-
-
-            ImGui::SameLine();
-
-            ImGui::PopID();
-
-
-            // ----------------------------------------------------
-            // Voxel types
-            // ----------------------------------------------------
-
-            // Voxel types of the project (assets/voxels.json).
-            const int voxelTypeCount = lynx::voxels::GetTypeCount();
-
-            if (voxelTypeCount <= 0)
-            {
-                ImGui::NewLine();
-                ImGui::TextDisabled(
-                    "No voxel type : add them in assets/voxels.json"
-                );
-            }
-
-            for (int i = 0; i < voxelTypeCount; ++i)
-            {
-                int type = i + 1;
-
-                const lynx::voxels::VoxelType* voxelType =
-                    lynx::voxels::GetType(static_cast<uint8_t>(type));
-
-                float rgba[4] = { 1.f, 0.f, 1.f, 1.f };
-
-                if (voxelType)
-                {
-                    for (int c = 0; c < 4; ++c)
-                        rgba[c] = voxelType->color[c];
-                }
-
-                ImVec4 color(
-                    rgba[0],
-                    rgba[1],
-                    rgba[2],
-                    rgba[3]
-                );
-
-
-                ImGui::PushID(type);
-
-
-                if (ImGui::ColorButton(
-                        "##VoxelColor",
-                        color,
-                        ImGuiColorEditFlags_NoTooltip,
-                        ImVec2(
-                            40.f,
-                            40.f
-                        )
-                    ))
-                {
-                    brushVoxelType = type;
-                }
-
-
-                if (brushVoxelType == type)
-                {
-                    ImVec2 min =
-                        ImGui::GetItemRectMin();
-
-
-                    ImVec2 max =
-                        ImGui::GetItemRectMax();
-
-
-                    ImGui::GetWindowDrawList()->AddRect(
-                        ImVec2(
-                            min.x - 2.f,
-                            min.y - 2.f
-                        ),
-                        ImVec2(
-                            max.x + 2.f,
-                            max.y + 2.f
-                        ),
-                        IM_COL32(
-                            255,
-                            255,
-                            255,
-                            255
-                        ),
-                        2.f,
-                        0,
-                        2.f
-                    );
-                }
-
-
-                if (voxelType && ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip(
-                        "%d : %s",
-                        type,
-                        voxelType->name.c_str()
-                    );
-                }
-
-                if ((i + 1) % 8 != 0)
-									ImGui::SameLine();
-
-
-                ImGui::PopID();
+                editorWindows.colorPicking = true;
+                ImGui::SetWindowFocus("Color Picking");
             }
         }
 
@@ -7703,6 +7843,9 @@ namespace editor
         HandleLevelAssetDrop(level);
 
 
+        // Sprite -> voxels dialog (right click on a sprite actor).
+        lynx::editor::sprite_voxels::Draw(SpriteVoxelHost());
+
         // --------------------------------------------------------
         // Close confirmation
         // --------------------------------------------------------
@@ -7729,7 +7872,8 @@ namespace editor
 
             const bool scripts_dirty =
                 lynx::editor::script_editors::HasUnsavedChanges() ||
-                lynx::editor::widget_editor::HasUnsavedChanges();
+                lynx::editor::widget_editor::HasUnsavedChanges() ||
+                lynx::editor::graph_editors::HasUnsavedChanges();
 
             if (editor_dirty || scripts_dirty)
             {
@@ -7752,6 +7896,7 @@ namespace editor
                         SaveEditor();
                     lynx::editor::script_editors::SaveAll();
                     lynx::editor::widget_editor::SaveAll();
+                    lynx::editor::graph_editors::SaveAll();
                     glfwSetWindowShouldClose(win, GLFW_TRUE);
                     ImGui::CloseCurrentPopup();
                 }

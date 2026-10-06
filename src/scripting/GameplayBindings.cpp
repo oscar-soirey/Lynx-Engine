@@ -1831,6 +1831,19 @@ namespace lynx::scripting
 		return found;
 	}
 
+	bool CallActorPredicate(Actor* self, const char* function)
+	{
+		JSContext* ctx = Context();
+		if (!ctx || !self || !function || !*function)
+			return false;
+
+		bool found = false;
+		JSValue r = CallActorFunction(ctx, self, function, 0, nullptr, &found);
+		const bool result = found && JS_ToBool(ctx, r) > 0;
+		JS_FreeValue(ctx, r);
+		return result;
+	}
+
 	void OnPlayerDestroyed(PlayerController* player)
 	{
 		JSContext* ctx = Context();

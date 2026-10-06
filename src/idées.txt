@@ -1,13 +1,47 @@
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
 
-node editor pour les animations et les IA (jumelés avec le javascript)
-
-editeur d'animations (pour visualiser, ajouter des events a certains endroits par exemple)
-
 gestion de la musique pour les jeux open world
 
-editeur graphique de json
+editeur graphique de json (des qu'on ouvre un fichier json, dans le coin on peut choisir entre l'editeur, et le fichier raw)
+
+assossier un level.xml à un .hrlv (pour qu'ils soient liés)
+
+pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>
 
 collisions qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
 
 plugins comme dans Horizon-Next
+
+Lynxie doit absolument pouvoir chercher sur internet
+
+convertir un sprite 2D en voxels directement dans le monde (genre on place un sprite, on clic droit sur l'actor (dans le level ou dans l'outilner) et on peut cliquer sur convertir en voxels ou un truc comme ca, on choisit quelques options, et ca projete nearest le sprite en voxels (ca choisit parmis la palette de couleur, si la couleur n'existe pas du tout, on crée un type de voxel, etc... fin faut que y'ai un bon rendu)
+
+enlever la fenetre node test
+
+pouvoir selectionner et copier le texte ecrit dans la conversation de lynxie (sans changer le fond ni le style)
+
+rendre plus beau le node editor (en le faisant pas de la meme couleur que le fond par exemple, en ajoutant des icones, des couleurs, etc...
+
+et revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
+
+arrondir un petit peu l'encoche de la title bar
+
+pouvoir selectionner plusieurs actors en meme temps (avec shift)
+
+mettre une selection par glisser (genre clic gauche maintenu de la souris) dans l'outiliner et dans le content browser
+
+afficher l'icone de la classe dans l'outliner (en petit)
+
+povoir creer des dossiers dans l'outiliner (comme dans unreal)
+
+mode simulation (pour play le jeu, mais ne pas posseder l'actor et rester avec la camera et deplacements de l'editeur
+
+
+
+
+HRL:
+trouver pourquoi le color picking marche a moitié
+
+fluides en voxels (dans HRL)
+
+revoir completement le systeme d'eclairage des voxels emissifs pour en autoriser autant qu'on veut (HRL)

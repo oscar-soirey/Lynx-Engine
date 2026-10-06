@@ -9,6 +9,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace lynx
 {
@@ -53,6 +55,37 @@ namespace lynx::scripting
 	 * dans la classe JS et les scripts de `self`.
 	 */
 	bool CallPlayerEvent(Actor* self, const char* function, PlayerController* player);
+
+	/**
+	 * Appelle `function()` (classe JS et scripts de `self`) et retourne sa
+	 * valeur comme booleen (false si elle n'existe pas). Conditions des graphes.
+	 */
+	bool CallActorPredicate(Actor* self, const char* function);
+
+	// ---- Behavior Trees (AIBindings.cpp) -----------------------------------
+
+	enum class AINodeKind { Task, Decorator, Service };
+
+	/** Classe JS "class X extends BTTask / BTDecorator / BTService". */
+	bool IsAIClass(const std::string& name, AINodeKind kind);
+
+	/**
+	 * Instance de la classe JS pour un noeud de l'arbre de `owner`
+	 * (this.owner, this.blackboard, this.params). 0 : classe inconnue.
+	 */
+	uint32_t CreateAINode(AINodeKind kind, const std::string& class_name, Actor* owner,
+	                      const std::vector<std::pair<std::string, std::string>>& params);
+	void DestroyAINode(uint32_t handle);
+
+	/**
+	 * Appelle handle.method(dt). Resultat : 0 succes (true, undefined,
+	 * "success"), 1 echec (false, "failure"), 2 en cours ("running").
+	 * `found` : la methode existe.
+	 */
+	int CallAINode(uint32_t handle, const char* method, float dt, bool* found = nullptr);
+
+	/** Fonction JS de l'acteur comme tache (meme resultat que CallAINode). */
+	int CallActorTask(Actor* self, const char* function, float dt, bool* found = nullptr);
 
 	/** Le joueur va etre detruit : son objet JS ne le designe plus. */
 	void OnPlayerDestroyed(PlayerController* player);

@@ -51,6 +51,12 @@ namespace lynx
 	class Actor;
 
 	/**
+	 * Classes JavaScript qui heritent de `base` ("BTTask", "BTDecorator",
+	 * "BTService", "UserWidget") : listes de l'editeur.
+	 */
+	LYNX_API std::vector<std::string> GetScriptClassesOf(const char* base);
+
+	/**
 	 * Appelle une fonction JS de l'acteur : methode de sa classe JavaScript
 	 * (class Player extends Actor) et fonctions de ses scripts attaches.
 	 * @return true si au moins l'un des deux la definissait.

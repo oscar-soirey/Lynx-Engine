@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Garde : poursuit et attaque le joueur quand il le voit, sinon patrouille. -->
+<BehaviorTree version="1">
+    <Blackboard>
+        <Key name="target" type="actor"/>
+        <Key name="distance" type="float" default="999"/>
+    </Blackboard>
+    <Node id="1" parent="0" type="Root" x="0" y="0"/>
+    <Node id="2" parent="1" type="Selector" x="260" y="0">
+        <Service id="30" type="Script" class="Perception" range="6" interval="0.2"/>
+    </Node>
+    <Node id="3" parent="2" type="Sequence" name="Chase and attack" x="560" y="-140">
+        <Decorator id="20" type="Blackboard" key="target" op="isSet" abort="both"/>
+        <Service id="31" type="DistanceTo" target="target" result="distance" interval="0.2"/>
+    </Node>
+    <Node id="4" parent="3" type="MoveTo" target="target" speed="3" acceptance="1.2" anim_speed_param="speed" x="860" y="-240"/>
+    <Node id="5" parent="3" type="Script" class="Attack" duration="0.4" x="860" y="-140"/>
+    <Node id="6" parent="3" type="Wait" time="0.6" x="860" y="-40"/>
+    <Node id="7" parent="2" type="Script" name="Patrol" class="Patrol" amplitude="3" x="560" y="100"/>
+</BehaviorTree>

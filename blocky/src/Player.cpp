@@ -220,7 +220,9 @@ void Player::ProcessInput()
         select_menu_open_ = false;
         current_player_form_ = selected_character_widget_ - 1;
         lynx::GetEngine()->SetGlobalTimeDilatation(1.f);
-        RemoveSelectCharacterWidgets();
+        //RemoveSelectCharacterWidgets();
+
+
     }
 
     if (select_menu_open_)
@@ -370,10 +372,7 @@ void Player::SetSelectedWidget(int in)
     HRL_SetLabelTintColor(select_character_scene_.Get(in), 0.f, 1.f, 0.f, 1.f);
 }
 
-void Player::RemoveSelectCharacterWidgets()
-{
-    select_character_scene_.Delete();
-}
+
 
 void Player::SetPlayerForm(int in)
 {
@@ -418,5 +417,5 @@ void Player::StartGame()
 
 void Player::EndGame()
 {
-    life_widget_scene_.Delete();
+    //life_widget_scene_.Delete();
 }

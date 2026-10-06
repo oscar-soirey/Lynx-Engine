@@ -4,6 +4,7 @@
 #include <hrl/hrl.h>
 
 #include "GameClasses.h"
+#include "widgets/WidgetScene.h"
 
 
 class Player : public Pawn {
@@ -31,7 +32,6 @@ private:
 	void ProcessInput() override;
 
 	void CreateSelectCharacterWidgets();
-	void RemoveSelectCharacterWidgets();
 
 	lynx::blend_space bs_default{};
 	lynx::animation _Idle{ sprite, "hero/Idle.png", 10 };

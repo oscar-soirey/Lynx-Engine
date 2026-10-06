@@ -18,6 +18,7 @@
 #include "../core/Engine.h"
 #include "../core/Voxels.h"
 #include "../gameplay/Actor.h"
+#include "../gameplay/BehaviorTree.h"
 #include "../gameplay/BoxColliderComponent.h"
 #include "../gameplay/CameraComponent.h"
 #include "../gameplay/Components.h"
@@ -729,6 +730,14 @@ namespace lynx::script_detail
 				 .get("frame", [](JSContext* c, AS& t) { return ToJS(c, t.GetFrame()); })
 				 .get("currentState", [](JSContext* c, AS& t) { return ToJS(c, t.GetCurrentState()); });
 
+				// --- Anim Graph (.animgraph de l'editeur) ---
+				b.field("graph", &AS::graph)
+				 .get("loadedGraph", [](JSContext* c, AS& t) { return ToJS(c, t.GetLoadedGraph()); })
+				 .method("loadGraph", 1, [](JSContext* c, AS& t, Actor&, int argc, JSValueConst* argv) -> JSValue
+				 {
+					 return ToJS(c, t.LoadGraph(Arg<std::string>(c, argc, argv, 0, "")));
+				 });
+
 				// --- Single ---
 				b.method("setAnimation", 4, [](JSContext* c, AS& t, Actor&, int argc, JSValueConst* argv) -> JSValue
 				{
@@ -930,6 +939,12 @@ namespace lynx::script_detail
 					return JS_UNDEFINED;
 				})
 				.method("trigger", 1, [](JSContext* c, AS& t, Actor&, int argc, JSValueConst* argv) -> JSValue
+				{
+					t.SetTrigger(Arg<std::string>(c, argc, argv, 0, ""));
+					return JS_UNDEFINED;
+				})
+				// Meme nom que setFloat / setBool (Anim Graph, editeur).
+				.method("setTrigger", 1, [](JSContext* c, AS& t, Actor&, int argc, JSValueConst* argv) -> JSValue
 				{
 					t.SetTrigger(Arg<std::string>(c, argc, argv, 0, ""));
 					return JS_UNDEFINED;
@@ -1190,6 +1205,32 @@ namespace lynx::script_detail
 			{
 				Binder<LifetimeComponent> b(ctx, "Lifetime");
 				b.field("remaining", &LifetimeComponent::remaining);
+			}
+
+			// ---------------- AI (Behavior Tree) ----------------
+			{
+				using AI = BehaviorTreeComponent;
+				Binder<AI> b(ctx, "AI");
+				b.field("behaviorTree", &AI::behavior_tree)
+				 .field("startOnBegin", &AI::start_on_begin)
+				 .get("running", [](JSContext* c, AI& t) { return ToJS(c, t.IsRunning()); })
+				 .get("loadedTree", [](JSContext* c, AI& t) { return ToJS(c, t.GetLoadedTree()); })
+				 .get("blackboard", [](JSContext* c, AI& t) { return BlackboardObject(c, t.GetOwner()); })
+				 .get("activeNodes", [](JSContext* c, AI& t)
+				 {
+					 JSValue array = JS_NewArray(c);
+					 uint32_t i = 0;
+					 for (const std::string& n : t.GetActiveNodeNames())
+						 JS_SetPropertyUint32(c, array, i++, JS_NewString(c, n.c_str()));
+					 return array;
+				 })
+				 .method("load", 1, [](JSContext* c, AI& t, Actor&, int argc, JSValueConst* argv) -> JSValue
+				 {
+					 return ToJS(c, t.Load(Arg<std::string>(c, argc, argv, 0, "")));
+				 })
+				 .action("start", [](AI& t) { t.Start(); })
+				 .action("stop", [](AI& t) { t.Stop(); })
+				 .action("restart", [](AI& t) { t.Restart(); });
 			}
 		}
 

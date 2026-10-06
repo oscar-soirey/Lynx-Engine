@@ -285,6 +285,16 @@ En C++ : `AddAnimation`, `AddBlendSpace` / `AddBlendSample`, `AddState`, `SetDef
 
 Les animations avancent pendant le jeu, au rythme du temps de jeu (time dilation).
 
+*Anim Graph fait dans l'éditeur* (fichier `.animgraph`, voir plus bas « Anim Graph ») :
+
+```js
+const anim = this.addComponent("AnimationSprite", { graph: "anim/Hero.animgraph" });
+anim.setFloat("speed", Math.abs(this.velocity.x));   // les transitions du graphe suivent
+anim.setTrigger("hurt");                             // = anim.trigger("hurt")
+anim.loadGraph("anim/Boss.animgraph");               // -> false si illisible
+anim.loadedGraph;                                    // "anim/Boss.animgraph"
+```
+
 ### Camera
 
 ```js
@@ -425,3 +435,131 @@ Dans le Widget Editor, mettre `MainMenu` dans *Class* (bouton *Copy JS class* : 
 avec les événements des widgets nommés) : `UI.create("ui/MainMenu.widget")` et
 `lynx::CreateWidget` en C++ créent alors un `MainMenu`. Sinon : `UI.create(path, player, MainMenu)`.
 `new MainMenu()` n'est pas possible (pas de constructeur : initialiser dans `Construct`).
+
+
+## Anim Graph (`.animgraph`)
+
+Machine à états d'un `AnimationSprite`, faite dans l'éditeur (Content Browser > New file >
+*Anim Graph*, double-clic pour l'ouvrir) — une version légère de l'AnimGraph d'Unreal :
+
+- **Parameters** (`float`, `bool`, `int`, `trigger`) : valeurs données par le jeu
+  (`setFloat`, `setBool`, `setInt`, `setTrigger`). Un trigger est consommé par la transition qui l'utilise.
+- **Animations** : planche horizontale (`texture`, `frames`, `frame time`, `loop`) et
+  **notifies** : frame → nom d'une fonction JS de l'acteur.
+- **Blend spaces** : un paramètre float choisit l'animation (échantillon le plus proche en dessous).
+- **States** : jouent une animation ou un blend space ; `next` (à la fin, sans transition),
+  `on enter` / `on exit` (fonctions JS de l'acteur), `interruptible`, `restart on enter`.
+- **Transitions** : glisser la broche d'un état sur un autre. Toutes leurs conditions doivent
+  être vraies : `compare` (`speed > 0.1`), `isTrue`, `isFalse`, `trigger`, `finished`
+  (fin de l'animation), `script` (fonction JS de l'acteur qui retourne `true` / `false`).
+  `Any State` : transitions testées depuis n'importe quel état (blessure, mort...).
+
+Les événements appellent la méthode de la classe JS de l'acteur (ou la fonction d'un script
+attaché) du même nom, et `AnimationSpriteComponent::on_graph_event` en C++ :
+
+```js
+class Hero extends Actor {
+    BeginPlay() { this.anim = this.addComponent("AnimationSprite", { graph: "anim/Hero.animgraph" }); }
+    Update(dt) { this.anim.setFloat("speed", Math.abs(this.velocity.x)); }
+    OnFootstep() { this.getComponent("SoundSource")?.play(); }   // notify de l'animation Run
+    CanAttack() { return this.stamina > 10; }                   // condition "script"
+}
+```
+
+C++ : `sprite.graph = "anim/Hero.animgraph";` (ou `LoadGraph`), puis `SetFloat`, `SetTrigger`...
+
+
+## IA : Behavior Trees (`.bt`)
+
+Arbre de comportement façon Unreal, fait dans l'éditeur (New file > *Behavior Tree*), exécuté
+par le composant **`AI`** de l'acteur :
+
+```js
+class Guard extends Actor {
+    BeginPlay() {
+        this.ai = this.addComponent("AI", { behaviorTree: "ai/Guard.bt" });   // démarre tout seul
+        this.ai.blackboard.set("home", this.position);
+    }
+}
+```
+
+| `AI` | |
+|---|---|
+| `behaviorTree` | asset `.bt` (le changer recharge l'arbre) |
+| `startOnBegin` | démarre au lancement (`true`) |
+| `running`, `activeNodes`, `loadedTree` | état (lecture) |
+| `start()`, `stop()`, `restart()`, `load(asset)` | `stop` envoie `Abort` à la tâche en cours |
+| `blackboard` | mémoire de l'IA (ci-dessous) |
+
+**Exécution** : la racine a un enfant ; un **Selector** essaie ses enfants jusqu'à un succès,
+une **Sequence** les enchaîne jusqu'à un échec. Les enfants s'exécutent **de haut en bas**
+(leur hauteur dans l'éditeur ; le numéro dans le titre donne l'ordre). L'arbre recommence quand
+il se termine.
+
+- **Tâches** : `Wait`, `MoveTo` (vers une clé vecteur ou acteur, utilise le BoxCollider s'il y en
+  a un, peut piloter un paramètre `speed` de l'Anim Graph), `SetValue`, `ClearValue`,
+  `SetAnimParam`, `Log` (`{clé}` = valeur du Blackboard), `CallFunction`, `Script`, `Finish`.
+- **Décorateurs** (conditions / modificateurs d'un nœud) : `Blackboard`, `CallFunction`,
+  `Script`, `Cooldown`, `Loop`, `TimeLimit`, `ForceSuccess`. Option **abort** (comme Unreal) :
+  `self` arrête le nœud quand la condition devient fausse ; `lowerPriority` interrompt ce qui
+  tourne plus bas (dans un Selector) quand elle devient vraie ; `both`.
+- **Services** (tournent à intervalle tant que leur nœud est actif) : `CallFunction`, `Script`,
+  `DistanceTo`, `FindNearest` (acteur le plus proche avec un tag).
+
+### Blackboard
+
+```js
+const bb = this.ai.blackboard;          // ou this.blackboard dans un nœud JS
+bb.set("target", Level.find("player")); // acteur, nombre, bool, texte, vecteur {x, y, z}
+bb.get("target");                       // undefined si absent ; bb.get("hp", 100) : valeur par défaut
+bb.has("target");  bb.clear("target");  bb.clear();  bb.keys();
+```
+
+Les clés déclarées dans l'éditeur ont un type (`int` arrondit, `bool`...) et une valeur par
+défaut. Un acteur détruit n'est plus « set ».
+
+### Nœuds écrits en JavaScript
+
+N'importe quel `.js` de `assets/` ; le bouton **JS** des Details copie un squelette.
+Valeur de retour : `true` / `undefined` / `BT.Success` = succès, `false` / `BT.Failure` = échec,
+`BT.Running` = pas fini (la tâche est rappelée avec `Tick`).
+
+```js
+class Attack extends BTTask {            // nœud "Script", Class = Attack
+    Execute(dt) {                        // au démarrage
+        this.owner.getComponent("AnimationSprite").setTrigger("attack");
+        this.t = 0;
+        return BT.Running;
+    }
+    Tick(dt) { return (this.t += dt) > this.params.duration ? BT.Success : BT.Running; }
+    Abort() { }                          // interrompue (abort d'un décorateur, stop())
+}
+
+class CanSeePlayer extends BTDecorator {
+    Check() {
+        const p = Level.find("player");
+        return p && Math.abs(p.position.x - this.owner.position.x) < 8;
+    }
+}
+
+class Perception extends BTService {
+    Activated() { }  Tick(dt) { /* ... */ }  Deactivated() { }
+}
+```
+
+Dans un nœud : `this.owner` (l'acteur), `this.blackboard`, `this.params` (les autres attributs
+du nœud dans le fichier : `<Node type="Script" class="Attack" duration="0.4"/>` →
+`this.params.duration === 0.4`), `this.name` (la classe). Une instance par nœud et par acteur.
+
+`CallFunction` (tâche, décorateur, service) appelle simplement une méthode de l'acteur :
+`Heartbeat(dt)` → même valeur de retour qu'une tâche.
+
+En C++ : `actor->AddComponent<lynx::BehaviorTreeComponent>().behavior_tree = "ai/Guard.bt";`
+puis `GetBlackboard().SetActor("target", player)`.
+
+### Debug
+
+Pendant le jeu, l'éditeur du `.bt` / `.animgraph` ouvert met en vert les nœuds actifs (ou l'état
+joué) et affiche les valeurs du Blackboard / des paramètres en direct ; la liste *Debug* de la
+barre d'outils choisit l'acteur.
+

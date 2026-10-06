@@ -85,4 +85,20 @@ namespace lynx::script_detail
 	void ForgetWidgetClasses(JSContext* ctx);
 	bool IsWidgetClassConstructor(JSContext* ctx, JSValueConst value);
 	void RegisterWidgetClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file);
+
+	// ---- AIBindings.cpp (Behavior Trees) ------------------------------------
+
+	/** BTTask, BTDecorator, BTService, BT.*, Blackboard. */
+	void RegisterAIGlobals(JSContext* ctx);
+
+	/** Libere les noeuds JS et les classes (avant la fin du runtime). */
+	void ShutdownAIBindings(JSContext* ctx);
+
+	/** Objet JS Blackboard de l'acteur (memoire de son composant AI), JS_NULL si nullptr. */
+	JSValue BlackboardObject(JSContext* ctx, Actor* actor);
+
+	/** Classes JS de noeuds (class X extends BTTask...) : chargement des fichiers. */
+	void ForgetAIClasses(JSContext* ctx);
+	bool IsAIClassConstructor(JSContext* ctx, JSValueConst value);
+	void RegisterAIClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file);
 }

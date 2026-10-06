@@ -1,5 +1,6 @@
 .build/
 .idea/
 build/
+build-release/
 blocky/
 jeu.txt
