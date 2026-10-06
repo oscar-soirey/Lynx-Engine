@@ -2,11 +2,11 @@ obligé:
 
 projets sans C++, ou on ne compile pas, on charge tout depuis une dll déja buildée
 
-publier le moteur sur microsoft store/steam/et autres
-
 parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
-plugins téléchargeables en ligne dans l'editeur
+plugins téléchargeables en ligne dans le launcher
+
+revoir la toolbar parcque ca commence a etre le bordel, mettre les plugins dans la section plugins des options, et enlever le bouton plugin
 
 
 
@@ -27,11 +27,6 @@ kiffe:
 component d'objets 3D
 
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
-
-plugins C++ comme dans Horizon-Next qui peuvent modifier l'editeur, ajouter des classes, des components, etc...
-plugins:
--histoire et dialogue
--cine camera
 
 editeur de post process
 

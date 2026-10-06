@@ -27,7 +27,7 @@
 // The engine API (<Lynx.h>) is available as in the runtime module.
 // =============================================================================
 
-#include <imgui.h>
+#include <imgui/imgui.h>
 
 namespace lynx
 {
