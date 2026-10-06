@@ -79,6 +79,12 @@ namespace lynx
 		/** Id HRL de la camera. */
 		uint32_t GetCameraId() const { return camera_; }
 
+		/**
+		 * Position actuelle de la camera (suivi, retard et lissage compris,
+		 * sans le camera shake). Sert aux blends entre cameras (plugins).
+		 */
+		vec3 GetCurrentLocation() const { return current_; }
+
 	protected:
 		void OnAttach() override;
 		void BeginPlay() override;

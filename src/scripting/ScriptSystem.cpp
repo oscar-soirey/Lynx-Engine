@@ -1072,6 +1072,90 @@ namespace lynx
 			JS_SetPropertyStr(ctx, obj, name, JS_NewCFunctionMagic(ctx, fn, name, length, JS_CFUNC_generic_magic, magic));
 		}
 
+		// ---- Fonctions natives des plugins (RegisterScriptFunction) ----------
+
+		struct NativeFunction
+		{
+			std::string object;
+			std::string name;
+			ScriptFunction fn;
+		};
+
+		// Hors de `g` : survit a un redemarrage du runtime JS.
+		std::vector<NativeFunction>& NativeFunctions()
+		{
+			static std::vector<NativeFunction> list;
+			return list;
+		}
+
+		std::vector<std::pair<std::string, std::string>>& Preludes()
+		{
+			static std::vector<std::pair<std::string, std::string>> list;
+			return list;
+		}
+
+		InterfaceArg JSToInterfaceArg(JSContext* ctx, JSValueConst v);
+		JSValue InterfaceArgToJS(JSContext* ctx, const InterfaceArg& arg);
+
+		JSValue CallNativeFunction(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, int, JSValue* data)
+		{
+			int32_t index = -1;
+			JS_ToInt32(ctx, &index, data[0]);
+			auto& list = NativeFunctions();
+			if (index < 0 || index >= static_cast<int32_t>(list.size()) || !list[index].fn)
+				return JS_UNDEFINED;
+
+			InterfaceArgs args;
+			args.reserve(static_cast<size_t>(argc));
+			for (int i = 0; i < argc; ++i)
+				args.push_back(JSToInterfaceArg(ctx, argv[i]));
+
+			const ScriptFunction fn = list[index].fn;   // the list may grow during the call
+			return InterfaceArgToJS(ctx, fn(args));
+		}
+
+		void InstallNativeFunction(JSContext* ctx, int index)
+		{
+			const NativeFunction& nf = NativeFunctions()[index];
+			JSValue global = JS_GetGlobalObject(ctx);
+			JSValue target = JS_DupValue(ctx, global);
+
+			if (!nf.object.empty())
+			{
+				JS_FreeValue(ctx, target);
+				target = JS_GetPropertyStr(ctx, global, nf.object.c_str());
+				if (!JS_IsObject(target))
+				{
+					JS_FreeValue(ctx, target);
+					target = JS_NewObject(ctx);
+					JS_SetPropertyStr(ctx, global, nf.object.c_str(), JS_DupValue(ctx, target));
+				}
+			}
+
+			JSValue data = JS_NewInt32(ctx, index);
+			JSValue fn = JS_NewCFunctionData(ctx, CallNativeFunction, 0, 0, 1, &data);
+			JS_SetPropertyStr(ctx, target, nf.name.c_str(), fn);
+			JS_FreeValue(ctx, data);
+			JS_FreeValue(ctx, target);
+			JS_FreeValue(ctx, global);
+		}
+
+		void RunPrelude(JSContext* ctx, const std::string& name, const std::string& code)
+		{
+			JSValue r = JS_Eval(ctx, code.c_str(), code.size(), name.c_str(), JS_EVAL_TYPE_GLOBAL);
+			if (JS_IsException(r))
+				LogException(ctx, name);
+			JS_FreeValue(ctx, r);
+		}
+
+		void InstallPluginScripting(JSContext* ctx)
+		{
+			for (int i = 0; i < static_cast<int>(NativeFunctions().size()); ++i)
+				InstallNativeFunction(ctx, i);
+			for (const auto& [name, code] : Preludes())
+				RunPrelude(ctx, name, code);
+		}
+
 		// Interfaces (definies plus bas)
 		JSValue ActorImplements(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 		JSValue ActorSend(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
@@ -2390,6 +2474,7 @@ namespace lynx
 			RegisterGlobals(g->ctx);
 			RegisterActorConstructor(g->ctx);
 			RegisterInterfaceGlobals(g->ctx);
+			InstallPluginScripting(g->ctx);
 		}
 
 
@@ -3223,6 +3308,41 @@ namespace lynx
 	// ========================================================================
 	// API publique
 	// ========================================================================
+
+	void RegisterScriptFunction(const std::string& object, const std::string& name, ScriptFunction fn)
+	{
+		auto& list = NativeFunctions();
+		int index = -1;
+		for (int i = 0; i < static_cast<int>(list.size()); ++i)
+			if (list[i].object == object && list[i].name == name)
+				index = i;
+
+		if (index < 0)
+		{
+			list.push_back({ object, name, std::move(fn) });
+			index = static_cast<int>(list.size()) - 1;
+		}
+		else
+		{
+			list[index].fn = std::move(fn);
+		}
+
+		if (g)
+			InstallNativeFunction(g->ctx, index);
+	}
+
+	void RegisterScriptPrelude(const std::string& name, const std::string& code)
+	{
+		auto& list = Preludes();
+		bool replaced = false;
+		for (auto& [n, c] : list)
+			if (n == name) { c = code; replaced = true; }
+		if (!replaced)
+			list.emplace_back(name, code);
+
+		if (g)
+			RunPrelude(g->ctx, name, code);
+	}
 
 	void ReloadScripts()
 	{

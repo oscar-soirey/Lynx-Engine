@@ -181,6 +181,12 @@ namespace lynx::editor::project_templates
 					t.description = info["description"].get<std::string>();
 				if (info.contains("order") && info["order"].is_number_integer())
 					t.order = info["order"].get<int>();
+				if (info.contains("no_cpp") && info["no_cpp"].is_boolean())
+					t.no_cpp = info["no_cpp"].get<bool>();
+				if (info.contains("plugins") && info["plugins"].is_array())
+					for (const auto& p : info["plugins"])
+						if (p.is_string())
+							t.plugins.push_back(p.get<std::string>());
 			}
 
 			templates.push_back(std::move(t));
@@ -307,9 +313,37 @@ namespace lynx::editor::project_templates
 		    !CopyTree(tmpl.folder, root, replacements, error))
 			return false;
 
+		// Without C++ : no build files (the engine's generic game DLL is used).
+		if (tmpl.no_cpp)
+		{
+			for (const char* file : { "CMakeLists.txt", "Build.bat", "build.bat", "CMakePresets.json" })
+				fs::remove(root / file, ec);
+			fs::remove_all(root / "src", ec);
+			fs::remove_all(root / "Source", ec);
+			for (const auto& entry : fs::directory_iterator(root, ec))
+			{
+				std::string ext = entry.path().extension().string();
+				std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				std::error_code e;
+				if (entry.is_regular_file(e) && (ext == ".cpp" || ext == ".h" || ext == ".hpp" || ext == ".inl"))
+					fs::remove(entry.path(), e);
+			}
+		}
+
+		// Plugins enabled from the start.
+		if (!tmpl.plugins.empty())
+		{
+			std::ofstream plugins(root / "plugins.json", std::ios::binary | std::ios::trunc);
+			plugins << "{";
+			for (size_t i = 0; i < tmpl.plugins.size(); ++i)
+				plugins << (i ? ", " : " ") << "\"" << tmpl.plugins[i] << "\": true";
+			plugins << " }\n";
+		}
+
 		// What the project browser checks (InspectProject).
 		fs::create_directories(root / "assets", ec);
-		fs::create_directories(root / "build", ec);
+		if (!tmpl.no_cpp)
+			fs::create_directories(root / "build", ec);
 
 		std::cout << "[PROJECT] Created \"" << title << "\" (" << tmpl.name << ") in " << root.string() << "\n";
 

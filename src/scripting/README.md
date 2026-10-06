@@ -147,6 +147,12 @@ class Coin extends Actor {
 `PostProcess.get("bloomStrength")`, `PostProcess.reset()`, `PostProcess.params()`.
 Les valeurs de départ viennent de `assets/postprocess.json` (fenêtre **Post Process** de l'éditeur).
 
+## Fonctions des plugins
+
+Les plugins (C++, voir `src/plugins/README.md`) ajoutent leurs objets JS
+(`lynx::RegisterScriptFunction`) : avec les plugins livrés activés, `Dialogue`, `Story`, `Quest`
+(plugin Dialogue) et `Cine`, `Sequence` (plugin CineCamera).
+
 ## Attacher un script
 
 - Niveau XML : `<Player object_id_="p1" scripts="scripts/Player.js;scripts/Blink.js"/>`

@@ -62,6 +62,7 @@ namespace content_browser_actions
 
         NameAction name_action = NameAction::None;
         NewFileKind new_file_kind = NewFileKind::Text;
+        int plugin_file_kind = -1;             // index in plugins::GetNewFileKinds(), -1 : none
         stdfs::path name_folder;       // where the new entry goes
         stdfs::path rename_target;
         char name[256] = {};
@@ -504,6 +505,8 @@ namespace content_browser_actions
             content_browser_current_path = path;
         else if (IsLevel(path))
             OpenLevel(path);
+        else if (lynx::editor::plugins::CanOpen(path) && lynx::editor::plugins::OpenFile(path))
+            return;
         else if (lynx::editor::widget_editor::CanOpen(path))
             lynx::editor::widget_editor::Open(path);
         else if (lynx::editor::graph_editors::CanOpen(path))
@@ -523,6 +526,7 @@ namespace content_browser_actions
     {
         state.name_action = action;
         state.new_file_kind = kind;
+        state.plugin_file_kind = -1;
         state.name_folder = folder;
         state.name_error.clear();
 
@@ -630,8 +634,22 @@ namespace content_browser_actions
                 return false;
             }
 
-            out << FileTemplate(state.new_file_kind, destination.stem().string());
+            if (state.plugin_file_kind >= 0 &&
+                state.plugin_file_kind < static_cast<int>(lynx::editor::plugins::GetNewFileKinds().size()))
+            {
+                // File kind of a plugin : its template, {{NAME}} = the name.
+                std::string text = lynx::editor::plugins::GetNewFileKinds()[state.plugin_file_kind].content;
+                const std::string stem = destination.stem().string();
+                for (size_t pos = 0; (pos = text.find("{{NAME}}", pos)) != std::string::npos; pos += stem.size())
+                    text.replace(pos, 8, stem);
+                out << text;
+            }
+            else
+            {
+                out << FileTemplate(state.new_file_kind, destination.stem().string());
+            }
         }
+        state.plugin_file_kind = -1;
 
         SelectOnly(destination);
 
@@ -647,6 +665,10 @@ namespace content_browser_actions
         else if (lynx::editor::graph_editors::CanOpen(destination))
         {
             lynx::editor::graph_editors::Open(destination);
+        }
+        else if (lynx::editor::plugins::CanOpen(destination))
+        {
+            lynx::editor::plugins::OpenFile(destination);
         }
 
         return true;
@@ -853,21 +875,205 @@ namespace content_browser_actions
     // UI
     // -------------------------------------------------------------------------
 
-    static void NewFileMenu(const stdfs::path& folder)
-    {
-        if (ImGui::MenuItem("New folder"))
-            BeginNew(NameAction::NewFolder, NewFileKind::Text, folder);
+    // -------------------------------------------------------------------------
+    // "New" panel (Unreal-like) : sections, big icons, a description per item,
+    // a search field. Used by the right click on the empty grid (directly)
+    // and on a folder (sub menu "New").
+    // -------------------------------------------------------------------------
 
-        if (ImGui::BeginMenu("New file"))
+    struct NewEntry
+    {
+        const char* section;
+        std::string label;
+        std::string description;
+        lynx::editor::file_icons::Kind icon;
+        std::function<void()> create;
+    };
+
+    static const char* KindSection(NewFileKind kind)
+    {
+        switch (kind)
         {
-            for (int i = 0; i < static_cast<int>(NewFileKind::Count); ++i)
+        case NewFileKind::JavaScriptClass:
+        case NewFileKind::JavaScriptScript: return "Scripting";
+        case NewFileKind::Level:            return "World";
+        case NewFileKind::Widget:           return "User Interface";
+        case NewFileKind::AnimGraph:        return "Animation";
+        case NewFileKind::BehaviorTree:     return "Artificial Intelligence";
+        default:                            return "Data";
+        }
+    }
+
+    static const char* KindDescription(NewFileKind kind)
+    {
+        switch (kind)
+        {
+        case NewFileKind::Text:             return "Plain text file : notes, data.";
+        case NewFileKind::JavaScriptClass:  return "A new actor class (class X extends Actor).";
+        case NewFileKind::JavaScriptScript: return "A behaviour to attach to any actor.";
+        case NewFileKind::Level:            return "A level and its voxel world (.hrlv).";
+        case NewFileKind::Json:             return "Structured data read by your scripts.";
+        case NewFileKind::Widget:           return "A user interface (menu, HUD), Widget Editor.";
+        case NewFileKind::AnimGraph:        return "Sprite animation states and transitions.";
+        case NewFileKind::BehaviorTree:     return "Decisions of an AI : tasks, decorators.";
+        default:                            return "";
+        }
+    }
+
+    static lynx::editor::file_icons::Kind IconForExtension(const std::string& extension)
+    {
+        return lynx::editor::file_icons::ForFile(stdfs::path("new" + extension), false);
+    }
+
+    static std::vector<NewEntry> NewEntries(const stdfs::path& folder)
+    {
+        using lynx::editor::file_icons::Kind;
+        std::vector<NewEntry> entries;
+
+        entries.push_back({ "Folder", "Folder", "Organize the assets.", Kind::Folder,
+                            [folder]() { BeginNew(NameAction::NewFolder, NewFileKind::Text, folder); } });
+
+        // Order of the sections : World, Scripting, User Interface, Animation, AI, Data.
+        const NewFileKind order[] = {
+            NewFileKind::Level, NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript, NewFileKind::Widget,
+            NewFileKind::AnimGraph, NewFileKind::BehaviorTree, NewFileKind::Json, NewFileKind::Text,
+        };
+        for (NewFileKind kind : order)
+        {
+            const FileKindInfo& info = kFileKinds[static_cast<int>(kind)];
+            Kind icon = IconForExtension(info.extension);
+            if (kind == NewFileKind::JavaScriptClass || kind == NewFileKind::JavaScriptScript)
+                icon = Kind::Script;
+            entries.push_back({ KindSection(kind), info.label, KindDescription(kind), icon,
+                                [folder, kind]() { BeginNew(NameAction::NewFile, kind, folder); } });
+        }
+
+        // File kinds of the plugins (.dialogue, .sequence...) : one section per plugin.
+        const auto& plugin_kinds = lynx::editor::plugins::GetNewFileKinds();
+        for (int i = 0; i < static_cast<int>(plugin_kinds.size()); ++i)
+        {
+            const auto& pk = plugin_kinds[i];
+            entries.push_back({ pk.plugin.c_str(), pk.label, "Plugin " + pk.plugin + " (" + pk.extension + ")",
+                                IconForExtension(pk.extension),
+                                [folder, i]()
+                                {
+                                    const auto& kinds = lynx::editor::plugins::GetNewFileKinds();
+                                    BeginNew(NameAction::NewFile, NewFileKind::Text, folder);
+                                    state.plugin_file_kind = i;
+                                    const stdfs::path unique = MakeUniqueDestinationPath(
+                                        folder / (kinds[i].default_name + kinds[i].extension));
+                                    std::snprintf(state.name, sizeof(state.name), "%s", unique.filename().string().c_str());
+                                } });
+        }
+        return entries;
+    }
+
+    static std::string LowerText(std::string text)
+    {
+        std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    }
+
+    // Section title : small capitals and a line, like Unreal.
+    static void NewSectionHeader(const char* title)
+    {
+        ImGui::Spacing();
+        const std::string upper = [&] { std::string t = title; for (char& c : t) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); return t; }();
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.66f, 1.f), "%s", upper.c_str());
+        const float text_w = ImGui::CalcTextSize(upper.c_str()).x;
+        const float y = pos.y + ImGui::GetTextLineHeight() * 0.5f;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(pos.x + text_w + 8.f, y), ImVec2(pos.x + width, y),
+                                            ImGui::GetColorU32(ImGuiCol_Separator));
+    }
+
+    // One row : big icon, name, description. true : clicked.
+    static bool NewEntryRow(const NewEntry& entry, int index)
+    {
+        const float icon = 32.f;
+        const float pad = 6.f;
+        const float line = ImGui::GetTextLineHeight();
+        const float height = std::max(icon, line * 2.f + 2.f) + pad * 2.f;
+        const float width = std::max(360.f, ImGui::GetContentRegionAvail().x);
+
+        ImGui::PushID(index);
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        const bool clicked = ImGui::InvisibleButton("##new", ImVec2(width, height));
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        if (hovered)
+            dl->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), ImGui::GetColorU32(ImGuiCol_HeaderHovered), 4.f);
+
+        // Icon on a small dark tile.
+        const ImVec2 tile(pos.x + pad, pos.y + (height - icon) * 0.5f);
+        dl->AddRectFilled(ImVec2(tile.x - 2.f, tile.y - 2.f), ImVec2(tile.x + icon + 2.f, tile.y + icon + 2.f),
+                          IM_COL32(20, 20, 24, 200), 4.f);
+        lynx::editor::file_icons::DrawAt(dl, entry.icon, tile, icon);
+
+        const float text_x = pos.x + pad + icon + 12.f;
+        const float text_y = pos.y + (height - line * 2.f - 2.f) * 0.5f;
+        dl->AddText(ImVec2(text_x, text_y), ImGui::GetColorU32(ImGuiCol_Text), entry.label.c_str());
+        dl->AddText(ImVec2(text_x, text_y + line + 2.f), ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                    entry.description.c_str());
+        return clicked;
+    }
+
+    // The panel itself (inside a popup or a menu).
+    static void NewFilePanel(const stdfs::path& folder)
+    {
+        static char filter[64] = "";
+        if (ImGui::IsWindowAppearing())
+        {
+            filter[0] = '\0';
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(std::max(360.f, ImGui::GetContentRegionAvail().x));
+        ImGui::InputTextWithHint("##newsearch", "Search a type of asset...", filter, sizeof(filter));
+
+        const std::string needle = LowerText(filter);
+        const std::vector<NewEntry> entries = NewEntries(folder);
+        std::string section;
+        int shown = 0;
+
+        for (int i = 0; i < static_cast<int>(entries.size()); ++i)
+        {
+            const NewEntry& entry = entries[i];
+            if (!needle.empty() &&
+                LowerText(entry.label).find(needle) == std::string::npos &&
+                LowerText(entry.description).find(needle) == std::string::npos &&
+                LowerText(entry.section).find(needle) == std::string::npos)
+                continue;
+
+            if (section != entry.section)
             {
-                if (ImGui::MenuItem(kFileKinds[i].label))
-                    BeginNew(NameAction::NewFile, static_cast<NewFileKind>(i), folder);
+                section = entry.section;
+                NewSectionHeader(entry.section);
             }
 
+            if (NewEntryRow(entry, i))
+            {
+                entry.create();
+                ImGui::CloseCurrentPopup();
+            }
+            ++shown;
+        }
+
+        if (shown == 0)
+            ImGui::TextDisabled("Nothing matches \"%s\".", filter);
+    }
+
+    static void NewFileMenu(const stdfs::path& folder)
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.f, 10.f));
+        if (ImGui::BeginMenu("New..."))
+        {
+            NewFilePanel(folder);
             ImGui::EndMenu();
         }
+        ImGui::PopStyleVar();
     }
 
     // Right click menu of one item (call right after the item).
@@ -958,7 +1164,9 @@ namespace content_browser_actions
                 ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
             return;
 
-        NewFileMenu(content_browser_current_path);
+        // Unreal-like : the "Add" panel right in the menu.
+        NewSectionHeader("Add to this folder");
+        NewFilePanel(content_browser_current_path);
 
         ImGui::Separator();
 

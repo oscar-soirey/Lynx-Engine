@@ -7,7 +7,8 @@
 // from Lynx/templates at build time). A new project = templates/_common/ then
 // templates/<id>/ on top of it (same path : the template's file wins).
 //
-//   templates/<id>/template.json   { "name": ..., "description": ..., "order": 1 }
+//   templates/<id>/template.json   { "name": ..., "description": ..., "order": 1,
+//                                    "no_cpp": false, "plugins": [ "Dialogue" ] }
 //
 // In text files (and file names), these words are replaced :
 //   {{PROJECT_NAME}}    identifier : CMake target, DLL name   (ex : MyGame)
@@ -31,6 +32,17 @@ namespace lynx::editor::project_templates
 		std::string description;
 		int order = 100;
 		std::filesystem::path folder;
+
+		/**
+		 * "no_cpp": true in template.json : project without C++. The build
+		 * files of _common (CMakeLists.txt, Build.bat, src/, *.cpp / *.h at
+		 * the root) are not copied : the editor loads the engine's generic
+		 * game DLL and never compiles (GameProject::script_only).
+		 */
+		bool no_cpp = false;
+
+		/** "plugins": [ "Dialogue" ] : enabled in the new project (plugins.json). */
+		std::vector<std::string> plugins;
 	};
 
 	// <editor>/templates

@@ -2,6 +2,7 @@
 
 #include "GameBuild.h"
 #include "../host/GameProject.h"
+#include "../core/Plugins.h"
 
 #include <imgui/imgui.h>
 
@@ -703,9 +704,16 @@ namespace lynx::editor::ship_game
 				return fail("icon : " + error);
 
 			const auto modules = host::FindGameModules(root / "build", 1);
-			if (modules.empty())
-				return fail("no game DLL in build/ (the build failed ?)");
-			const fs::path game_dll = modules.front();
+			fs::path game_dll = modules.empty() ? fs::path() : modules.front();
+			if (game_dll.empty())
+			{
+				// Project without C++ : the generic game DLL of the engine.
+				const fs::path script_game = engine_dir / "scriptgame" / "LynxScriptGame.dll";
+				if (!host::CanBuildProject(root) && fs::is_regular_file(script_game, ec))
+					game_dll = script_game;
+				else
+					return fail("no game DLL in build/ (the build failed ?)");
+			}
 
 			fs::create_directories(output, ec);
 			if (!fs::is_directory(output, ec))
@@ -779,6 +787,51 @@ namespace lynx::editor::ship_game
 
 			if (fs::is_regular_file(root / "input.json", ec) && !CopyInto(root / "input.json", output, error))
 				return fail(error);
+
+			// 4. Plugins : the runtime module (+ plugin.json, assets/) of every
+			//    enabled plugin -> <game>/plugins/<Name>/, and a plugins.json
+			//    that enables them. The editor modules stay behind.
+			{
+				Status("Copying the plugins...");
+				fs::remove_all(output / "plugins", ec);
+				std::vector<std::string> enabled;
+				int plugin_count = 0;
+				for (const lynx::plugins::PluginInfo& p : lynx::plugins::GetPlugins())
+				{
+					if (!p.enabled || p.runtime_dll.empty())
+						continue;
+					if (!fs::is_regular_file(p.runtime_dll, ec))
+					{
+						Log("Warning : plugin " + p.name + " not built, not shipped (" + ToUtf8(p.runtime_dll) + ")");
+						continue;
+					}
+					const fs::path dest = output / "plugins" / FromUtf8(p.name);
+					const fs::path dll_rel = p.runtime_dll.lexically_relative(p.folder);
+					fs::create_directories(dest / dll_rel.parent_path(), ec);
+					fs::copy_file(p.runtime_dll, dest / dll_rel, fs::copy_options::overwrite_existing, ec);
+					if (ec)
+						return fail("could not copy the plugin " + p.name + " : " + ec.message());
+
+					// plugin.json without the editor module.
+					{
+						std::ofstream json(dest / "plugin.json", std::ios::trunc);
+						json << "{\n  \"name\": \"" << p.name << "\",\n  \"version\": \"" << p.version
+						     << "\",\n  \"runtime\": \"" << dll_rel.generic_string() << "\"\n}\n";
+					}
+					if (fs::is_directory(p.folder / "assets", ec))
+						fs::copy(p.folder / "assets", dest / "assets",
+						         fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+					enabled.push_back(p.name);
+					++plugin_count;
+				}
+
+				std::ofstream settings(output / "plugins.json", std::ios::trunc);
+				settings << "{";
+				for (size_t i = 0; i < enabled.size(); ++i)
+					settings << (i ? ", " : " ") << "\"" << enabled[i] << "\": true";
+				settings << " }\n";
+				Log(std::to_string(plugin_count) + " plugin(s)");
+			}
 
 			// An old assets.pak would be read instead of nothing : removed.
 			fs::remove(output / "assets.pak", ec);
@@ -1058,7 +1111,8 @@ namespace lynx::editor::ship_game
 				save_level();
 			Log("Shipping " + SafeFileName(g_game_name) + " to " + g_output);
 
-			if (g_compile)
+			// Nothing to compile in a project without C++.
+			if (g_compile && host::CanBuildProject(g_root))
 			{
 				Status("Compiling the game...");
 				g_build_started = false;

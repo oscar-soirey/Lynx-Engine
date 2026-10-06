@@ -10,6 +10,7 @@
 #include "Filesystem.h"
 #include "Profiler.h"
 #include "Level.h"
+#include "Plugins.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/EngineActors.h"
 #include "../gameplay/PlayerController.h"
@@ -105,6 +106,9 @@ namespace lynx
 		// ========================================================
 
 		const float game_dt = dt * GetGlobalTimeDilatation();
+
+		// Plugins : every frame (game time ; also in the editor, not playing).
+		plugins::Tick(game_dt, game_tick_enabled_);
 
 
 		// ========================================================
@@ -248,10 +252,17 @@ namespace lynx
 
 		// apres StartGame : les composants voient les acteurs deja initialises
 		ecs::BeginPlay();
+
+		// Plugins (LynxGame_OnGameStart of their runtime modules).
+		plugins::OnGameStart();
 	}
 
 	void Engine::EndGame()
 	{
+		// Plugins first, while the game is still entire.
+		if (game_tick_enabled_)
+			plugins::OnGameEnd();
+
 		game_tick_enabled_ = false;
 
 		// The players release their actors while the game is still entire.
@@ -494,6 +505,8 @@ namespace lynx
 
 		// The sprites of the loaded actors must be drawn at once.
 		RequestRenderRefresh();
+
+		plugins::OnLevelLoaded();
 		return current_level_;
 	}
 

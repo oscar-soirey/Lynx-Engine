@@ -62,3 +62,6 @@ set_target_properties(Blocky PROPERTIES
 	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/$<0:>"
 	ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
 )
+
+# Plugin MyPlugin (created by the editor)
+add_subdirectory(plugins/MyPlugin)

@@ -253,6 +253,15 @@ static std::filesystem::path FindGameModule(const std::filesystem::path& project
     if (modules.empty())
         modules = lynx::host::FindGameModules(project_root / "build", 1);
 
+    // Project without C++ : the generic game DLL of the engine.
+    if (modules.empty())
+    {
+        std::error_code error;
+        const std::filesystem::path script_game = lynx::host::GetScriptGameModule();
+        if (std::filesystem::is_regular_file(script_game, error))
+            return script_game;
+    }
+
     return modules.empty() ? std::filesystem::path() : modules.front();
 }
 
@@ -370,6 +379,18 @@ int main(int argc, char** argv)
 
     gameModule.RegisterFactory();
     gameHooks.Load(gameModule);
+
+    // Plugins : runtime modules only. Shipped game : <game>/plugins (copied
+    // by Ship Game with a plugins.json that enables them) ; otherwise the
+    // engine's plugins and the project's, enabled in <project>/plugins.json.
+    {
+        const std::filesystem::path exe_dir = lynx::host::GetEditorDirectory();
+        if (shipped)
+            lynx::plugins::Discover(exe_dir / "plugins", {}, exe_dir);
+        else
+            lynx::plugins::Discover(exe_dir / "plugins", project_root / "plugins", project_root);
+        lynx::plugins::LoadRuntimeModules();
+    }
 
     lynx::SetMasterVolume(
         appSettings.masterVolume
@@ -536,6 +557,7 @@ int main(int argc, char** argv)
     // The game registers its voxel events...
     if (gameHooks.setup_scene)
         gameHooks.setup_scene(scene);
+    lynx::plugins::SetupScene(scene);
 
 
     engine->CreateLevel(
@@ -656,6 +678,7 @@ int main(int argc, char** argv)
     // The module needs a live engine to invalidate its actors / factory.
     gameHooks.Clear();
     gameModule.Unload();
+    lynx::plugins::UnloadAll();
 
     lynx::Engine::Destroy();
 

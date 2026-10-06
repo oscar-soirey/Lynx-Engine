@@ -39,6 +39,7 @@ add_library(Lynx SHARED
 		src/core/Filesystem.cpp
 		src/core/Level.cpp
 		src/core/PostProcess.cpp
+		src/core/Plugins.cpp
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
 		src/core/Profiler.cpp
@@ -153,6 +154,7 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/EditorOptions.cpp
 		src/editor/ExternalIde.cpp
 		src/editor/ShellIntegration.cpp
+		src/editor/EditorPlugins.cpp
 		src/editor/ProjectTemplates.cpp
 		src/editor/LynxieIcon.cpp
 		src/editor/EditorIcons.cpp
@@ -231,6 +233,38 @@ add_custom_command(TARGET LynxEditor POST_BUILD
 		COMMENT "Copying the project templates"
 )
 
+
+
+## Generic game DLL : projects without C++ (see src/host/ScriptGame.cpp)
+# <editor>/scriptgame/LynxScriptGame.dll (a sub folder : never taken for the
+# game DLL of another project, nor copied by Ship Game unless needed).
+
+add_library(LynxScriptGame SHARED src/host/ScriptGame.cpp)
+target_link_libraries(LynxScriptGame PRIVATE Lynx)
+set_target_properties(LynxScriptGame PROPERTIES
+		PREFIX ""
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/scriptgame")
+add_dependencies(LynxEditor LynxScriptGame)
+
+
+## Plugins shipped with the engine : <editor>/plugins/<Name>/ (plugin.json + bin/)
+# Off by default in a project (Plugins window, <project>/plugins.json).
+
+set(LYNX_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(LYNX_ENGINE_TARGET Lynx)
+set(LYNX_HRL_LIB "${HRL_LIB}")
+include(cmake/LynxPlugin.cmake)
+
+foreach(LYNX_PLUGIN_NAME Dialogue CineCamera)
+	add_subdirectory(plugins/${LYNX_PLUGIN_NAME})
+	add_dependencies(LynxEditor ${LYNX_PLUGIN_NAME} ${LYNX_PLUGIN_NAME}.Editor)
+endforeach()
+
+# Game projects : include("${Lynx_DIR}/LynxPlugin.cmake") (after find_package(Lynx)).
+file(WRITE "${CMAKE_BINARY_DIR}/LynxPlugin.cmake"
+		"set(LYNX_ROOT_DIR \"${CMAKE_CURRENT_SOURCE_DIR}\")\n"
+		"set(LYNX_HRL_LIB \"${HRL_LIB}\")\n"
+		"include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxPlugin.cmake\")\n")
 
 
 ## Lynx Runtime (engine executable : plays a project without the editor)

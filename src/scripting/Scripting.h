@@ -14,6 +14,9 @@
 #include <vector>
 
 #include "../core/Common.h"
+#include "../gameplay/Interface.h"   // InterfaceArg
+
+#include <functional>
 
 namespace lynx
 {
@@ -62,4 +65,31 @@ namespace lynx
 	 * @return true si au moins l'un des deux la definissait.
 	 */
 	LYNX_API bool CallScriptFunction(Actor* actor, const char* name, const std::vector<double>& args = {});
+
+	// ------------------------------------------------------------------------
+	// Fonctions natives pour le JS (plugins, jeu C++)
+	// ------------------------------------------------------------------------
+
+	/**
+	 * Fonction C++ appelable depuis le JS. Arguments / retour : nombres,
+	 * bool, chaines, vecteurs, acteurs (InterfaceArg, voir Interface.h).
+	 * Pour rendre un objet / tableau : retourner du JSON (std::string) et
+	 * le decoder dans un prelude JS (JSON.parse).
+	 */
+	using ScriptFunction = std::function<InterfaceArg(const InterfaceArgs& args)>;
+
+	/**
+	 * `object`.`name`(...) en JS ("" = fonction globale). L'objet global
+	 * `object` est cree s'il n'existe pas. Reste valable apres un
+	 * redemarrage du runtime JS. Une fonction du meme nom est remplacee.
+	 */
+	LYNX_API void RegisterScriptFunction(const std::string& object, const std::string& name, ScriptFunction fn);
+
+	/**
+	 * Code JS execute dans le contexte global apres l'enregistrement des
+	 * fonctions natives (et a chaque redemarrage du runtime JS) : classes,
+	 * wrappers... `name` : pour les messages d'erreur (et remplace un prelude
+	 * du meme nom).
+	 */
+	LYNX_API void RegisterScriptPrelude(const std::string& name, const std::string& code);
 }

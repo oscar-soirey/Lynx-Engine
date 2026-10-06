@@ -36,7 +36,19 @@ namespace lynx::host
 		// The one the editor loads (absolute). Defaults to modules[0].
 		// Empty when the game was never built (the editor compiles it first).
 		std::filesystem::path module_path;
+
+		/**
+		 * Project without C++ (no Build.bat / CMakeLists.txt, no DLL in
+		 * build/) : the engine's generic game DLL is loaded
+		 * (<editor>/scriptgame/LynxScriptGame.dll) and nothing is ever
+		 * compiled. The game is made of JavaScript, plugins and the engine
+		 * actors.
+		 */
+		bool script_only = false;
 	};
+
+	/** The generic game DLL of the engine (may not exist). */
+	std::filesystem::path GetScriptGameModule();
 
 	// Checks `folder` and fills `out`. On failure returns false and explains
 	// why in `error` (no assets/ folder, no game DLL and nothing to build it...).

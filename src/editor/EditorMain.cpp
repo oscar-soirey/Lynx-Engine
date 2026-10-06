@@ -77,6 +77,7 @@
 #include "EditorOptions.h"
 #include "ExternalIde.h"
 #include "ShellIntegration.h"
+#include "EditorPlugins.h"
 #include "ProjectTemplates.h"
 #include "LynxieIcon.h"
 #include "EditorIcons.h"
@@ -136,6 +137,7 @@ struct EditorWindowVisibility
 
 static EditorWindowVisibility editorWindows;
 static bool showEditorOptions = false;   // Options window (not saved)
+static bool showPluginManager = false;   // Plugins window (not saved)
 
 static void LoadEditorWindowVisibility()
 {
@@ -695,10 +697,68 @@ void SetObjectSelected(HRL_id object)
 }
 
 
+// Every selected actor (Ctrl / Shift click, rubber band in the Outliner).
+// editing_actor is the primary one (Details, gizmo) and is always in it.
+static std::vector<lynx::Actor*> selected_actors;
+
+static bool IsActorAlive(lynx::Actor* actor);
+
+// Dead actors (deleted, level rebuilt) leave the selection.
+static void PruneActorSelection()
+{
+    std::erase_if(selected_actors, [](lynx::Actor* a) { return !IsActorAlive(a); });
+    if (editing_actor && !IsActorAlive(editing_actor))
+        editing_actor = nullptr;
+    if (editing_actor && std::find(selected_actors.begin(), selected_actors.end(), editing_actor) == selected_actors.end())
+        selected_actors.push_back(editing_actor);
+}
+
+static bool IsActorInSelection(lynx::Actor* actor)
+{
+    return actor && std::find(selected_actors.begin(), selected_actors.end(), actor) != selected_actors.end();
+}
+
+void SetActorSelected(lynx::Actor* actor);
+
+// Ctrl + click : adds / removes. The primary actor becomes the last one added.
+static void ToggleActorSelection(lynx::Actor* actor)
+{
+    if (!actor)
+        return;
+    auto it = std::find(selected_actors.begin(), selected_actors.end(), actor);
+    if (it != selected_actors.end())
+    {
+        selected_actors.erase(it);
+        lynx::Actor* primary = selected_actors.empty() ? nullptr : selected_actors.back();
+        const std::vector<lynx::Actor*> keep = selected_actors;
+        SetActorSelected(primary);
+        selected_actors = keep;
+        return;
+    }
+    const std::vector<lynx::Actor*> keep = selected_actors;
+    SetActorSelected(actor);
+    selected_actors = keep;
+    selected_actors.push_back(actor);
+}
+
+// Several actors at once (Shift range, rubber band). `primary` : the gizmo one.
+static void SetActorSelection(const std::vector<lynx::Actor*>& actors, lynx::Actor* primary)
+{
+    SetActorSelected(primary ? primary : (actors.empty() ? nullptr : actors.back()));
+    selected_actors = actors;
+    if (editing_actor && !IsActorInSelection(editing_actor))
+        selected_actors.push_back(editing_actor);
+}
+
 void SetActorSelected(lynx::Actor* actor)
 {
     editing_actor = actor;
     editing_object = HRL_INVALID_ID;
+
+    // A plain selection : only this actor.
+    selected_actors.clear();
+    if (actor)
+        selected_actors.push_back(actor);
 
     if (!editing_actor)
     {
@@ -749,6 +809,90 @@ struct EditorActorSnapshot
 
 
 static lynx::Level* editor_level = nullptr;
+
+static bool IsActorAlive(lynx::Actor* actor)
+{
+    if (!actor || !editor_level)
+        return false;
+    const auto& actors = editor_level->GetActors();
+    return std::find(actors.begin(), actors.end(), actor) != actors.end();
+}
+
+// Rows of the Outliner drawn this frame (order on screen, rectangles) :
+// Shift + click ranges and the rubber band.
+struct OutlinerRow
+{
+    lynx::Actor* actor;
+    ImVec2 min;
+    ImVec2 max;
+};
+static std::vector<OutlinerRow> outliner_rows;        // last frame (complete)
+static std::vector<OutlinerRow> outliner_rows_next;   // being drawn
+
+// Rubber band (shared code : Outliner and Content Browser). Call right after
+// the item that starts it (the empty area). `rects` : the items of this
+// frame ; `apply` gets the indices inside the band (with Ctrl : added to
+// what was selected when the drag started, kept by the caller).
+struct RubberBand
+{
+    bool active = false;
+    ImVec2 start_local{ 0.f, 0.f };   // window space + scroll (survives scrolling)
+    bool additive = false;
+    bool moved = false;
+};
+
+static bool RubberBandUpdate(RubberBand& band, bool start, const std::vector<std::pair<ImVec2, ImVec2>>& rects,
+                             std::vector<int>& inside)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 mouse = ImGui::GetMousePos();
+    const ImVec2 offset(window->Pos.x - window->Scroll.x, window->Pos.y - window->Scroll.y);
+
+    if (start)
+    {
+        band.active = true;
+        band.moved = false;
+        band.additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
+        band.start_local = ImVec2(mouse.x - offset.x, mouse.y - offset.y);
+    }
+    if (!band.active)
+        return false;
+
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        band.active = false;
+        return false;
+    }
+
+    // Scroll when the mouse goes past the top / bottom.
+    if (mouse.y < window->InnerRect.Min.y)
+        ImGui::SetScrollY(window, window->Scroll.y - (window->InnerRect.Min.y - mouse.y) * 0.3f);
+    else if (mouse.y > window->InnerRect.Max.y)
+        ImGui::SetScrollY(window, window->Scroll.y + (mouse.y - window->InnerRect.Max.y) * 0.3f);
+
+    const ImVec2 a(band.start_local.x + offset.x, band.start_local.y + offset.y);
+    const ImVec2 min(std::min(a.x, mouse.x), std::min(a.y, mouse.y));
+    const ImVec2 max(std::max(a.x, mouse.x), std::max(a.y, mouse.y));
+    if (max.x - min.x > 3.f || max.y - min.y > 3.f)
+        band.moved = true;
+    if (!band.moved)
+        return false;
+
+    inside.clear();
+    for (int i = 0; i < static_cast<int>(rects.size()); ++i)
+    {
+        const auto& [rmin, rmax] = rects[i];
+        if (rmin.x <= max.x && rmax.x >= min.x && rmin.y <= max.y && rmax.y >= min.y)
+            inside.push_back(i);
+    }
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList(window);
+    const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive);
+    dl->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(accent.x, accent.y, accent.z, 0.18f)));
+    dl->AddRect(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(accent.x, accent.y, accent.z, 0.9f)));
+    return true;
+}
+static lynx::Actor* outliner_anchor = nullptr;   // Shift + click range start
 static std::vector<std::function<void()>> editorUndoHistory;
 
 
@@ -1953,6 +2097,9 @@ static void SaveEditor()
     if (!editor_level)
         return;
 
+    // Previews of the plugins (sequencer...) put the actors back first.
+    lynx::editor::plugins::BeforeLevelSnapshot();
+
 
     ClearBrushPreview();
 
@@ -2489,6 +2636,34 @@ static void DrawOutlinerTree(lynx::Level* level, DrawActor& draw_actor)
     const ImVec2 rest = ImGui::GetContentRegionAvail();
     ImGui::InvisibleButton("##outliner_root", ImVec2(std::max(1.f, rest.x), std::max(ImGui::GetTextLineHeight(), rest.y)));
     OutlinerDropTarget(level, "");
+
+    // Click in the empty space : nothing selected ; drag : rubber band
+    // (Ctrl / Shift : added to the selection).
+    {
+        static RubberBand band;
+        static std::vector<lynx::Actor*> base;
+        const bool start = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        if (start)
+        {
+            base = (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) ? selected_actors : std::vector<lynx::Actor*>{};
+            if (base.empty())
+                SetActorSelected(nullptr);
+        }
+        std::vector<std::pair<ImVec2, ImVec2>> rects;
+        for (const OutlinerRow& row : outliner_rows_next)
+            rects.emplace_back(row.min, row.max);
+        std::vector<int> inside;
+        if (RubberBandUpdate(band, start, rects, inside))
+        {
+            std::vector<lynx::Actor*> actors = base;
+            for (int i : inside)
+                if (std::find(actors.begin(), actors.end(), outliner_rows_next[i].actor) == actors.end())
+                    actors.push_back(outliner_rows_next[i].actor);
+            lynx::Actor* primary = inside.empty() ? (actors.empty() ? nullptr : actors.back())
+                                                  : outliner_rows_next[inside.back()].actor;
+            SetActorSelection(actors, primary);
+        }
+    }
     if (ImGui::BeginPopupContextItem("##outliner_root_menu"))
     {
         if (ImGui::MenuItem("New folder"))
@@ -3041,8 +3216,15 @@ static void DrawContentBrowser(lynx::Level* level)
     const int row_count =
         (static_cast<int>(shown.size()) + columns - 1) / columns;
 
+    // Cells of every entry (also the rows the clipper skips) : rubber band.
+    const ImVec2 grid_origin = ImGui::GetCursorScreenPos();
+    const float row_pitch = item_height + ImGui::GetStyle().ItemSpacing.y;
+    static int browser_anchor = -1;   // Shift + click range start (index in `shown`)
+    if (browser_anchor >= static_cast<int>(shown.size()))
+        browser_anchor = -1;
+
     ImGuiListClipper clipper;
-    clipper.Begin(row_count, item_height + ImGui::GetStyle().ItemSpacing.y);
+    clipper.Begin(row_count, row_pitch);
 
     while (clipper.Step())
     for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
@@ -3076,7 +3258,7 @@ static void DrawContentBrowser(lynx::Level* level)
 
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool selected = cba::state.selected == entry.path();
+        const bool selected = cba::IsSelected(entry.path());
 
         // Double-click on a text file (.js, .py, .json, .xml, .txt...) : opens
         // it in a script editor window (one window per file). A single click
@@ -3088,6 +3270,10 @@ static void DrawContentBrowser(lynx::Level* level)
             // .level : opens the level (and its linked voxel world).
             if (cba::IsLevel(entry.path()))
                 cba::OpenLevel(entry.path());
+            // Files of the plugins (.dialogue, .sequence...).
+            else if (lynx::editor::plugins::CanOpen(entry.path()) &&
+                     lynx::editor::plugins::OpenFile(entry.path()))
+                ;
             // .widget : Widget Editor (UMG-like designer).
             else if (lynx::editor::widget_editor::CanOpen(entry.path()))
                 lynx::editor::widget_editor::Open(entry.path());
@@ -3121,10 +3307,34 @@ static void DrawContentBrowser(lynx::Level* level)
         DrawAssetTile(draw_list, cell_min, cell_max, thumb_min, image_size, item_width,
                       hovered, active, selected, entry.path(), is_directory, filename);
 
-        if (clicked && is_directory)
+        // Click : select (Ctrl : add / remove, Shift : range). Double-click on
+        // a folder : open it (like Unreal).
+        if (clicked)
+        {
+            const ImGuiIO& cio = ImGui::GetIO();
+            if (cio.KeyCtrl)
+            {
+                cba::ToggleSelected(entry.path());
+                browser_anchor = static_cast<int>(index);
+            }
+            else if (cio.KeyShift && browser_anchor >= 0)
+            {
+                std::vector<std::filesystem::path> range;
+                const size_t from = std::min(static_cast<size_t>(browser_anchor), index);
+                const size_t to = std::max(static_cast<size_t>(browser_anchor), index);
+                for (size_t k = from; k <= to; ++k)
+                    range.push_back(shown[k]->path());
+                cba::SetSelection(range, entry.path());
+            }
+            else
+            {
+                cba::SelectOnly(entry.path());
+                browser_anchor = static_cast<int>(index);
+            }
+        }
+
+        if (is_directory && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             content_browser_current_path = entry.path();   // listed again at the next frame
-        else if (clicked)
-            cba::state.selected = entry.path();
 
         if (!is_directory &&
             ImGui::BeginDragDropSource(
@@ -3147,6 +3357,52 @@ static void DrawContentBrowser(lynx::Level* level)
         cba::ItemContextMenu(entry);
 
         ImGui::PopID();
+    }
+
+    // Rubber band : drag from an empty place of the grid (Ctrl / Shift : added
+    // to the selection). A simple click there : nothing selected.
+    {
+        static RubberBand band;
+        static std::vector<std::filesystem::path> base;
+        const bool start = ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                           !ImGui::IsAnyItemHovered() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+        if (start)
+        {
+            base = (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) ? cba::state.selection
+                                                                      : std::vector<std::filesystem::path>{};
+            if (base.empty())
+                cba::ClearSelection();
+        }
+
+        std::vector<std::pair<ImVec2, ImVec2>> rects;
+        rects.reserve(shown.size());
+        for (size_t k = 0; k < shown.size(); ++k)
+        {
+            const float x = grid_origin.x + static_cast<float>(k % static_cast<size_t>(columns)) * (item_width + item_spacing);
+            const float y = grid_origin.y + static_cast<float>(k / static_cast<size_t>(columns)) * row_pitch;
+            rects.emplace_back(ImVec2(x, y), ImVec2(x + item_width, y + item_height));
+        }
+
+        std::vector<int> inside;
+        if (RubberBandUpdate(band, start, rects, inside))
+        {
+            std::vector<std::filesystem::path> paths = base;
+            for (int k : inside)
+                if (std::find(paths.begin(), paths.end(), shown[k]->path()) == paths.end())
+                    paths.push_back(shown[k]->path());
+            cba::SetSelection(paths, inside.empty() ? (paths.empty() ? std::filesystem::path() : paths.back())
+                                                    : shown[inside.back()]->path());
+        }
+
+        // Ctrl + A : everything shown.
+        if (content_browser_focused && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+            !ImGui::GetIO().WantTextInput && !shown.empty())
+        {
+            std::vector<std::filesystem::path> all;
+            for (const auto* e : shown)
+                all.push_back(e->path());
+            cba::SetSelection(all, all.back());
+        }
     }
 
     if (entries.empty())
@@ -3786,6 +4042,8 @@ static bool brushPainting = false;
 static bool gizmoUndoActive = false;
 static std::string gizmoUndoActorId;
 static lynx::transform gizmoUndoTransform{};
+// The other selected actors moved with the gizmo : their transform before.
+static std::vector<std::pair<std::string, lynx::transform>> gizmoUndoOthers;
 
 struct VoxelChange
 {
@@ -4348,12 +4606,16 @@ static void TogglePlayMode(bool simulate = false)
     if (!isPlaying)
     {
         // EDITOR -> GAME
+        // Previews of the plugins put the actors back first.
+        lynx::editor::plugins::BeforeLevelSnapshot();
+
         // Remember the current state so Stop can put everything back.
         SavePlaySnapshot();
 
         // Clear editor selection and hide the gizmo in game mode.
         editing_object = HRL_INVALID_ID;
         editing_actor = nullptr;
+        selected_actors.clear();
 
         HRL_SetGizmoVisible(
             gizmo,
@@ -4712,7 +4974,8 @@ static void DrawToolbar()
 
         // Compile the game (Build.bat of the project) while the editor runs :
         // the editor uses a copy of the DLL, build/<game>.dll is free.
-        ImGui::BeginDisabled(lynx::editor::game_build::IsRunning());
+        // A project without C++ (generic game DLL) has nothing to compile.
+        ImGui::BeginDisabled(lynx::editor::game_build::IsRunning() || currentProject.script_only);
 
         if (lynx::editor::icons::ButtonWithLabel("Compile", lynx::editor::icons::Icon::Compile))
             lynx::editor::game_build::Start();
@@ -4893,6 +5156,17 @@ static void DrawToolbar()
             ImGui::PopStyleVar();
         }
 
+        // Plugins : manager + the menu items of the editor modules.
+        ImGui::SameLine();
+        if (lynx::editor::icons::ButtonWithLabel("Plugins", lynx::editor::icons::Icon::Settings))
+            ImGui::OpenPopup("PluginsPopup");
+        tooltip("Plugins : enable / disable, and the tools of the plugins");
+        if (ImGui::BeginPopup("PluginsPopup"))
+        {
+            lynx::editor::plugins::DrawPluginsMenu(&showPluginManager);
+            ImGui::EndPopup();
+        }
+
         // Build state / DLL rebuilt outside the editor.
         {
             const std::string build_status = lynx::editor::game_build::ToolbarStatus();
@@ -4969,6 +5243,8 @@ static void DrawToolbar()
             EditorWindowCheckbox("Git", &editorWindows.git, lynx::editor::icons::Icon::Git);
             EditorWindowCheckbox("Console", &editorWindows.console, lynx::editor::icons::Icon::Console);
             EditorWindowCheckbox("Profiler", &editorWindows.profiler, lynx::editor::icons::Icon::Profiler);
+            EditorWindowCheckbox("Plugins", &showPluginManager, lynx::editor::icons::Icon::Settings);
+            lynx::editor::plugins::DrawWindowsMenuItems();
             ImGui::Separator();
             ImGui::TextDisabled("All editor windows are hidden during Play.");
             ImGui::EndPopup();
@@ -5422,6 +5698,21 @@ namespace editor
         InitImGui(win);
         LoadEditorWindowVisibility();
 
+        // Editor modules of the plugins (<Name>.Editor.dll) : they draw in
+        // this ImGui context.
+        {
+            lynx::editor::plugins::Host host;
+            host.get_selected_actor = []() { return editing_actor; };
+            host.select_actor = [](lynx::Actor* actor) { SetActorSelected(actor); };
+            host.mark_level_dirty = []() { MarkEditorDirty(); };
+            host.is_playing = []() { return isPlaying; };
+            host.message = [](const std::string& text) { ShowEditorWarning(text); };
+            host.open_asset = [](const std::filesystem::path& path) { content_browser_actions::OpenEntry(path); };
+            host.project_root = currentProject.root;
+            lynx::editor::plugins::SetHost(host);
+            lynx::editor::plugins::LoadEditorModules();
+        }
+
         // At every start : Commands is shown, on the Lynxie tab (whatever
         // was open / focused when the editor was closed).
         editorWindows.commands = true;
@@ -5543,6 +5834,7 @@ namespace editor
             SaveEditor();
 
         editing_actor = nullptr;
+        selected_actors.clear();
         editing_object = HRL_INVALID_ID;
         dragging_object = false;
         HRL_SetGizmoVisible(gizmo, HRL_FALSE);
@@ -5619,6 +5911,7 @@ namespace editor
     void BeginRestoreAfterPlay()
     {
         editing_actor = nullptr;
+        selected_actors.clear();
         editing_object = HRL_INVALID_ID;
         dragging_object = false;
 
@@ -5711,6 +6004,7 @@ namespace editor
 
         // 3. Forget every actor pointer.
         editing_actor = nullptr;
+        selected_actors.clear();
         editing_object = HRL_INVALID_ID;
         dragging_object = false;
 
@@ -5795,6 +6089,11 @@ namespace editor
                 editing_object = HRL_INVALID_ID;
                 SetObjectSelected(HRL_INVALID_ID);
             }
+
+            // A click in the viewport : only this actor (or nothing).
+            selected_actors.clear();
+            if (editing_actor)
+                selected_actors.push_back(editing_actor);
         }
     }
 
@@ -5855,6 +6154,9 @@ namespace editor
         float dt)
     {
         HRL_id camera = editor_camera;
+
+        // Editor modules of the plugins.
+        lynx::editor::plugins::Tick(dt);
 
         ImGuiIO& io =
             ImGui::GetIO();
@@ -6122,12 +6424,25 @@ namespace editor
                     gizmoUndoActive = true;
                     gizmoUndoActorId = editing_actor->object_id_;
                     gizmoUndoTransform = editing_actor->transform;
+                    gizmoUndoOthers.clear();
+                    PruneActorSelection();
+                    for (lynx::Actor* other : selected_actors)
+                        if (other != editing_actor)
+                            gizmoUndoOthers.emplace_back(other->object_id_, other->transform);
                 }
 
                 dragging_object = true;
 
                 if (pos_changed)
                 {
+                    // The other selected actors move by the same amount.
+                    const lynx::vec3 delta(pos[0] - editing_actor->transform.location.x,
+                                           pos[1] - editing_actor->transform.location.y,
+                                           pos[2] - editing_actor->transform.location.z);
+                    for (lynx::Actor* other : selected_actors)
+                        if (other != editing_actor && IsActorAlive(other))
+                            other->transform.location += delta;
+
                     editing_actor->transform.location = { pos[0], pos[1], pos[2] };
                 }
 
@@ -6165,8 +6480,9 @@ namespace editor
 
             const lynx::transform previous_transform =
                 gizmoUndoTransform;
+            const auto others = gizmoUndoOthers;
 
-            PushEditorUndo([actor_id, previous_transform]()
+            PushEditorUndo([actor_id, previous_transform, others]()
             {
                 lynx::Actor* actor =
                     FindEditorActor(actor_id);
@@ -6175,9 +6491,18 @@ namespace editor
                     return;
 
                 actor->transform = previous_transform;
-                SetActorSelected(actor);
+
+                std::vector<lynx::Actor*> moved = { actor };
+                for (const auto& [id, tr] : others)
+                    if (lynx::Actor* other = FindEditorActor(id))
+                    {
+                        other->transform = tr;
+                        moved.push_back(other);
+                    }
+                SetActorSelection(moved, actor);
                 MarkEditorDirty();
             });
+            gizmoUndoOthers.clear();
 
             gizmoUndoActive = false;
             gizmoUndoActorId.clear();
@@ -6880,40 +7205,38 @@ namespace editor
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
-            lynx::Actor* actor_to_delete = editing_actor;
-            const EditorActorSnapshot deleted_snapshot =
-                CaptureActorSnapshot(actor_to_delete);
+            // Every selected actor (Ctrl / Shift / rubber band), one undo.
+            PruneActorSelection();
+            std::vector<lynx::Actor*> to_delete = selected_actors;
+            if (to_delete.empty())
+                to_delete.push_back(editing_actor);
 
-            PushEditorUndo([deleted_snapshot]()
+            std::vector<EditorActorSnapshot> snapshots;
+            for (lynx::Actor* actor : to_delete)
+                snapshots.push_back(CaptureActorSnapshot(actor));
+
+            PushEditorUndo([snapshots]()
             {
                 if (!editor_level)
                     return;
 
-                if (!deleted_snapshot.object_id.empty() &&
-                    FindEditorActor(deleted_snapshot.object_id))
+                std::vector<lynx::Actor*> restored_all;
+                for (const EditorActorSnapshot& snapshot : snapshots)
                 {
-                    return;
+                    if (!snapshot.object_id.empty() && FindEditorActor(snapshot.object_id))
+                        continue;
+                    if (lynx::Actor* restored = RestoreActorSnapshot(editor_level, snapshot))
+                        restored_all.push_back(restored);
                 }
 
-                lynx::Actor* restored =
-                    RestoreActorSnapshot(
-                        editor_level,
-                        deleted_snapshot
-                    );
-
-                if (restored)
-                    SetActorSelected(restored);
+                if (!restored_all.empty())
+                    SetActorSelection(restored_all, restored_all.back());
             });
 
-            editing_actor = nullptr;
-            editing_object = HRL_INVALID_ID;
+            SetActorSelected(nullptr);
 
-            HRL_SetGizmoVisible(
-                gizmo,
-                HRL_FALSE
-            );
-
-            level->DestroyActor(actor_to_delete);
+            for (lynx::Actor* actor : to_delete)
+                level->DestroyActor(actor);
             MarkEditorDirty();
         }
 
@@ -6925,6 +7248,9 @@ namespace editor
         if (!isPlaying && editorWindows.outliner)
         {
             ImGui::Begin("Outliner");
+
+            PruneActorSelection();
+            outliner_rows_next.clear();
 
             const auto& actors = level->GetActors();
 
@@ -6946,7 +7272,7 @@ namespace editor
                     label += std::to_string(i);
 
                     const bool selected =
-                        editing_actor == actor;
+                        IsActorInSelection(actor);
 
                     // Small icon of the class.
                     DrawActorTypePreview(typeName, ImGui::GetTextLineHeight());
@@ -6957,8 +7283,37 @@ namespace editor
                             selected
                         ))
                     {
-                        SetActorSelected(actor);
+                        const ImGuiIO& sio = ImGui::GetIO();
+                        if (sio.KeyCtrl)
+                        {
+                            // Ctrl : adds / removes this actor.
+                            ToggleActorSelection(actor);
+                            outliner_anchor = actor;
+                        }
+                        else if (sio.KeyShift && outliner_anchor && IsActorAlive(outliner_anchor))
+                        {
+                            // Shift : every row between the last click and this one.
+                            int a = -1, b = -1;
+                            for (int r = 0; r < static_cast<int>(outliner_rows.size()); ++r)
+                            {
+                                if (outliner_rows[r].actor == outliner_anchor) a = r;
+                                if (outliner_rows[r].actor == actor) b = r;
+                            }
+                            std::vector<lynx::Actor*> range;
+                            if (a >= 0 && b >= 0)
+                                for (int r = std::min(a, b); r <= std::max(a, b); ++r)
+                                    range.push_back(outliner_rows[r].actor);
+                            else
+                                range.push_back(actor);
+                            SetActorSelection(range, actor);
+                        }
+                        else
+                        {
+                            SetActorSelected(actor);
+                            outliner_anchor = actor;
+                        }
                     }
+                    outliner_rows_next.push_back({ actor, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
 
                     // Drag onto a folder (or the empty space : root).
                     if (ImGui::BeginDragDropSource())
@@ -7288,6 +7643,7 @@ namespace editor
             };
 
             DrawOutlinerTree(level, draw_actor);
+            outliner_rows.swap(outliner_rows_next);
 
             ImGui::End();
 
@@ -8169,6 +8525,11 @@ namespace editor
         if (editorWindows.postProcess)
             DrawPostProcessWindow();
 
+        // Plugins : manager and the windows of the editor modules.
+        if (showPluginManager)
+            lynx::editor::plugins::DrawManager(&showPluginManager);
+        lynx::editor::plugins::DrawWindows();
+
         // --------------------------------------------------------
         // Camera Shake
         // --------------------------------------------------------
@@ -9020,11 +9381,20 @@ int main(int argc, char** argv)
 
     lynx::host::AddRecentProject(currentProject.root);
 
+    // Plugins : <editor>/plugins (engine) and <project>/plugins, enabled in
+    // <project>/plugins.json. Runtime modules now (classes before the level).
+    lynx::editor::splash::SetStep("Loading the plugins", 0.24f);
+    lynx::plugins::Discover(
+        lynx::host::GetEditorDirectory() / "plugins",
+        currentProject.root / "plugins",
+        currentProject.root);
+    lynx::plugins::LoadRuntimeModules();
+
     lynx::editor::game_build::Init(currentProject.root, currentProject.module_path);
 
     // Game DLL not rebuilt after an engine change : warn (crash otherwise).
     ShowEditorWarning(
-        lynx::host::CheckModuleUpToDate(currentProject.module_path)
+        currentProject.script_only ? std::string() : lynx::host::CheckModuleUpToDate(currentProject.module_path)
     );
 
     // Project files (working directory = project root).
@@ -9301,6 +9671,7 @@ int main(int argc, char** argv)
     // The game registers its voxel events...
     if (gameHooks.setup_scene)
         gameHooks.setup_scene(scene);
+    lynx::plugins::SetupScene(scene);
 
 
     lynx::editor::splash::SetStep("Loading the level", 0.72f);
@@ -9535,6 +9906,7 @@ int main(int argc, char** argv)
         // Voxel events of the new build.
         if (gameHooks.setup_scene)
             gameHooks.setup_scene(scene);
+        lynx::plugins::SetupScene(scene);
 
         // 4. Rebuild the level (saved in step 1 if it was dirty).
         level =
@@ -9554,7 +9926,7 @@ int main(int argc, char** argv)
         editor::EndGameReload(level);
 
         ShowEditorWarning(
-            lynx::host::CheckModuleUpToDate(currentProject.module_path)
+            currentProject.script_only ? std::string() : lynx::host::CheckModuleUpToDate(currentProject.module_path)
         );
 
         std::cout << "[RELOAD] Done\n";
@@ -9905,6 +10277,8 @@ int main(int argc, char** argv)
     // The module needs a live engine to invalidate its actors / factory.
     gameHooks.Clear();
     gameModule.reset();
+    lynx::editor::plugins::UnloadEditorModules();
+    lynx::plugins::UnloadAll();
 
     lynx::Engine::Destroy();
 

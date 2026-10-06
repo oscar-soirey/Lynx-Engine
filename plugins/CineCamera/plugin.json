@@ -1,0 +1,9 @@
+{
+  "name": "CineCamera",
+  "version": "1.0",
+  "description": "Cinematic cameras (focal length, look-at, shake), camera rails, blends between cameras, and a sequencer (.sequence : camera cuts, actor animation, events, fades). C++ and JavaScript API.",
+  "author": "Lynx",
+  "category": "Cinematics",
+  "runtime": "bin/CineCamera.dll",
+  "editor": "bin/CineCamera.Editor.dll"
+}

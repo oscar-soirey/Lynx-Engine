@@ -1,0 +1,7 @@
+{
+  "name": "JavaScript only",
+  "description": "No C++ and nothing to compile : the game is made of JavaScript classes and scripts, the engine actors (Humanoid, lights, colliders...) and the plugins. Uses the engine's generic game DLL.",
+  "order": 5,
+  "no_cpp": true,
+  "plugins": [ "Dialogue", "CineCamera" ]
+}

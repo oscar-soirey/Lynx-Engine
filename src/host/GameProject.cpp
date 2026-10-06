@@ -177,6 +177,10 @@ namespace lynx::host
 		std::vector<fs::path> modules;
 		FindGameModulesIn(dir, depth, modules);
 
+		// Plugin modules (LYNX_PLUGIN) also export FactoryRegisterClasses :
+		// they are never the game.
+		std::erase_if(modules, [](const fs::path& m) { return DllExportsSymbol(m, "LynxPlugin_Info"); });
+
 		// Most recently built first.
 		std::stable_sort(modules.begin(), modules.end(),
 			[](const fs::path& a, const fs::path& b)
@@ -369,6 +373,15 @@ namespace lynx::host
 			if (CanBuildProject(root))
 				return true;
 
+			// No C++ at all : the generic game DLL of the engine.
+			const fs::path script_game = GetScriptGameModule();
+			if (fs::is_regular_file(script_game, ec))
+			{
+				out.module_path = script_game;
+				out.script_only = true;
+				return true;
+			}
+
 			error = "No game DLL in \"build\" (a DLL exporting FactoryRegisterClasses,\n"
 			        "see LYNX_LINK_MODULE), and no Build.bat / CMakeLists.txt to build it.";
 			return false;
@@ -377,6 +390,12 @@ namespace lynx::host
 		out.module_path = out.modules.front();
 
 		return true;
+	}
+
+
+	fs::path GetScriptGameModule()
+	{
+		return GetEditorDirectory() / "scriptgame" / "LynxScriptGame.dll";
 	}
 
 
@@ -467,6 +486,10 @@ namespace lynx::host
 	{
 		blocking = false;
 		std::error_code ec;
+
+		// Generic DLL of the engine : built with it, never compiled here.
+		if (project.script_only)
+			return {};
 
 		if (project.module_path.empty() || !fs::is_regular_file(project.module_path, ec))
 		{

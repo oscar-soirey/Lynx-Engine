@@ -1,0 +1,9 @@
+{
+  "name": "Dialogue",
+  "version": "1.0",
+  "description": "Dialogues (.dialogue, node graph editor), dialogue box, story variables and quests, saves. C++ and JavaScript API (Dialogue, Story, Quest).",
+  "author": "Lynx",
+  "category": "Gameplay",
+  "runtime": "bin/Dialogue.dll",
+  "editor": "bin/Dialogue.Editor.dll"
+}
