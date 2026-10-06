@@ -2,6 +2,8 @@
 
 #include "EditorFonts.h"
 
+#include "WindowIcon.h"
+
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
 #include <imgui/imgui_impl_opengl3.h>
@@ -466,6 +468,7 @@ namespace lynx::editor::splash
 			return;
 		}
 
+		lynx::editor::window_icon::Apply(g.window);
 		glfwSetWindowPos(g.window, x, y);
 
 		// GL + ImGui contexts of the splash.

@@ -376,6 +376,21 @@ namespace lynx::editor::graph_editors
 			ImGui::TextColored(kTitleDim, "%s", text);
 		}
 
+		// A small rounded badge with a symbol, at the start of a title (icon of the kind of node).
+		void TitleBadge(const char* glyph, ImU32 color)
+		{
+			const float h = ImGui::GetTextLineHeight();
+			const ImVec2 text = ImGui::CalcTextSize(glyph);
+			const float w = std::max(h, text.x + h * 0.5f);
+			const ImVec2 pos = ImGui::GetCursorScreenPos();
+			ImDrawList* dl = ImGui::GetWindowDrawList();
+			dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), color, h * 0.3f);
+			dl->AddRect(pos, ImVec2(pos.x + w, pos.y + h), IM_COL32(255, 255, 255, 70), h * 0.3f);
+			dl->AddText(ImVec2(std::floor(pos.x + (w - text.x) * 0.5f), pos.y), IM_COL32(255, 255, 255, 255), glyph);
+			ImGui::Dummy(ImVec2(w, h));
+			ImGui::SameLine(0.f, h * 0.35f);
+		}
+
 		void PopTitleColor()
 		{
 			ImNodes::PopColorStyle();
@@ -1377,6 +1392,18 @@ namespace lynx::editor::graph_editors
 				PushTitleColor(playing ? kActive : kStateColor);
 				ImNodes::BeginNode(node);
 				BeginTitle();
+				{
+					// Badge : animation, blend space, or nothing yet.
+					bool blend = false;
+					for (const auto& b : g.blend_spaces)
+						blend |= b.name == s.motion;
+					if (s.motion.empty() || !g.IsMotion(s.motion))
+						TitleBadge("?", IM_COL32(200, 110, 40, 255));
+					else if (blend)
+						TitleBadge("BS", IM_COL32(150, 90, 200, 255));
+					else
+						TitleBadge("A", IM_COL32(60, 140, 210, 255));
+				}
 				ImGui::TextUnformatted(s.name.c_str());
 				if (g.entry_state == s.name)
 					TitleDim("(entry)");
@@ -1424,6 +1451,7 @@ namespace lynx::editor::graph_editors
 				PushTitleColor(color);
 				ImNodes::BeginNode(node);
 				BeginTitle();
+				TitleBadge(node == kEntryNode ? ">" : "*", Lighter(color, 40));
 				ImGui::TextUnformatted(title);
 				EndTitle();
 				ImNodes::BeginOutputAttribute(OutAttr(node), ImNodesPinShape_TriangleFilled);
@@ -2612,6 +2640,24 @@ namespace lynx::editor::graph_editors
 				ImNodes::BeginNode(n.id);
 
 				BeginTitle();
+				{
+					const char* glyph = "*";
+					ImU32 badge = IM_COL32(120, 120, 130, 255);
+					const std::string& ty = n.type;
+					if (ty == "Root")              { glyph = ">";   badge = IM_COL32(90, 90, 110, 255); }
+					else if (ty == "Selector")     { glyph = "?";   badge = IM_COL32(64, 132, 210, 255); }
+					else if (ty == "Sequence")     { glyph = "->";  badge = IM_COL32(64, 170, 120, 255); }
+					else if (ty == "Wait")         { glyph = "zz";  badge = IM_COL32(120, 110, 190, 255); }
+					else if (ty == "MoveTo")       { glyph = ">>";  badge = IM_COL32(60, 160, 190, 255); }
+					else if (ty == "SetValue")     { glyph = "=";   badge = IM_COL32(200, 140, 50, 255); }
+					else if (ty == "ClearValue")   { glyph = "x";   badge = IM_COL32(190, 80, 80, 255); }
+					else if (ty == "SetAnimParam") { glyph = "~";   badge = IM_COL32(220, 110, 150, 255); }
+					else if (ty == "Log")          { glyph = "i";   badge = IM_COL32(110, 130, 150, 255); }
+					else if (ty == "CallFunction") { glyph = "f()"; badge = IM_COL32(200, 160, 40, 255); }
+					else if (ty == "Script")       { glyph = "JS";  badge = IM_COL32(220, 180, 40, 255); }
+					else if (ty == "Finish")       { glyph = "!";   badge = IM_COL32(200, 70, 70, 255); }
+					TitleBadge(glyph, badge);
+				}
 				if (order > 0)
 				{
 					ImGui::TextColored(kTitleDim, "%d", order);
@@ -3356,6 +3402,24 @@ namespace lynx::editor::graph_editors
 			g_nodes_context = ImNodes::CreateContext();
 			ImNodes::SetCurrentContext(g_nodes_context);
 			ImNodes::StylePixel();
+			// A dark canvas (not the color of the windows) : the nodes stand out.
+			{
+				ImNodesStyle& s = ImNodes::GetStyle();
+				s.Colors[ImNodesCol_GridBackground] = IM_COL32(40, 42, 50, 255);
+				s.Colors[ImNodesCol_GridLine] = IM_COL32(52, 55, 65, 255);
+				s.Colors[ImNodesCol_GridLinePrimary] = IM_COL32(66, 70, 84, 255);
+				s.Colors[ImNodesCol_Link] = IM_COL32(168, 176, 194, 255);
+				s.Colors[ImNodesCol_LinkHovered] = IM_COL32(236, 196, 104, 255);
+				s.Colors[ImNodesCol_LinkSelected] = IM_COL32(255, 170, 60, 255);
+				s.Colors[ImNodesCol_Pin] = IM_COL32(150, 158, 176, 255);
+				s.Colors[ImNodesCol_PinHovered] = IM_COL32(255, 190, 90, 255);
+				s.Colors[ImNodesCol_BoxSelector] = IM_COL32(255, 170, 60, 40);
+				s.Colors[ImNodesCol_BoxSelectorOutline] = IM_COL32(255, 170, 60, 200);
+				s.Colors[ImNodesCol_NodeOutline] = IM_COL32(20, 20, 26, 255);
+				s.LinkThickness = 2.5f;
+				s.PinCircleRadius = 4.5f;
+				s.PinTriangleSideLength = 10.f;
+			}
 			ImNodes::GetIO().EmulateThreeButtonMouse.Modifier = &ImGui::GetIO().KeyAlt;
 			ImNodes::GetIO().LinkDetachWithModifierClick.Modifier = &ImGui::GetIO().KeyCtrl;
 			if (previous)

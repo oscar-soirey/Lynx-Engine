@@ -317,12 +317,30 @@ namespace lynx::editor::title_bar
 				const float x1 = x0 + top_w;
 				const float y0 = origin.y;
 				const float y1 = origin.y + tab_h;
-				const ImVec2 shape[4] = { ImVec2(x0, y0), ImVec2(x1, y0), ImVec2(x1 - slant, y1), ImVec2(x0 + slant, y1) };
 				const ImU32 tab = focused ? IM_COL32(26, 24, 30, 255) : IM_COL32(70, 66, 74, 255);
-				dl->AddConvexPolyFilled(shape, 4, tab);
-				// light edge on the slanted sides (pixel look)
-				dl->AddLine(shape[1], shape[2], IM_COL32(255, 255, 255, 40), 1.f);
-				dl->AddLine(shape[3], shape[0], IM_COL32(255, 255, 255, 40), 1.f);
+				// Slanted sides, bottom corners slightly rounded.
+				const float r = std::floor(tab_h * 0.28f);
+				const ImVec2 tl(x0, y0), tr(x1, y0), br(x1 - slant, y1), bl(x0 + slant, y1);
+				auto toward = [](const ImVec2& from, const ImVec2& to, float d)
+				{
+					const float dx = to.x - from.x, dy = to.y - from.y;
+					const float len = std::max(0.001f, std::sqrt(dx * dx + dy * dy));
+					return ImVec2(from.x + dx / len * d, from.y + dy / len * d);
+				};
+				auto outline = [&]()
+				{
+					dl->PathLineTo(tl);
+					dl->PathLineTo(tr);
+					dl->PathLineTo(toward(br, tr, r));
+					dl->PathBezierQuadraticCurveTo(br, toward(br, bl, r), 8);
+					dl->PathLineTo(toward(bl, br, r));
+					dl->PathBezierQuadraticCurveTo(bl, toward(bl, tl, r), 8);
+				};
+				outline();
+				dl->PathFillConvex(tab);
+				// light edge on the sides and the bottom (pixel look)
+				outline();
+				dl->PathStroke(IM_COL32(255, 255, 255, 40), ImDrawFlags_Closed, 1.f);
 				const ImU32 cream = focused ? IM_COL32(244, 229, 172, 255) : IM_COL32(200, 192, 160, 255);
 				dl->AddText(ImVec2(std::floor(cx - text_size.x * 0.5f), std::floor(y0 + (tab_h - text_size.y) * 0.5f)), cream, title.c_str());
 			}

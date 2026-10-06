@@ -67,6 +67,12 @@ namespace lynx
 
 		void SaveToFile(const char* _path);
 
+		/**
+		 * Folders of the Outliner of the editor (also the empty ones), saved in
+		 * the <Level> element. The actors keep theirs in Actor::outliner_folder.
+		 */
+		std::vector<std::string> outliner_folders;
+
 	private:
 		std::vector<Actor*> actors_;
 		std::vector<Actor*> destroy_queue_;

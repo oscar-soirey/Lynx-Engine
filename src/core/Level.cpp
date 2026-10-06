@@ -58,6 +58,23 @@ namespace lynx
 			return;
 		}
 
+		outliner_folders.clear();
+		if (const char* folders = root->Attribute("outliner_folders"))
+		{
+			std::string all = folders;
+			size_t start = 0;
+			while (start <= all.size())
+			{
+				const size_t bar = all.find('|', start);
+				const std::string f = all.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+				if (!f.empty())
+					outliner_folders.push_back(f);
+				if (bar == std::string::npos)
+					break;
+				start = bar + 1;
+			}
+		}
+
 		//each actor elements
 		for (XMLElement* actor = root->FirstChildElement();
 			actor != nullptr;
@@ -195,6 +212,15 @@ namespace lynx
 
 		XMLElement* root = doc.NewElement("Level");
 		doc.InsertFirstChild(root);
+
+		// Folders of the Outliner (editor), "a|a/b|c".
+		if (!outliner_folders.empty())
+		{
+			std::string folders;
+			for (const std::string& f : outliner_folders)
+				folders += (folders.empty() ? "" : "|") + f;
+			root->SetAttribute("outliner_folders", folders.c_str());
+		}
 
 		for (Actor* actor : actors_)
 		{

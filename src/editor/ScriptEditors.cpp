@@ -1,6 +1,7 @@
 #include "ScriptEditors.h"
 
 #include "EditorIcons.h"
+#include "JsonEditor.h"
 #include "../scripting/Scripting.h"
 
 #include <imgui_textedit/TextEditor.h>
@@ -166,6 +167,19 @@ namespace lynx::editor::script_editors
 			char find[128] = {};
 			bool show_goto = false;
 			char goto_line[16] = {};
+			// .json : visual editor ("Editor") or the text ("Raw")
+			bool is_json = false;
+			bool visual = false;
+			json_editor::Json json;
+			json_editor::State json_state;
+			bool json_stale = true;          // the text changed : parse it again
+			bool json_ok = false;
+			bool json_comments = false;
+			std::string json_error;
+			int json_error_line = 0;
+			std::string json_source;         // text the document was read from / written to
+			std::vector<std::string> visual_undo;
+			std::vector<std::string> visual_redo;
 		};
 
 		std::vector<std::unique_ptr<Editor>> g_editors;
@@ -196,6 +210,9 @@ namespace lynx::editor::script_editors
 			e.changed_on_disk = false;
 			e.error.clear();
 			e.check_pending = true;
+			e.json_stale = true;
+			e.visual_undo.clear();
+			e.visual_redo.clear();
 			std::error_code ec;
 			e.write_time = fs::last_write_time(e.path, ec);
 			e.has_write_time = !ec;
@@ -315,6 +332,118 @@ namespace lynx::editor::script_editors
 			e.text.SetCursorPosition(TextEditor::Coordinates(line - 1, 0));
 		}
 
+		// ---------------------------------------------------------------------
+		// JSON : "Editor" view
+		// ---------------------------------------------------------------------
+
+		void SyncJson(Editor& e)
+		{
+			if (!e.json_stale)
+				return;
+			e.json_stale = false;
+			e.json_source = e.text.GetText();
+			e.json_ok = json_editor::Parse(e.json_source, e.json, e.json_error, &e.json_comments);
+			e.json_error_line = 0;
+			if (!e.json_ok)
+			{
+				static const std::regex position(R"(line (\d+))");
+				std::smatch match;
+				if (std::regex_search(e.json_error, match, position))
+					e.json_error_line = std::stoi(match.str(1));
+			}
+		}
+
+		void UpdateDirty(Editor& e)
+		{
+			e.dirty = e.json_source != e.saved_text && e.json_source != e.saved_text + "\n";
+		}
+
+		// The visual editor changed the document : new text (one undo step).
+		void CommitJson(Editor& e)
+		{
+			e.visual_undo.push_back(e.json_source);
+			e.visual_redo.clear();
+			e.json_source = json_editor::Dump(e.json, e.json_source);
+			e.text.SetText(e.json_source);
+			UpdateDirty(e);
+		}
+
+		void VisualUndo(Editor& e, bool redo)
+		{
+			std::vector<std::string>& from = redo ? e.visual_redo : e.visual_undo;
+			std::vector<std::string>& to = redo ? e.visual_undo : e.visual_redo;
+			if (from.empty())
+				return;
+			to.push_back(e.json_source);
+			e.json_source = from.back();
+			from.pop_back();
+			e.text.SetText(e.json_source);
+			std::string error;
+			e.json_ok = json_editor::Parse(e.json_source, e.json, error, &e.json_comments);
+			UpdateDirty(e);
+		}
+
+		void SetVisual(Editor& e, bool visual)
+		{
+			if (e.visual == visual)
+				return;
+			e.visual = visual;
+			e.json_stale = true;   // the raw text may have been edited
+		}
+
+		/** "Editor | Raw" in the right corner of the toolbar. */
+		void ModeSwitch(Editor& e)
+		{
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float w1 = ImGui::CalcTextSize("Editor").x + style.FramePadding.x * 2.f;
+			const float w2 = ImGui::CalcTextSize("Raw").x + style.FramePadding.x * 2.f;
+			const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+			ImGui::SameLine();
+			ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - w1 - w2));
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, style.ItemSpacing.y));
+			for (int i = 0; i < 2; ++i)
+			{
+				const bool visual = i == 0;
+				const bool selected = e.visual == visual;
+				if (i > 0)
+					ImGui::SameLine();
+				if (selected)
+				{
+					ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+				}
+				if (ImGui::Button(visual ? "Editor" : "Raw"))
+					SetVisual(e, visual);
+				if (selected)
+					ImGui::PopStyleColor(2);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip(visual ? "Visual editor : fields, values, colors" : "The text of the file");
+			}
+			ImGui::PopStyleVar();
+		}
+
+		void DrawJsonView(Editor& e, float height)
+		{
+			SyncJson(e);
+			ImGui::BeginChild("##json_view", ImVec2(0.f, height), ImGuiChildFlags_Borders);
+			if (!e.json_ok)
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.22f, 0.20f, 1.f));
+				ImGui::TextWrapped("This file is not valid JSON : %s", e.json_error.c_str());
+				ImGui::PopStyleColor();
+				ImGui::Spacing();
+				if (ImGui::Button(e.json_error_line > 0 ? "Fix it in the raw text (go to the line)" : "Fix it in the raw text"))
+				{
+					SetVisual(e, false);
+					if (e.json_error_line > 0)
+						GoToLine(e, e.json_error_line);
+				}
+			}
+			else if (json_editor::Draw(e.json, e.json_state))
+				CommitJson(e);
+			ImGui::EndChild();
+		}
+
 		// ( [ { : the closing one is inserted after the cursor.
 		void AutoCloseBrackets(Editor& e, const std::string& before)
 		{
@@ -354,20 +483,28 @@ namespace lynx::editor::script_editors
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Reload from disk (unsaved edits are lost)");
 			ImGui::SameLine();
-			ImGui::BeginDisabled(!e.text.CanUndo());
+			ImGui::BeginDisabled(e.visual ? e.visual_undo.empty() : !e.text.CanUndo());
 			if (icons::Button("Undo", icons::Icon::Undo))
-				e.text.Undo();
+			{
+				if (e.visual)
+					VisualUndo(e, false);
+				else
+					e.text.Undo();
+			}
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 				ImGui::SetTooltip("Undo (Ctrl+Z) - Redo : Ctrl+Y");
-			ImGui::SameLine();
-			if (icons::Button("Find", icons::Icon::Search, icons::kThemeTint, e.show_find))
+			if (!e.visual)
 			{
-				e.show_find = !e.show_find;
-				e.focus_find = e.show_find;
+				ImGui::SameLine();
+				if (icons::Button("Find", icons::Icon::Search, icons::kThemeTint, e.show_find))
+				{
+					e.show_find = !e.show_find;
+					e.focus_find = e.show_find;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Find (Ctrl+F), next F3, previous Shift+F3");
 			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Find (Ctrl+F), next F3, previous Shift+F3");
 
 			ImGui::SameLine();
 			ImGui::TextDisabled("|");
@@ -386,6 +523,9 @@ namespace lynx::editor::script_editors
 			ImGui::TextDisabled("%s", e.path.parent_path().filename().generic_string().c_str());
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("%s", e.path.string().c_str());
+
+			if (e.is_json)
+				ModeSwitch(e);
 		}
 
 		void FindBar(Editor& e)
@@ -417,6 +557,19 @@ namespace lynx::editor::script_editors
 
 		void StatusBar(Editor& e)
 		{
+			if (e.visual)
+			{
+				if (e.json_ok)
+					ImGui::TextDisabled("%d values   JSON", json_editor::CountValues(e.json));
+				else
+					ImGui::TextDisabled("JSON");
+				if (e.json_ok && e.json_comments)
+				{
+					ImGui::SameLine();
+					ImGui::TextColored(ImVec4(0.80f, 0.45f, 0.05f, 1.f), "The comments (//) are removed when a value is changed here.");
+				}
+				return;
+			}
 			const auto cursor = e.text.GetCursorPosition();
 			ImGui::TextDisabled("Ln %d, Col %d   %d lines   %s", cursor.mLine + 1, cursor.mColumn + 1,
 			                    e.text.GetTotalLines(), e.text.GetLanguageDefinition().mName.c_str());
@@ -456,12 +609,15 @@ namespace lynx::editor::script_editors
 				}
 			}
 
-			if (!e.dirty && e.text.IsTextChanged())
+			// (the text editor is not drawn in the JSON "Editor" view : its
+			// "changed" flag only means something in the raw view)
+			if (!e.visual && !e.dirty && e.text.IsTextChanged())
 				e.dirty = e.text.GetText() != e.saved_text && e.text.GetText() != e.saved_text + "\n";
-			if (e.text.IsTextChanged())
+			if (!e.visual && e.text.IsTextChanged())
 			{
 				e.last_edit_time = ImGui::GetTime();
 				e.check_pending = true;
+				e.json_stale = true;
 			}
 			if (e.check_pending && ImGui::GetTime() - e.last_edit_time > 0.4)
 				CheckScript(e);
@@ -498,7 +654,21 @@ namespace lynx::editor::script_editors
 				const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
 
 				// Shortcuts of the editor window.
-				if (focused)
+				if (focused && e.visual)
+				{
+					// Undo / redo of the visual editor (not while a field is typed in :
+					// the field has its own).
+					if (io.KeyCtrl && !ImGui::IsAnyItemActive())
+					{
+						if (ImGui::IsKeyPressed(ImGuiKey_Z, false) && !io.KeyShift)
+							VisualUndo(e, false);
+						else if (ImGui::IsKeyPressed(ImGuiKey_Y, false) || (ImGui::IsKeyPressed(ImGuiKey_Z, false) && io.KeyShift))
+							VisualUndo(e, true);
+					}
+					if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_0, false))
+						e.zoom = 1.f;
+				}
+				else if (focused)
 				{
 					if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
 					{
@@ -525,7 +695,7 @@ namespace lynx::editor::script_editors
 				}
 
 				Toolbar(e);
-				if (e.show_find)
+				if (e.show_find && !e.visual)
 					FindBar(e);
 
 				if (e.changed_on_disk)
@@ -564,12 +734,21 @@ namespace lynx::editor::script_editors
 
 				// The text editor, zoomed while it renders only.
 				const float status_height = ImGui::GetFrameHeightWithSpacing();
-				const std::string before = e.text.GetText();
 				const float previous_scale = io.FontGlobalScale;
 				io.FontGlobalScale = previous_scale * e.zoom;
-				e.text.Render("##text", ImVec2(0.f, std::max(80.f, ImGui::GetContentRegionAvail().y - status_height)), true);
-				io.FontGlobalScale = previous_scale;
-				AutoCloseBrackets(e, before);
+				const float height = std::max(80.f, ImGui::GetContentRegionAvail().y - status_height);
+				if (e.visual)
+				{
+					DrawJsonView(e, height);
+					io.FontGlobalScale = previous_scale;
+				}
+				else
+				{
+					const std::string before = e.text.GetText();
+					e.text.Render("##text", ImVec2(0.f, height), true);
+					io.FontGlobalScale = previous_scale;
+					AutoCloseBrackets(e, before);
+				}
 
 				StatusBar(e);
 
@@ -645,6 +824,9 @@ namespace lynx::editor::script_editors
 		editor->text.SetLanguageDefinition(LanguageFor(absolute));
 		editor->text.SetTabSize(4);
 		editor->text.SetShowWhitespaces(false);
+		// .json : opens in the visual editor ("Raw" in the corner for the text).
+		editor->is_json = Lower(absolute.extension().string()) == ".json";
+		editor->visual = editor->is_json;
 		ApplyPalette(*editor);
 		Load(*editor);
 		if (line > 0)
@@ -718,6 +900,9 @@ namespace lynx::editor::script_editors
 				continue;
 			editor->path = relative.empty() ? destination : destination / relative;
 			editor->text.SetLanguageDefinition(LanguageFor(editor->path));
+			editor->is_json = Lower(editor->path.extension().string()) == ".json";
+			if (!editor->is_json)
+				editor->visual = false;
 			editor->write_time = fs::last_write_time(editor->path, ec);
 			editor->has_write_time = !ec;
 			editor->focus_next_frame = true;   // new title = new window

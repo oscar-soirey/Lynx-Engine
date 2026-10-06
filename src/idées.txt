@@ -1,45 +1,85 @@
-séléction automatique du modele d'IA, pour generer des pixelart par exemple
+obligé:
+
+ameliorer l'editeur de code javascript :
+-police à ./fonts/JetBrainsMono-{Regular/Italic/Bold/BoldItalic}.ttf
+-ameliorer la séléction, n'hesite pas a modifier ImTextEdit pour ca
+-vrai language server fonctionel (avec detection des erreurs etc...)
+-et aussi le curseur de souris de selection de texte s'affiche pas, on garde le curseur par défaut de lynx, je veux juste le selecteur de texte par défaut du windows
+
+quand on survole l'encoche en haut, ca affiche des infos sur le projet (sa date de modification, de création, son path, sa taille, etc...)
+
+a coté du bouton lynxie dans la header bar de la window glfw, met la version du moteur (qui est récuperée par GetEngineVersion() (dans engine.h) (met le en petit, ca doit donner ca : Lynx 2026.0.6 par exemple), modifie GetEngineVersion pour ajouter le point.
+
+la caméra ne doit plus etre gérée par le main du jeu, mais en tant que composant, la camera doit etre affichée dans le viewport du personnage dont l'actor est possédé, en gros la camera est en composant de l'actor possedé par le PlayerController
+
+revenir a la police d'ecriture normale pour Lynxie
+
+class Humanoid fonctionel (herite de actor), s'inspirer de Pawn pour les deplacements, ne pas implementer par contre la gestion des input, juste le mouvement
+
+collider components qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
+
+et revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
+Q : Quelle structure veux-tu pour l'animgraph ?
+R : Graphe de pose Unreal : un nœud Output Pose final, auquel on branche une Animation, un Blend Space ou la State Machine (plus de nœud Entry au niveau racine)
+
+collider actor dans les actors standards du moteur
 
 gestion de la musique pour les jeux open world
-
-editeur graphique de json (des qu'on ouvre un fichier json, dans le coin on peut choisir entre l'editeur, et le fichier raw)
 
 assossier un level.xml à un .hrlv (pour qu'ils soient liés)
 
 pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>
 
-collisions qui appelent OnBeginOverlap(Actor* a); et autres, et pareil en javascript
+mode simulation (pour play le jeu, mais ne pas posseder l'actor et rester avec la camera et deplacements de l'editeur
 
-plugins comme dans Horizon-Next
+projets sans C++, ou on ne compile pas, on charge tout depuis une dll déja buildée
+
+options de post process (juste editer les valeurs du post process courant, réfere toi a l'api de HRL pour savoir tout ce qu'on peut changer ou pose moi la question)
+
+casts en javascript (je sais pas si c'est possible), pour genre avoir un ecosysteme entre les classes javascript, genre faire dans coin.js : "player.coin += 1;" alors que coin est une variable qui apartient a la classe Player dans player.js
+
+limiter l'éloignement de la camera à 1000 dans l'editeur
+
+pouvoir selectionner et copier les messages de la console
+
+quand lynx echoue le script, il ne doit pas etre affichée, l'erreur ne doit pas etre affichée, elle doit echouer en silence, et continuer d'essayer
+
+
+
+
+
+plus tard:
 
 Lynxie doit absolument pouvoir chercher sur internet
 
-convertir un sprite 2D en voxels directement dans le monde (genre on place un sprite, on clic droit sur l'actor (dans le level ou dans l'outilner) et on peut cliquer sur convertir en voxels ou un truc comme ca, on choisit quelques options, et ca projete nearest le sprite en voxels (ca choisit parmis la palette de couleur, si la couleur n'existe pas du tout, on crée un type de voxel, etc... fin faut que y'ai un bon rendu)
 
-enlever la fenetre node test
 
-pouvoir selectionner et copier le texte ecrit dans la conversation de lynxie (sans changer le fond ni le style)
 
-rendre plus beau le node editor (en le faisant pas de la meme couleur que le fond par exemple, en ajoutant des icones, des couleurs, etc...
 
-et revois le systeme de animgraph, et fais la à l'envers (on donne la sortie, pas l'entrée), comme dans unreal
+kiffe:
 
-arrondir un petit peu l'encoche de la title bar
+component d'objets 3D
 
-pouvoir selectionner plusieurs actors en meme temps (avec shift)
+on peut choisir en haut a droite du viewport de se deplacer en camera 2D (comme elle est aujourdhui) ou en 3D (comme dans unreal engine par exemple)
 
-mettre une selection par glisser (genre clic gauche maintenu de la souris) dans l'outiliner et dans le content browser
+séléction automatique du modele d'IA, pour generer des pixelart par exemple
 
-afficher l'icone de la classe dans l'outliner (en petit)
+plugins C++ comme dans Horizon-Next qui peuvent modifier l'editeur, ajouter des classes, des components, etc...
 
-povoir creer des dossiers dans l'outiliner (comme dans unreal)
+editeur de post process
 
-mode simulation (pour play le jeu, mais ne pas posseder l'actor et rester avec la camera et deplacements de l'editeur
+editeur de sprites pixel art integré a l'editeur (qui exporte pas en png ou autre, il exporte directement en .lsprite), comme ca on peut l'editer a tout moment, a aucun moment c'est convertit en image par contre ca n'utilise pas les voxels du monde
+
+
+
 
 
 
 
 HRL:
+
+bugs quand on met plusieurs lights dans une scene
+
 trouver pourquoi le color picking marche a moitié
 
 fluides en voxels (dans HRL)

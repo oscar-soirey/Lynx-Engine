@@ -1,0 +1,4 @@
+IDI_ICON1 ICON DISCARDABLE "icon.ico"
+// GLFW gives this icon to every window it creates (project browser, splash,
+// build window, ImGui windows dragged out of the editor...).
+GLFW_ICON ICON DISCARDABLE "icon.ico"

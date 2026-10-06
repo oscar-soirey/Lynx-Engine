@@ -133,7 +133,7 @@ file(GLOB ImGUI_SOURCE
 		"${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp"
 )
 
-add_executable(LynxEditor src/icon.rc
+add_executable(LynxEditor src/editor_icon.rc
 		${ImGUI_SOURCE}
 		third-party/imgui_textedit/TextEditor.cpp
 		third-party/imgui_node/imnodes.cpp
@@ -154,7 +154,6 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/ProfilerWindow.cpp
 		src/editor/ScriptEditors.cpp
 		src/editor/MarkdownText.cpp
-		src/editor/NodeGraphTest.cpp
 		src/editor/EditorFonts.cpp
 		src/editor/ShipGame.cpp
 		src/editor/SplashScreen.cpp
@@ -164,6 +163,9 @@ add_executable(LynxEditor src/icon.rc
 		src/editor/TitleBar.cpp
 		src/editor/FileIcons.cpp
 		src/editor/SpriteVoxelizer.cpp
+		src/editor/TextSelection.cpp
+		src/editor/WindowIcon.cpp
+		src/editor/JsonEditor.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp
@@ -242,7 +244,7 @@ target_link_libraries(LynxRuntime PRIVATE
 ## then the engine versions from the GitHub releases, see launcher/README.md)
 # Independent from lynx.dll : it must start on a computer where nothing is installed yet.
 
-add_executable(LynxLauncher src/icon.rc
+add_executable(LynxLauncher src/editor_icon.rc
 		${ImGUI_SOURCE}
 
 		launcher/main.cpp

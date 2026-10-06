@@ -394,6 +394,7 @@ namespace lynx
 		HPROPERTY(transform, Exposed, OnTransformChanged());
 		HPROPERTY(scripts, Exposed, OnScriptsPropertyChanged());
 		HPROPERTY(auto_possess_player, Exposed);
+		HPROPERTY(outliner_folder, Exposed);
 	}
 
 	Actor::~Actor()
@@ -426,6 +427,7 @@ namespace lynx
 		  auto_possess_done_(other.auto_possess_done_)
 	{
 		object_id_ = other.object_id_;
+		outliner_folder = other.outliner_folder;
 		other.entity_ = ecs::kNullEntity;
 		ecs::RebindEntity(entity_, this);
 
@@ -437,6 +439,7 @@ namespace lynx
 		HPROPERTY(transform, Exposed, OnTransformChanged());
 		HPROPERTY(scripts, Exposed, OnScriptsPropertyChanged());
 		HPROPERTY(auto_possess_player, Exposed);
+		HPROPERTY(outliner_folder, Exposed);
 	}
 
 	Actor& Actor::operator=(Actor&& other)
@@ -446,6 +449,7 @@ namespace lynx
 
 		// les proprietes de `this` pointent deja sur ses propres membres
 		object_id_ = other.object_id_;
+		outliner_folder = other.outliner_folder;
 		transform = other.transform;
 		scripts = std::move(other.scripts);
 		auto_possess_player = other.auto_possess_player;

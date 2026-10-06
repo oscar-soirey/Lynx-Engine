@@ -2,6 +2,8 @@
 #include "ProjectTemplates.h"
 #include "EditorFonts.h"
 
+#include "WindowIcon.h"
+
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
 #include <imgui/imgui_impl_opengl3.h>
@@ -715,6 +717,7 @@ namespace lynx::editor
 			return false;
 		}
 
+		lynx::editor::window_icon::Apply(window);
 		glfwMakeContextCurrent(window);
 		glfwSwapInterval(1);
 

@@ -1,6 +1,7 @@
 #include "CommandsWindow.h"
 #include "../LynxieIcon.h"
 #include "../MarkdownText.h"
+#include "../TextSelection.h"
 #include "../EditorFonts.h"
 
 #include "CommandRegistry.h"
@@ -2240,9 +2241,7 @@ namespace lynx::editor::commands_window
 			{
 				if (paragraph.empty())
 					return;
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::TextUnformatted(paragraph.c_str());
-				ImGui::PopTextWrapPos();
+				text_selection::TextWrapped(paragraph.c_str());   // same look, selectable
 				paragraph.clear();
 			};
 
@@ -2261,6 +2260,7 @@ namespace lynx::editor::commands_window
 				{
 					ImGui::Indent();
 					ImGui::TextDisabled("%s", line.empty() ? " " : line.c_str());
+					text_selection::RecordLastItem(line.c_str());
 					ImGui::Unindent();
 				}
 				else
@@ -2340,6 +2340,8 @@ namespace lynx::editor::commands_window
 			const ImGuiStyle& style = ImGui::GetStyle();
 			const float bottom_height = ImGui::GetFrameHeightWithSpacing() * 2.f + ImGui::GetTextLineHeightWithSpacing();
 			ImGui::BeginChild("##LocalAIConversation", ImVec2(0.f, -bottom_height), true);
+			// The text of the conversation can be selected and copied (drag, Ctrl+C).
+			text_selection::Begin("##LynxieText");
 			// Colors readable on the light pixel theme and on a dark one.
 			const ImVec4 window_bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
 			const bool light_theme = window_bg.x * 0.3f + window_bg.y * 0.59f + window_bg.z * 0.11f > 0.5f;
@@ -2362,6 +2364,7 @@ namespace lynx::editor::commands_window
 					speaker == "Lynxie" ? lynxie_color :
 					                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 				ImGui::TextUnformatted(speaker.c_str());
+				text_selection::RecordLastItem(speaker.c_str());
 				ImGui::PopStyleColor();
 				// Lynxie writes Markdown (**bold**, lists, `code`, tables...) ;
 				// the user's messages and the script receipts stay plain text.
@@ -2418,6 +2421,7 @@ namespace lynx::editor::commands_window
 				g_ai_chat_entries = entries;
 				ImGui::SetScrollHereY(1.f);
 			}
+			text_selection::End();
 			ImGui::EndChild();
 
 			const bool can_send = !g_local_ai.busy && g_local_ai.selected_model >= 0 &&

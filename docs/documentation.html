@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lynx — Complete Documentation</title>
+<link rel="icon" href="assets/logo-black.png"><link rel="stylesheet" href="styles.css"><style>
+/* Shared Lynx navigation: identical chrome across every section */
+.site-shared-toolbar,
+header,
+nav {
+  box-sizing: border-box;
+}
+</style></head>
+<body>
+<header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="documentation.html">Documentation</a><a href="scripting.html">JavaScript</a><a class="lynxie-link" href="lynxie.html">Lynxie</a></nav></header>
+
+<main class="docs">
+<section class="doc-hero">
+<p class="eyebrow">LYNX ENGINE / COMPLETE DOCUMENTATION</p>
+<h1>Everything inside Lynx.</h1>
+<p>One documentation hub for the engine's C++ core, internal architecture, public API, JavaScript runtime, editor, UI system, project structure, game modules, assets, build pipeline and runtime.</p>
+</section>
+
+<div class="note"><b>Start here.</b> You do not need C++ to make a game with Lynx. Use the editor and JavaScript for gameplay. C++ is the extension layer when you need custom Actors, Components, systems or native modules.</div>
+
+<div class="doc-grid">
+<aside class="toc">
+<h3>DOCUMENTATION</h3>
+<a href="#overview">Overview</a>
+<a href="#quickstart">Project workflow</a>
+<a href="#cpp">C++ / native</a>
+<a href="#internals">Engine internals</a>
+<a href="#actors">Actors &amp; Components</a>
+<a href="#reflection">Reflection</a>
+<a href="#modules">Game DLL / Factory</a>
+<a href="#javascript">JavaScript</a>
+<a href="#editor">Editor</a>
+<a href="#widgets">UI / Widgets</a>
+<a href="#assets">Assets &amp; data</a>
+<a href="#runtime">Runtime &amp; build</a>
+<a href="#references">Existing references</a>
+</aside>
+
+<div class="doc-content">
+
+<article id="overview">
+<h2>1. What is Lynx?</h2>
+<p>Lynx is a C++ game engine built around Actors, Components, Levels and a lightweight JavaScript layer. Rendering is provided by HRL, while EnTT is used internally for the ECS registry and QuickJS-ng powers scripting.</p>
+<div class="api-grid">
+<div><code>Actor</code><span>World object with transform, scripts, components and ownership.</span></div>
+<div><code>Level</code><span>Owns active Actors and safely defers spawn/destruction during iteration.</span></div>
+<div><code>Component</code><span>Reusable native gameplay behavior attached to an Actor.</span></div>
+<div><code>Object</code><span>Base reflected object used by engine and game classes.</span></div>
+<div><code>Engine</code><span>Owns global runtime state, the current Level, factory, players and HRL scene.</span></div>
+<div><code>QuickJS</code><span>Runs gameplay scripts and JavaScript classes.</span></div>
+</div>
+</article>
+
+<article id="quickstart">
+<h2>2. The project workflow</h2>
+<p>A normal Lynx project is edited as a project folder. The editor manages the level, Actors, assets, input settings and scripts. The game itself is built as a separate DLL which is loaded by the editor or runtime.</p>
+<div class="timeline">
+<div><b>01 / CREATE</b><span>Open a project and configure its assets, level and input.</span></div>
+<div><b>02 / BUILD</b><span>Use JavaScript and the editor first. Add C++ only when native extension is required.</span></div>
+<div><b>03 / PLAY</b><span>Editor Play mode loads the game module and runs the current level.</span></div>
+<div><b>04 / RELOAD</b><span>Reload Game can rebuild/reload the game DLL without restarting the editor.</span></div>
+<div><b>05 / SHIP</b><span>LynxRuntime runs the project without the editor.</span></div>
+<div><b>06 / DISTRIBUTE</b><span>Ship Game prepares a release runtime and project assets.</span></div>
+</div>
+<h3>Typical project content</h3>
+<pre>MyGame/
+  assets/
+    classes/
+    scripts/
+    ui/
+    voxels.json
+    input.json
+    *.png / *.wav / ...
+  levels/
+  CMakeLists.txt
+  src/
+  build/</pre>
+</article>
+
+<article id="cpp">
+<h2>3. C++ development</h2>
+<p>The native API is intended for extending Lynx rather than forcing every game to be written in C++. Public engine headers expose stable concepts such as <code>Engine</code>, <code>Level</code>, <code>Actor</code>, <code>Component</code>, input, scripting and widgets without requiring third-party ECS headers in gameplay code.</p>
+<h3>Engine lifetime</h3>
+<pre>#include &lt;Lynx.h&gt;
+
+lynx::Engine* engine = lynx::Engine::Create();
+engine-&gt;CreateScene();
+
+engine-&gt;StartGame();
+engine-&gt;ProgressOneFrame(dt);
+engine-&gt;EndGame();
+
+lynx::Engine::Destroy();</pre>
+<p>The host application is responsible for the window and for feeding frames to the engine. Rendering is initialized through HRL before the engine scene is created.</p>
+<h3>Custom Component</h3>
+<pre>struct Health : lynx::Component
+{
+    float hp = 100.f;
+
+protected:
+    void BeginPlay() override {}
+    void Tick(float dt) override
+    {
+        if (hp &lt;= 0.f)
+            GetOwner()-&gt;GetController(); // example engine access
+    }
+    void EndPlay() override {}
+};
+
+auto&amp; health = actor-&gt;AddComponent&lt;Health&gt;();</pre>
+<p>Component callbacks are optional. The lifecycle is <code>OnAttach()</code>, <code>BeginPlay()</code>, <code>Update(dt)</code>, <code>Tick(dt)</code>, <code>EndPlay()</code>, then destruction. <code>Update</code> also runs outside gameplay; <code>Tick</code> is gameplay simulation and respects <code>tick_enabled</code>.</p>
+</article>
+
+<article id="internals">
+<h2>4. Engine internals</h2>
+<p>The runtime is deliberately split into layers. The editor and host are not the same thing as the engine DLL, and third-party implementation details stay behind the public headers.</p>
+<table><tr><th>Layer</th><th>Responsibility</th></tr>
+<tr><td>Host</td><td>Window, platform integration, project selection and gamepad plumbing.</td></tr>
+<tr><td>Engine</td><td>Game state, Level, Actors, Components, players, factory and frame progression.</td></tr>
+<tr><td>ECS</td><td>Internal EnTT registry. Actors expose an opaque entity id instead of EnTT types.</td></tr>
+<tr><td>Scripting</td><td>QuickJS-ng runtime, script instances, JavaScript classes and bindings.</td></tr>
+<tr><td>Rendering</td><td>HRL scene, viewports, cameras, sprites, lights and rendering resources.</td></tr>
+<tr><td>Editor</td><td>ImGui docking UI, viewport, Outliner, Details, Content Browser, graph/editor tools and build controls.</td></tr>
+</table>
+<h3>Frame lifecycle</h3>
+<pre>HOST
+  ↓ supplies dt
+ENGINE
+  ↓ advances one frame
+LEVEL
+  ↓ updates Actors
+ACTORS / ECS
+  ↓ updates Components
+SCRIPTS
+  ↓ BeginPlay → Update(dt)
+DEFERRED
+  ↓ apply queued spawns / destruction
+RENDER</pre>
+<p>Level iteration is protected by deferred queues. Actors spawned or destroyed while the engine is traversing the Actor list are finalized safely after the iteration instead of invalidating the container.</p>
+</article>
+
+<article id="actors">
+<h2>5. Actors, Components and Levels</h2>
+<h3>Actor</h3>
+<p><code>lynx::Actor</code> inherits from <code>Object</code>. It contains a transform, script list, possession state, editor folder metadata and an internal ECS entity. Components are owned by the Actor.</p>
+<pre>actor-&gt;transform.position = {0.f, 2.f, 0.f};
+
+actor-&gt;AddComponent&lt;Health&gt;(100.f);
+
+if (actor-&gt;HasComponent&lt;Health&gt;())
+    actor-&gt;GetComponent&lt;Health&gt;()-&gt;hp = 50.f;
+
+actor-&gt;RemoveComponent&lt;Health&gt;();</pre>
+<h3>Level</h3>
+<p><code>Level</code> owns active Actors. Native code can spawn by factory class name, construct a concrete Actor, find Actors by id, iterate them, count classes and save the level.</p>
+<pre>auto* player = level-&gt;SpawnActor("Player");
+auto* enemy  = level-&gt;GetActorFromID("Enemy01");
+
+for (auto* actor : level-&gt;GetActors())
+{
+    // inspect actors
+}
+
+level-&gt;DestroyActor(enemy);</pre>
+</article>
+
+<article id="reflection">
+<h2>6. Reflection, properties and functions</h2>
+<p>Lynx uses explicit reflection. A native member becomes visible to the editor and JavaScript when registered by the class. This keeps the public system predictable and avoids requiring a general-purpose C++ reflection library.</p>
+<pre>class Pawn : public lynx::Actor
+{
+public:
+    float move_speed_ = 5.f;
+
+    void Jump();
+
+    Pawn()
+    {
+        HPROPERTY(move_speed_, lynx::Exposed);
+        HFUNCTION(Jump);
+    }
+};</pre>
+<p><code>HPROPERTY</code> exposes a value to Details, level serialization and JavaScript. <code>HFUNCTION</code> registers a callable function for the same reflection system. Supported property values include <code>int</code>, <code>float</code>, <code>bool</code>, <code>std::string</code>, <code>vec2</code>, <code>vec3</code>, <code>vec4</code> and <code>transform</code>.</p>
+<h3>Dynamic properties</h3>
+<p>Objects can also create reflected properties at runtime. This is used by JavaScript classes for <code>static properties</code>, which then appear in Details and are serialized like native properties.</p>
+</article>
+
+<article id="modules">
+<h2>7. Game DLLs and the Factory</h2>
+<p>Game projects are separate from the engine. The factory allows native classes to be registered when the game module is loaded and removed again when it is unloaded.</p>
+<pre>LYNX_LINK_MODULE(
+    LYNX_MODULE_REGISTER(MyPlayer);
+    LYNX_MODULE_REGISTER(MyEnemy);
+);</pre>
+<p>The exported module functions are <code>FactoryRegisterClasses()</code> and <code>FactoryUnregisterClasses()</code>. The engine removes constructors belonging to an unloaded DLL so the factory never keeps function pointers into a module that no longer exists.</p>
+<h3>Build contract</h3>
+<p>A game project can use CMake's Lynx package:</p>
+<pre>find_package(Lynx CONFIG)
+add_library(MyGame SHARED ...)
+target_link_libraries(MyGame PRIVATE Lynx::Lynx Lynx::HRL)</pre>
+<p>The game should be compiled with the same compiler/toolchain and engine version as the editor/runtime.</p>
+</article>
+
+<article id="javascript">
+<h2>8. JavaScript runtime</h2>
+<p>JavaScript is the preferred gameplay iteration layer. A normal attached script is a behavior, not a class. Every attachment receives its own execution environment while the source can be compiled and cached.</p>
+<pre>function BeginPlay()
+{
+    parent.position = vec3(5, 0, 0);
+}
+
+function Update(dt)
+{
+    parent.position.x += 3 * dt;
+}</pre>
+<h3>JavaScript classes</h3>
+<p>Assets can also define Actor classes using standard JavaScript inheritance:</p>
+<pre>class Enemy extends Pawn
+{
+    static properties = {
+        hp: 100,
+        speed: 2.5
+    };
+
+    BeginPlay()
+    {
+        this.addTag("enemy");
+    }
+
+    Update(dt)
+    {
+        this.position.x += this.speed * dt;
+    }
+}</pre>
+<p>Classes derived from Actor are registered in the same factory concept as C++ classes and can appear in Place Actors, level files and <code>Level.spawn()</code>.</p>
+<h3>Core globals</h3>
+<div class="api-grid">
+<div><code>Level</code><span>spawn, find, findWithTag, all, count, destroy.</span></div>
+<div><code>Input</code><span>pressed, held, released, axis.</span></div>
+<div><code>Engine</code><span>time dilation, game state and player access.</span></div>
+<div><code>UI</code><span>Create, destroy and inspect UserWidgets.</span></div>
+<div><code>vec3()</code><span>Create vector values used by transforms and gameplay.</span></div>
+<div><code>console</code><span>log, info, warn and error output.</span></div>
+</div>
+<p>For the complete JavaScript reference, use the dedicated <a href="scripting.html"><b>JavaScript guide</b></a>.</p>
+</article>
+
+<article id="editor">
+<h2>9. Lynx Editor</h2>
+<p>The editor is a separate application built around Dear ImGui with docking. It is the development environment for levels, assets, scripts, input, widgets and game builds.</p>
+<div class="api-grid">
+<div><code>Viewport</code><span>Play/edit the current world and interact with Actors.</span></div>
+<div><code>Outliner</code><span>Browse Actors and organize them into folders.</span></div>
+<div><code>Details</code><span>Edit reflected Actor/component properties.</span></div>
+<div><code>Content Browser</code><span>Browse project assets and create engine resources.</span></div>
+<div><code>Script Editor</code><span>Edit JavaScript with engine-aware workflows.</span></div>
+<div><code>Input Settings</code><span>Edit input.json and apply mappings immediately.</span></div>
+<div><code>Widget Editor</code><span>Build UMG-like interfaces from .widget assets.</span></div>
+<div><code>Build / Reload</code><span>Compile and reload the game DLL without restarting the editor.</span></div>
+</div>
+<h3>Input Settings</h3>
+<p>Input mappings live in <code>input.json</code>. Actions and axes can use keyboard, mouse and gamepad inputs. Changes made through Input Settings are saved and reloaded immediately.</p>
+<h3>Project and build tools</h3>
+<p>The editor contains project/build tooling, output console, profiler views, graph editors, JSON/markdown/text editors and project settings. These are editor facilities and are not required by the standalone runtime.</p>
+</article>
+
+<article id="widgets">
+<h2>10. UI and Widget system</h2>
+<p>Lynx has a UMG-like widget tree. A <code>UserWidget</code> is an asset-backed root containing panels and controls. The same system is available from C++ and JavaScript, while HRL remains an implementation detail of the renderer.</p>
+<pre>auto* hud = lynx::CreateWidget(player, "ui/Hud.widget");
+hud-&gt;GetWidget&lt;lynx::ProgressBar&gt;("Health")-&gt;percent = 0.75f;
+hud-&gt;AddToViewport();</pre>
+<p>Built-in panels include CanvasPanel, VerticalBox, HorizontalBox, Overlay and Border. Controls include TextBlock, Button, Image, Slider, CheckBox, ProgressBar and Spacer.</p>
+<p>Widget layouts use slate units and a DPI reference so a design made for 1920×1080 can scale to different viewport sizes. The Widget Editor stores the tree in <code>.widget</code> assets.</p>
+</article>
+
+<article id="assets">
+<h2>11. Assets and project data</h2>
+<h3>Levels</h3>
+<p>Levels serialize Actors, object ids, reflected properties, scripts and editor metadata such as Outliner folders. Scripts can be attached directly through the Actor's <code>scripts</code> property.</p>
+<h3>Voxels</h3>
+<p><code>assets/voxels.json</code> describes voxel types, including collision and gameplay flags, emissive behavior and destruction rules. The editor and runtime load this data before the level; Reload Game reloads it as well.</p>
+<h3>Input</h3>
+<p><code>input.json</code> contains Action Mappings and Axis Mappings. Named key codes such as <code>KEY_SPACE</code> and <code>KEY_W</code> are supported, while older numeric codes remain accepted.</p>
+<h3>Widgets and scripts</h3>
+<p><code>.widget</code> files describe UI trees. JavaScript files can live anywhere under <code>assets/</code>; a <code>classes/</code> directory is only a convention.</p>
+</article>
+
+<article id="runtime">
+<h2>12. Runtime, host and shipping</h2>
+<h3>Standalone runtime</h3>
+<pre>LynxRuntime.exe
+LynxRuntime.exe "C:/path/MyGame"</pre>
+<p>The runtime plays a project without the editor. The game DLL is searched beside the executable and then in the project's build directory.</p>
+<h3>Host boundary</h3>
+<p>The host owns the platform window. GLFW and platform input are kept outside the core engine boundary. The engine receives the relevant opaque handles and frame timing instead of owning the application's window lifecycle.</p>
+<h3>Release / Ship Game</h3>
+<p>The release engine build provides <code>LynxRuntime.exe</code> and the required engine DLLs. Ship Game can use a project icon and stores its project-specific settings in <code>.lynx/ship.cfg</code>.</p>
+</article>
+
+<article id="references">
+<h2>13. Detailed references</h2>
+<div class="api-grid">
+<div><code><a href="architecture.html">Architecture</a></code><span>Engine, Level, Actor, ECS, Factory, systems and frame lifecycle.</span></div>
+<div><code><a href="scripting.html">JavaScript</a></code><span>Script model, lifecycle, Actor API, transforms, input and hot reload.</span></div>
+<div><code></code><span>Compact reference for the QuickJS API actually registered by Lynx.</span></div>
+<div><code></footer>
+</body></html>

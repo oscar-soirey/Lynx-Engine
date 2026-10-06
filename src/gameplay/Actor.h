@@ -38,6 +38,12 @@ namespace lynx
 		 */
 		int auto_possess_player = -1;
 
+		/**
+		 * Folder of the actor in the Outliner of the editor ("Lights/Street",
+		 * "" = root). Saved with the level ; no effect in the game.
+		 */
+		std::string outliner_folder;
+
 
 		Actor();
 		~Actor() override;

@@ -57,7 +57,8 @@ namespace content_browser_actions
 
     struct State
     {
-        stdfs::path selected;
+        stdfs::path selected;                  // primary item (the last one clicked)
+        std::vector<stdfs::path> selection;    // every selected item (selected is one of them)
 
         NameAction name_action = NameAction::None;
         NewFileKind new_file_kind = NewFileKind::Text;
@@ -79,6 +80,90 @@ namespace content_browser_actions
     };
 
     static State state;
+
+
+    // -------------------------------------------------------------------------
+    // Selection (several items : Shift / Ctrl click, rubber band)
+    // -------------------------------------------------------------------------
+
+    static bool IsSelected(const stdfs::path& path)
+    {
+        return std::find(state.selection.begin(), state.selection.end(), path) != state.selection.end();
+    }
+
+    static void SelectOnly(const stdfs::path& path)
+    {
+        state.selection.clear();
+
+        if (!path.empty())
+            state.selection.push_back(path);
+
+        state.selected = path;
+    }
+
+    static void ToggleSelected(const stdfs::path& path)
+    {
+        auto it = std::find(state.selection.begin(), state.selection.end(), path);
+
+        if (it == state.selection.end())
+        {
+            state.selection.push_back(path);
+            state.selected = path;
+            return;
+        }
+
+        state.selection.erase(it);
+
+        if (state.selected == path)
+            state.selected = state.selection.empty() ? stdfs::path() : state.selection.back();
+    }
+
+    static void SetSelection(const std::vector<stdfs::path>& paths, const stdfs::path& primary)
+    {
+        state.selection.clear();
+
+        for (const stdfs::path& path : paths)
+        {
+            if (!path.empty() && !IsSelected(path))
+                state.selection.push_back(path);
+        }
+
+        if (!primary.empty() && IsSelected(primary))
+            state.selected = primary;
+        else
+            state.selected = state.selection.empty() ? stdfs::path() : state.selection.back();
+    }
+
+    static void ClearSelection()
+    {
+        state.selection.clear();
+        state.selected.clear();
+    }
+
+    static void RemoveFromSelection(const stdfs::path& path)
+    {
+        state.selection.erase(
+            std::remove(state.selection.begin(), state.selection.end(), path),
+            state.selection.end());
+
+        if (state.selected == path)
+            state.selected = state.selection.empty() ? stdfs::path() : state.selection.back();
+    }
+
+    // The selected items that still exist : what Delete / Copy / Cut / Duplicate act on.
+    static std::vector<stdfs::path> SelectedPaths()
+    {
+        std::vector<stdfs::path> result;
+        std::error_code error;
+
+        for (const stdfs::path& path : state.selection)
+        {
+            if (stdfs::exists(path, error))
+                result.push_back(path);
+        }
+
+        return result;
+    }
 
 
     // -------------------------------------------------------------------------
@@ -383,7 +468,7 @@ namespace content_browser_actions
             if (content_browser_current_path == state.rename_target)
                 content_browser_current_path = destination;
 
-            state.selected = destination;
+            SelectOnly(destination);
             ScriptsChanged({ destination });
             return true;
         }
@@ -402,7 +487,7 @@ namespace content_browser_actions
                 return false;
             }
 
-            state.selected = destination;
+            SelectOnly(destination);
             return true;
         }
 
@@ -419,7 +504,7 @@ namespace content_browser_actions
             out << FileTemplate(state.new_file_kind, destination.stem().string());
         }
 
-        state.selected = destination;
+        SelectOnly(destination);
 
         if (IsJs(destination))
         {
@@ -463,7 +548,7 @@ namespace content_browser_actions
 
         if (!created.empty())
         {
-            state.selected = created.back();
+            SetSelection(created, created.back());
             ScriptsChanged(created);
         }
     }
@@ -519,8 +604,7 @@ namespace content_browser_actions
             if (IsPathInside(content_browser_current_path, target))
                 content_browser_current_path = target.parent_path();
 
-            if (state.selected == target)
-                state.selected.clear();
+            RemoveFromSelection(target);
 
             deleted.push_back(target);
         }
@@ -599,7 +683,7 @@ namespace content_browser_actions
 
         if (!done.empty())
         {
-            state.selected = done.back();
+            SetSelection(done, done.back());
             ScriptsChanged(done);
         }
     }
@@ -634,7 +718,18 @@ namespace content_browser_actions
 
         const stdfs::path& path = entry.path();
         const bool is_directory = entry.is_directory();
-        state.selected = path;
+
+        // Right click on an item of the selection keeps the whole selection ;
+        // on another item, selects only that one.
+        if (!IsSelected(path))
+            SelectOnly(path);
+        else
+            state.selected = path;
+
+        // Duplicate / Copy / Cut / Delete act on the whole selection.
+        std::vector<stdfs::path> targets = SelectedPaths();
+        if (std::find(targets.begin(), targets.end(), path) == targets.end())
+            targets = { path };
 
         if (ImGui::MenuItem(is_directory ? "Open folder" : "Open"))
             OpenEntry(path);
@@ -645,13 +740,13 @@ namespace content_browser_actions
             BeginRename(path);
 
         if (ImGui::MenuItem("Duplicate", "Ctrl+D"))
-            Duplicate({ path });
+            Duplicate(targets);
 
         if (ImGui::MenuItem("Copy", "Ctrl+C"))
-            Copy({ path }, false);
+            Copy(targets, false);
 
         if (ImGui::MenuItem("Cut", "Ctrl+X"))
-            Copy({ path }, true);
+            Copy(targets, true);
 
         if (is_directory && ImGui::MenuItem("Paste into", nullptr, false, !state.clipboard.empty()))
             Paste(path);
@@ -678,7 +773,7 @@ namespace content_browser_actions
 
         if (ImGui::MenuItem("Delete", "Del"))
         {
-            state.delete_targets = { path };
+            state.delete_targets = targets;
             state.open_delete_popup = true;
         }
 
@@ -713,24 +808,27 @@ namespace content_browser_actions
 
         const bool ctrl = ImGui::GetIO().KeyCtrl;
         std::error_code error;
-        const bool has_selection = !state.selected.empty() && stdfs::exists(state.selected, error);
+        const std::vector<stdfs::path> targets = SelectedPaths();
+        const bool has_selection = !targets.empty();
+        // Rename / Open work on one item : the last one clicked.
+        const bool has_primary = !state.selected.empty() && stdfs::exists(state.selected, error);
 
         if (has_selection && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
-            state.delete_targets = { state.selected };
+            state.delete_targets = targets;
             state.open_delete_popup = true;
         }
-        else if (has_selection && ImGui::IsKeyPressed(ImGuiKey_F2, false))
+        else if (has_primary && ImGui::IsKeyPressed(ImGuiKey_F2, false))
             BeginRename(state.selected);
         else if (has_selection && ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false))
-            Duplicate({ state.selected });
+            Duplicate(targets);
         else if (has_selection && ctrl && ImGui::IsKeyPressed(ImGuiKey_C, false))
-            Copy({ state.selected }, false);
+            Copy(targets, false);
         else if (has_selection && ctrl && ImGui::IsKeyPressed(ImGuiKey_X, false))
-            Copy({ state.selected }, true);
+            Copy(targets, true);
         else if (ctrl && ImGui::IsKeyPressed(ImGuiKey_V, false) && !state.clipboard.empty())
             Paste(content_browser_current_path);
-        else if (has_selection && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+        else if (has_primary && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
             OpenEntry(state.selected);
     }
 

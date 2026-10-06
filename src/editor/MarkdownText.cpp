@@ -1,4 +1,5 @@
 #include "MarkdownText.h"
+#include "TextSelection.h"
 #include "EditorFonts.h"
 
 #include <imgui/imgui.h>
@@ -413,6 +414,7 @@ namespace lynx::editor::markdown
 			const char* begin = piece.text.c_str();
 			const char* end = begin + piece.text.size();
 			draw_list->AddText(font, font_size, text_pos, color, begin, end);
+			text_selection::Record(font, font_size, text_pos, begin, end);
 			if (FakeBold(flags))
 				draw_list->AddText(font, font_size, ImVec2(text_pos.x + 1.f, text_pos.y), color, begin, end);
 
@@ -539,6 +541,9 @@ namespace lynx::editor::markdown
 				draw_list->AddText(code_font, ImGui::GetFontSize(),
 				                   ImVec2(origin.x + pad, origin.y + pad + line_height * static_cast<float>(i)),
 				                   color, lines[i].c_str());
+				text_selection::Record(code_font, ImGui::GetFontSize(),
+				                       ImVec2(origin.x + pad, origin.y + pad + line_height * static_cast<float>(i)),
+				                       lines[i].c_str());
 			}
 			draw_list->PopClipRect();
 
@@ -732,6 +737,7 @@ namespace lynx::editor::markdown
 				ImFont* label_font = FontFor(kBold);
 				const ImVec2 size(TextWidth(label_font, label.c_str()), 0.f);
 				draw_list->AddText(label_font, font_size, ImVec2(origin.x + base, origin.y), color, label.c_str());
+				text_selection::Record(label_font, font_size, ImVec2(origin.x + base, origin.y), label.c_str());
 				if (FakeBold(kBold))
 					draw_list->AddText(label_font, font_size, ImVec2(origin.x + base + 1.f, origin.y), color, label.c_str());
 				indent = base + std::max(size.x + 1.f, font_size * 0.9f) + font_size * 0.35f;
