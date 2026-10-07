@@ -8,6 +8,10 @@ plugins téléchargeables en ligne dans le launcher
 
 revoir la toolbar parcque ca commence a etre le bordel, mettre les plugins dans la section plugins des options, et enlever le bouton plugin
 
+pouvoir acceder super facilement a la destruction/reconstruction des voxels en C++ et javascript
+
+physics queries (traces et autres)
+
 
 
 
@@ -45,7 +49,5 @@ bugs quand on met plusieurs lights dans une scene
 textures de voxels au lieu de juste couleur (optionel a chaque voxel type)
 
 trouver pourquoi le color picking marche a moitié
-
-fluides en voxels (dans HRL)
 
 revoir completement le systeme d'eclairage des voxels emissifs pour en autoriser autant qu'on veut (HRL)

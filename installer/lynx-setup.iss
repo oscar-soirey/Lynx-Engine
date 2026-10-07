@@ -35,7 +35,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ;SetupArchitecture=x64
 ChangesAssociations=yes
 DisableProgramGroupPage=yes
-LicenseFile=S:\Horizon\Lynx\installer\privacy-policy.txt
+LicenseFile=S:\Horizon\Lynx\installer\licence.txt
 InfoBeforeFile=S:\Horizon\Lynx\installer\privacy-policy.txt
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest

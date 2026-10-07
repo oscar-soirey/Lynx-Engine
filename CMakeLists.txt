@@ -94,7 +94,7 @@ target_compile_definitions(Lynx
 		PRIVATE
 		LYNX_VERSION_YEAR=2026
 		LYNX_VERSION_MAJOR=0
-		LYNX_VERSION_MINOR=4
+		LYNX_VERSION_MINOR=5
 )
 
 target_link_libraries(Lynx PRIVATE
