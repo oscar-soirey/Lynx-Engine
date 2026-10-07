@@ -229,7 +229,7 @@ For licensing inquiries or requests for written permission, contact:
 
 **Oscar Soirey**  
 Lynx Engine Licensor  
-Contact: [Insert licensing email address]
+Contact: oscarsoirey.contact@gmail.com
 
 ---
 
