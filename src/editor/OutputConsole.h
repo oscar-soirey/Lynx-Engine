@@ -12,7 +12,9 @@
 // Not the Commands > Console tab : that one runs editor commands.
 // =============================================================================
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace lynx::editor::output_console
 {
@@ -29,4 +31,13 @@ namespace lynx::editor::output_console
 	void FlushToScreen(unsigned int scene);
 
 	void Draw(bool* open);
+
+	// "Fix with Lynxie" on the error lines : the editor gives what to do with the
+	// request (prompt for the AI, short text for the chat). Not set : no button.
+	using FixHandler = std::function<void(const std::string& prompt, const std::string& display)>;
+	void SetFixHandler(FixHandler handler);
+
+	// Request for Lynxie about the error at this line of the Console (error +
+	// stack + file / line) ; "" if there is no error there. Exposed for the tests.
+	std::string BuildFixPrompt(const std::vector<std::string>& lines, size_t error_index, std::string* display = nullptr);
 }

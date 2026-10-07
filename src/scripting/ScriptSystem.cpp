@@ -7,6 +7,7 @@
 #include "../core/Filesystem.h"
 #include "../core/Level.h"
 #include "../core/PostProcess.h"
+#include "../core/Lighting2D.h"
 #include "../core/VoxelPhysics.h"
 #include "../core/data/Typename.h"
 #include "../gameplay/Actor.h"
@@ -1248,6 +1249,63 @@ namespace lynx
 			return arr;
 		}
 
+		// ---- Lighting2D.get / set / reset / params (core/Lighting2D.h) ----
+
+		JSValue Lighting2DGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 1)
+				return JS_UNDEFINED;
+			const std::string name = ToStdString(ctx, argv[0]);
+			const lighting2d::ParamInfo* p = lighting2d::FindParam(name);
+			if (!p)
+				return JS_UNDEFINED;
+			float v[3] = {};
+			lighting2d::GetValue(name, v);
+			if (p->type == lighting2d::ParamType::Color)
+				return NewPlainVec3(ctx, vec3(v[0], v[1], v[2]));
+			if (p->type == lighting2d::ParamType::Toggle)
+				return JS_NewBool(ctx, v[0] != 0.f);
+			return JS_NewFloat64(ctx, v[0]);
+		}
+
+		// Lighting2D.set("enabled", true) / set("ambientColor", {x,y,z} | [r,g,b]) / set("ambientIntensity", 0.2)
+		JSValue Lighting2DSet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 2)
+				return JS_ThrowTypeError(ctx, "Lighting2D.set(name, value)");
+			const std::string name = ToStdString(ctx, argv[0]);
+			float v[3] = {};
+			int n = 1;
+			if (JS_IsBool(argv[1]))
+				v[0] = JS_ToBool(ctx, argv[1]) > 0 ? 1.f : 0.f;
+			else if (JS_IsNumber(argv[1]))
+			{
+				double d = 0;
+				JS_ToFloat64(ctx, &d, argv[1]);
+				v[0] = static_cast<float>(d);
+			}
+			else if (ReadFloats(ctx, argv[1], v, 3))
+				n = 3;
+			else
+				return JS_ThrowTypeError(ctx, "Lighting2D.set : number, bool or color expected");
+			return JS_NewBool(ctx, lighting2d::SetValue(name, v, n));
+		}
+
+		JSValue Lighting2DReset(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			lighting2d::Reset(argc > 0 ? ToStdString(ctx, argv[0]) : std::string());
+			return JS_UNDEFINED;
+		}
+
+		JSValue Lighting2DParams(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			JSValue arr = JS_NewArray(ctx);
+			uint32_t i = 0;
+			for (const lighting2d::ParamInfo& p : lighting2d::GetParams())
+				JS_SetPropertyUint32(ctx, arr, i++, JS_NewString(ctx, p.name));
+			return arr;
+		}
+
 		void RegisterClasses(JSContext* ctx)
 		{
 			JSRuntime* rt = g->rt;
@@ -1369,6 +1427,13 @@ namespace lynx
 			DefFunc(ctx, post, "reset", PostProcessReset, 0);
 			DefFunc(ctx, post, "params", PostProcessParams, 0);
 			JS_SetPropertyStr(ctx, global, "PostProcess", post);
+
+			JSValue light2d = JS_NewObject(ctx);
+			DefFunc(ctx, light2d, "get", Lighting2DGet, 1);
+			DefFunc(ctx, light2d, "set", Lighting2DSet, 2);
+			DefFunc(ctx, light2d, "reset", Lighting2DReset, 0);
+			DefFunc(ctx, light2d, "params", Lighting2DParams, 0);
+			JS_SetPropertyStr(ctx, global, "Lighting2D", light2d);
 
 			JSValue vphys = JS_NewObject(ctx);
 			DefFuncMagic(ctx, vphys, "setEnabled", VoxelPhysicsOp, 1, 0);

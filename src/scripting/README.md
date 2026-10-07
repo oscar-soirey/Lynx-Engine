@@ -217,6 +217,28 @@ C++ : `lynx::physics::Raycast(from, to, params)`, `RaycastAll`, `LineOfSight`, `
 `PostProcess.get("bloomStrength")`, `PostProcess.reset()`, `PostProcess.params()`.
 Les valeurs de départ viennent de `assets/postprocess.json` (fenêtre **Post Process** de l'éditeur).
 
+## Éclairage 2D
+
+Éclaire le niveau vu de face (sprites, voxels, décor) avec des lumières 2D, et les voxels projettent
+des ombres. À activer pour le projet : fenêtre **2D Lighting** de l'éditeur, ou
+`Lighting2D.set("enabled", true)`. Réglages (sauvegardés dans `assets/lighting2d.json`) :
+
+| Réglage | Rôle |
+|---|---|
+| `enabled` | éclairage 2D du projet |
+| `ambientColor`, `ambientIntensity` | lumière hors des lumières 2D. Par défaut blanc / 1 : l'éclairage normal (lumières HRL, voxels émissifs) est gardé et les lumières 2D s'y ajoutent. Plus bas : plus sombre (nuit : 0.1 à 0.3) |
+| `intensity` | multiplie toutes les lumières 2D |
+| `shadows`, `shadowQuality` | ombres des voxels, précision des rayons |
+| `edgeDepth` | voxels éclairés à l'intérieur des murs face à une lumière (bords lumineux) |
+| `liquidOpacity`, `gasOpacity`, `decorOpacity` | combien l'eau, la fumée, les voxels sans collision bloquent |
+| `pixelSnap` | lumière calculée par voxel (carrée, style pixel art) |
+| `bands` | lumière par paliers (0 : lisse, 3 à 8 : rétro) |
+| `keepBright` | les pixels émissifs restent lumineux dans le noir |
+
+`Lighting2D.get(name)`, `Lighting2D.set(name, value)`, `Lighting2D.reset(name?)`, `Lighting2D.params()`.
+Les lumières : acteur `Light2DActor` (Place Actors) ou composant `Light2D` (voir plus bas).
+Au plus 16 lumières par vue (les plus proches / fortes).
+
 ## Fonctions des plugins
 
 Les plugins (C++, voir `src/plugins/README.md`) ajoutent leurs objets JS
@@ -498,6 +520,18 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 ### Light
 
 `type` (`"point"` / `"sky"`), `color`, `intensity`, `offset`, `enabled`.
+
+### Light2D
+
+Lumière de l'éclairage 2D (voir *Éclairage 2D*). `color`, `intensity`, `radius` (voxels),
+`falloff` (1 linéaire, 2 doux, 4 serré), `offset`, `enabled`, `castShadows`, `shadowStrength`,
+`sourceRadius` (0 ombres nettes, 1 à 3 ombres douces), `coneAngle` (360 : tout autour, 40 à 90 : lampe
+torche), `coneSoftness`, `direction` (degrés, 0 = +X, + rotation Z de l'acteur si `useActorRotation`),
+`flicker` (0.1 à 0.3 : torche).
+
+```js
+this.addComponent("Light2D", { color: {x: 1, y: 0.6, z: 0.3}, radius: 18, flicker: 0.2 });
+```
 
 ## Acteurs du moteur
 

@@ -39,6 +39,8 @@ add_library(Lynx SHARED
 		src/core/Filesystem.cpp
 		src/core/Level.cpp
 		src/core/PostProcess.cpp
+		src/core/CameraState.cpp
+		src/core/Lighting2D.cpp
 		src/core/Plugins.cpp
 		src/core/VoxelPhysics.cpp
 		src/core/VoxelEdit.cpp
@@ -64,6 +66,7 @@ add_library(Lynx SHARED
 		src/gameplay/PhysicsQueries.cpp
 		src/gameplay/SoundSourceComponent.cpp
 		src/gameplay/LightComponent.cpp
+		src/gameplay/Light2DComponent.cpp
 		src/gameplay/EngineActors.cpp
 		src/gameplay/Humanoid.cpp
 		src/gameplay/Interface.cpp
@@ -155,6 +158,7 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/GameBuild.cpp
 		src/editor/StartupBuild.cpp
 		src/editor/OutputConsole.cpp
+		src/editor/CommandPalette.cpp
 		src/editor/EditorOptions.cpp
 		src/editor/ExternalIde.cpp
 		src/editor/ShellIntegration.cpp

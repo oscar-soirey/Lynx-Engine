@@ -11,6 +11,8 @@
 #include "Profiler.h"
 #include "Level.h"
 #include "Plugins.h"
+#include "CameraState.h"
+#include "Lighting2D.h"
 #include "VoxelPhysics.h"
 #include "../gameplay/PhysicsQueries.h"
 #include "../gameplay/Actor.h"
@@ -66,6 +68,8 @@ namespace lynx
 		players_.clear();
 
 		// frees every HRL object, the scene too
+		lighting2d::Shutdown();
+		camera_state::Clear();
 		HRL_Shutdown();
 		scene_ = HRL_INVALID_ID;
 		scene_created_ = false;
@@ -194,6 +198,12 @@ namespace lynx
 		{
 			LYNX_PROFILE_SCOPE("Level::Update");
 			current_level_->Update();
+		}
+
+		{
+			// 2D lighting : after the cameras and lights got their final position.
+			LYNX_PROFILE_SCOPE("Lighting2D");
+			lighting2d::Update(dt);
 		}
 
 		LYNX_PROFILE_PLOT("Actors", static_cast<int64_t>(current_level_ ? current_level_->GetActors().size() : 0));

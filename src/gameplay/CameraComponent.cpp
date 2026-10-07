@@ -4,6 +4,7 @@
 #include "CameraShake.h"
 #include "PlayerController.h"
 #include "../core/Engine.h"
+#include "../core/CameraState.h"
 
 #include <hrl/hrl.h>
 
@@ -86,15 +87,15 @@ namespace lynx
 
 	void CameraComponent::ApplySettings()
 	{
-		HRL_SetCameraPerspectiveFov(camera_, fov);
+		lynx::camera_state::SetFov(camera_, fov);
 		HRL_SetCameraNearPlane(camera_, near_plane);
 		HRL_SetCameraFarPlane(camera_, far_plane);
 	}
 
 	void CameraComponent::ApplyTransform(float x, float y, float z, float roll)
 	{
-		HRL_SetCameraLocation(camera_, x, y, z);
-		HRL_SetCameraRotation(camera_, rotation.x, rotation.y, rotation.z + roll);
+		lynx::camera_state::SetLocation(camera_, x, y, z);
+		lynx::camera_state::SetRotation(camera_, rotation.x, rotation.y, rotation.z + roll);
 	}
 
 	void CameraComponent::OnAttach()

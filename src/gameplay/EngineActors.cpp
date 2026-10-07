@@ -109,6 +109,7 @@ namespace lynx
 				{ "SpotLightActor", { EngineActorIcon::SpotLight } },
 				{ "DirectionalLightActor", { EngineActorIcon::DirectionalLight } },
 				{ "SkyLightActor", { EngineActorIcon::SkyLight } },
+				{ "Light2DActor", { EngineActorIcon::PointLight } },
 				{ "SpriteActor", { EngineActorIcon::Sprite } },
 				{ "SoundActor", { EngineActorIcon::Sound } },
 				{ "ColliderActor", { EngineActorIcon::Collider } },
@@ -301,6 +302,108 @@ namespace lynx
 	}
 
 
+	// ------------------------------------------------------------------------
+	// Light2DActor
+	// ------------------------------------------------------------------------
+
+	Light2DActor::Light2DActor()
+	{
+		HPROPERTY(color, Exposed);
+		HPROPERTY(intensity, Exposed);
+		HPROPERTY(radius, Exposed);
+		HPROPERTY(falloff, Exposed);
+		HPROPERTY(enabled, Exposed);
+		HPROPERTY(cast_shadows, Exposed);
+		HPROPERTY(shadow_strength, Exposed);
+		HPROPERTY(source_radius, Exposed);
+		HPROPERTY(cone_angle, Exposed);
+		HPROPERTY(cone_softness, Exposed);
+		HPROPERTY(direction, Exposed);
+		HPROPERTY(flicker, Exposed);
+	}
+
+	void Light2DActor::Init()
+	{
+		Actor::Init();
+		light_ = &AddComponent<Light2DComponent>();
+		ApplyProperties();
+		if (EditorDecorations())
+			AddComponent<EditorIconComponent>(EngineActorIcon::PointLight);
+	}
+
+	void Light2DActor::Update(double dt)
+	{
+		Actor::Update(dt);
+		if (!light_)
+			return;
+		ApplyProperties();
+		if (!playing_ && EditorDecorations())
+			DrawEditorHelpers();
+	}
+
+	void Light2DActor::StartGame()
+	{
+		Actor::StartGame();
+		playing_ = true;
+	}
+
+	void Light2DActor::EndGame()
+	{
+		Actor::EndGame();
+		playing_ = false;
+	}
+
+	void Light2DActor::ApplyProperties()
+	{
+		light_->color = color;
+		light_->intensity = intensity;
+		light_->radius = radius;
+		light_->falloff = falloff;
+		light_->enabled = enabled;
+		light_->cast_shadows = cast_shadows;
+		light_->shadow_strength = shadow_strength;
+		light_->source_radius = source_radius;
+		light_->cone_angle = cone_angle;
+		light_->cone_softness = cone_softness;
+		light_->direction = direction;
+		light_->flicker = flicker;
+	}
+
+	void Light2DActor::DrawEditorHelpers()
+	{
+		const uint32_t scene = Engine::GetScene();
+		if (!HRL_IsValidScene(scene) || !light_)
+			return;
+
+		// Reach of the light (radius in voxels -> world units).
+		float ox = 0.f, oy = 0.f, sx = 1.f, sy = 0.f;
+		HRL_VoxelToWorldCoordinates(scene, 0.f, 0.f, &ox, &oy);
+		HRL_VoxelToWorldCoordinates(scene, 1.f, 0.f, &sx, &sy);
+		const float r = radius * std::max(1e-5f, sx - ox);
+
+		float c[3];
+		LineColor(color, c);
+		const vec3 center = light_->GetWorldLocation();
+		const bool cone = cone_angle < 359.f;
+		const float dir = light_->GetWorldDirection() * 3.14159265f / 180.f;
+		const float half = std::clamp(cone_angle, 1.f, 359.f) * 0.5f * 3.14159265f / 180.f;
+		const float a0 = cone ? dir - half : 0.f;
+		const float a1 = cone ? dir + half : 6.2831853f;
+		constexpr int kSegments = 40;
+		vec3 previous = cone ? center : center + vec3(std::cos(a0) * r, std::sin(a0) * r, 0.f);
+		for (int i = 0; i <= kSegments; ++i)
+		{
+			const float a = a0 + (a1 - a0) * static_cast<float>(i) / kSegments;
+			const vec3 p = center + vec3(std::cos(a) * r, std::sin(a) * r, 0.f);
+			HRL_DrawDebugSegment(scene, previous.x, previous.y, previous.z, p.x, p.y, p.z, c[0], c[1], c[2]);
+			previous = p;
+		}
+		if (cone)
+			HRL_DrawDebugSegment(scene, previous.x, previous.y, previous.z, center.x, center.y, center.z,
+			                     c[0], c[1], c[2]);
+	}
+
+
 	SkyLightActor::SkyLightActor()
 		: LightActor(LightComponent::Type::Sky, EngineActorIcon::SkyLight)
 	{
@@ -484,6 +587,7 @@ namespace lynx
 		factory.RegisterObject("SpotLightActor", []() -> Object* { return new SpotLightActor(); });
 		factory.RegisterObject("DirectionalLightActor", []() -> Object* { return new DirectionalLightActor(); });
 		factory.RegisterObject("SkyLightActor", []() -> Object* { return new SkyLightActor(); });
+		factory.RegisterObject("Light2DActor", []() -> Object* { return new Light2DActor(); });
 		factory.RegisterObject("SpriteActor", []() -> Object* { return new SpriteActor(); });
 		factory.RegisterObject("SoundActor", []() -> Object* { return new SoundActor(); });
 		factory.RegisterObject("ColliderActor", []() -> Object* { return new ColliderActor(); });

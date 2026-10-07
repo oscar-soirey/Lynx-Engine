@@ -972,7 +972,7 @@ static void RegisterEditorCommands()
             if (cmd::Has(params, "y")) camY = static_cast<float>(cmd::GetNumber(params, "y"));
             if (cmd::Has(params, "z")) camZ = ClampCameraZ(static_cast<float>(cmd::GetNumber(params, "z")));
 
-            HRL_SetCameraLocation(editor_camera, camX, camY, camZ);
+            lynx::camera_state::SetLocation(editor_camera, camX, camY, camZ);
 
             return { { "x", camX }, { "y", camY }, { "z", camZ } };
         });

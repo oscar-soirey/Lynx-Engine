@@ -32,6 +32,7 @@
 #include "Actor.h"
 #include "BoxColliderComponent.h"
 #include "LightComponent.h"
+#include "Light2DComponent.h"
 #include "SpriteComponents.h"
 
 namespace lynx
@@ -162,6 +163,45 @@ namespace lynx
 	{
 	public:
 		SkyLightActor();
+	};
+
+	/**
+	 * 2D light (core/Lighting2D.h) : lights the level seen from the front, with
+	 * shadows cast by the voxels. Enable the 2D lighting of the project first
+	 * (window 2D Lighting). Radius in voxels ; cone_angle < 360 : flashlight
+	 * along `direction` + the actor rotation (Z).
+	 */
+	class LYNX_API Light2DActor : public Actor
+	{
+	public:
+		Light2DActor();
+
+		vec3 color{1.f, 0.85f, 0.65f};
+		float intensity = 1.5f;
+		float radius = 20.f;
+		float falloff = 2.f;
+		bool enabled = true;
+		bool cast_shadows = true;
+		float shadow_strength = 1.f;
+		float source_radius = 0.f;
+		float cone_angle = 360.f;
+		float cone_softness = 0.3f;
+		float direction = 0.f;
+		float flicker = 0.f;
+
+		void Init() override;
+		void Update(double dt) override;
+		void StartGame() override;
+		void EndGame() override;
+
+		Light2DComponent* GetLight() const { return light_; }
+
+	private:
+		void ApplyProperties();
+		void DrawEditorHelpers();
+
+		Light2DComponent* light_ = nullptr;
+		bool playing_ = false;
 	};
 
 

@@ -84,6 +84,7 @@
 #include "EditorIcons.h"
 #include "PropertyWidgets.h"
 #include "ProfilerWindow.h"
+#include "CommandPalette.h"
 #include "ScriptEditors.h"
 #include "WidgetEditor.h"
 #include "GraphEditors.h"
@@ -135,6 +136,7 @@ struct EditorWindowVisibility
     bool nodeGraphTest = false;  // (removed window : kept for the format of editor_windows.txt)
     bool postProcess = false;
     bool voxelWorld = false;     // Voxel World (size of the level's world)
+    bool lighting2D = false;     // 2D Lighting (lynx::lighting2d)
 };
 
 static EditorWindowVisibility editorWindows;
@@ -194,6 +196,10 @@ static void LoadEditorWindowVisibility()
     int voxelWorld = 0;
     if (file >> voxelWorld)
         editorWindows.voxelWorld = voxelWorld != 0;
+
+    int lighting2D = 0;
+    if (file >> lighting2D)
+        editorWindows.lighting2D = lighting2D != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -216,12 +222,19 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.profiler ? 1 : 0) << ' '
          << (editorWindows.nodeGraphTest ? 1 : 0) << ' '
          << (editorWindows.postProcess ? 1 : 0) << ' '
-         << (editorWindows.voxelWorld ? 1 : 0) << '\n';
+         << (editorWindows.voxelWorld ? 1 : 0) << ' '
+         << (editorWindows.lighting2D ? 1 : 0) << '\n';
 }
 
 // Post Process window : the settings of the current post process
 // (lynx::postprocess, HRL default shader), saved in assets/postprocess.json.
 static void DrawPostProcessWindow();
+
+// 2D Lighting window : settings of lynx::lighting2d, saved in assets/lighting2d.json.
+static void DrawLighting2DWindow();
+
+// Command palette (Ctrl+P) : commands, windows, actors and files (CommandPalette.h).
+static void OpenCommandPalette(const std::string& prefix = "");
 
 // Camera Shake window : live settings, curves, Test (shakes the editor
 // camera), saved in assets/camera_shake.json.
@@ -328,7 +341,7 @@ static void SetPlaying(
     if (lynx::PlayerController* player = engine->GetDefaultPlayer())
         player->SetViewCamera(camera);
     else
-        HRL_SetViewportCamera(viewport, camera);
+        lynx::camera_state::SetViewportCamera(viewport, camera);
 
     if (playing == isPlaying)
     {
@@ -2136,6 +2149,8 @@ static void SaveEditor()
     // Post process settings (Post Process window), with the level.
     if (lynx::postprocess::IsDirty())
         lynx::postprocess::Save();
+    if (lynx::lighting2d::IsDirty())
+        lynx::lighting2d::Save();
 
     editor_dirty = false;
 
@@ -5356,6 +5371,7 @@ static void DrawToolbar()
                 EditorWindowCheckbox("Paint", &editorWindows.config, icons::Icon::Paint);
                 EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, icons::Icon::Shake);
                 EditorWindowCheckbox("Post Process", &editorWindows.postProcess, icons::Icon::Settings);
+                EditorWindowCheckbox("2D Lighting", &editorWindows.lighting2D, icons::Icon::Settings);
                 EditorWindowCheckbox("Voxel World", &editorWindows.voxelWorld, icons::Icon::World);
                 EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, icons::Icon::Input);
                 EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, icons::Icon::Commands);
@@ -5608,9 +5624,9 @@ static void ApplyEditorCameraRotation()
         return;
 
     if (cameraMode == EditorCameraMode::Mode3D)
-        HRL_SetCameraRotation(editor_camera, camPitch, camYaw, 0.f);
+        lynx::camera_state::SetRotation(editor_camera, camPitch, camYaw, 0.f);
     else
-        HRL_SetCameraRotation(editor_camera, 0.f, -90.f, 0.f);
+        lynx::camera_state::SetRotation(editor_camera, 0.f, -90.f, 0.f);
 }
 
 static void SetEditorCameraMode(EditorCameraMode mode)
@@ -5632,7 +5648,7 @@ static void SetEditorCameraMode(EditorCameraMode mode)
 
     ApplyEditorCameraRotation();
     if (editor_camera != HRL_INVALID_ID)
-        HRL_SetCameraLocation(editor_camera, camX, camY, camZ);
+        lynx::camera_state::SetLocation(editor_camera, camX, camY, camZ);
     SaveEditorCamera();
 }
 
@@ -5694,7 +5710,7 @@ namespace editor
                 HRL_PERSPECTIVE
             );
 
-        HRL_SetCameraPerspectiveFov(
+        lynx::camera_state::SetFov(
             editor_camera,
             20.f
         );
@@ -5727,7 +5743,7 @@ namespace editor
         );
 
 
-        HRL_SetCameraLocation(
+        lynx::camera_state::SetLocation(
             editor_camera,
             camX,
             camY,
@@ -5807,6 +5823,14 @@ namespace editor
         // was open / focused when the editor was closed).
         editorWindows.commands = true;
         lynx::editor::commands_window::ShowLynxie(5);
+
+        // Console : "Fix with Lynxie" sends an error (stack, script, line) to Lynxie.
+        lynx::editor::output_console::SetFixHandler([](const std::string& prompt, const std::string& display)
+        {
+            editorWindows.commands = true;
+            SaveEditorWindowVisibility();
+            lynx::editor::commands_window::AskLynxie(prompt, display);
+        });
 
         // Widget Editor : textures / fonts / nested widgets with the asset picker.
         lynx::editor::widget_editor::SetAssetFieldDrawer([](std::string& value)
@@ -6455,7 +6479,7 @@ namespace editor
             }
 
             ApplyEditorCameraRotation();
-            HRL_SetCameraLocation(camera, camX, camY, camZ);
+            lynx::camera_state::SetLocation(camera, camX, camY, camZ);
         }
         else if ((!isPlaying || isSimulating) &&
             !io.KeyCtrl &&
@@ -6480,7 +6504,7 @@ namespace editor
 
             camZ = ClampCameraZ(camZ);
 
-            HRL_SetCameraLocation(
+            lynx::camera_state::SetLocation(
                 camera,
                 camX,
                 camY,
@@ -7294,6 +7318,22 @@ namespace editor
             ImGui::GetIO();
 
 
+
+
+        // --------------------------------------------------------
+        // Command palette : Ctrl+P (everything), Ctrl+Shift+P (commands)
+        // --------------------------------------------------------
+
+        if (!isPlaying &&
+            !lynx::editor::command_palette::IsOpen() &&
+            !lynx::editor::input_settings::BlocksEditorShortcuts() &&
+            io.KeyCtrl &&
+            ImGui::IsKeyPressed(ImGuiKey_P, false) &&
+            !io.WantTextInput)
+        {
+            OpenCommandPalette(io.KeyShift ? ">" : "");
+        }
+        lynx::editor::command_palette::Draw();
 
 
         // --------------------------------------------------------
@@ -8648,6 +8688,9 @@ namespace editor
         if (editorWindows.postProcess)
             DrawPostProcessWindow();
 
+        if (editorWindows.lighting2D)
+            DrawLighting2DWindow();
+
         if (editorWindows.voxelWorld)
             DrawVoxelWorldWindow(&editorWindows.voxelWorld);
 
@@ -9846,6 +9889,7 @@ int main(int argc, char** argv)
     // Post process of every player (HRL default shader). Its settings come
     // from assets/postprocess.json (editor : Windows > Post Process).
     lynx::postprocess::Install();
+    lynx::lighting2d::Install();   // 2D lighting pass (before the post process)
 
     // Camera shake settings (editor : Windows > Camera Shake).
     lynx::LoadCameraShakeSettings();
@@ -10705,11 +10749,11 @@ static void ApplyCameraShakePreview(HRL_id camera, float dt)
     {
         float x = 0.f, y = 0.f, roll = 0.f;
         shake.Update(dt, x, y, roll);
-        HRL_SetCameraLocation(camera, camX + x, camY + y, camZ);
+        lynx::camera_state::SetLocation(camera, camX + x, camY + y, camZ);
         if (cameraMode == EditorCameraMode::Mode3D)
-            HRL_SetCameraRotation(camera, camPitch, camYaw, roll);
+            lynx::camera_state::SetRotation(camera, camPitch, camYaw, roll);
         else
-            HRL_SetCameraRotation(camera, 0.f, -90.f, roll);
+            lynx::camera_state::SetRotation(camera, 0.f, -90.f, roll);
         shaking = true;
     }
     else if (shaking)
@@ -10718,7 +10762,7 @@ static void ApplyCameraShakePreview(HRL_id camera, float dt)
         if (!isPlaying && camera != HRL_INVALID_ID)
         {
             ApplyEditorCameraRotation();
-            HRL_SetCameraLocation(camera, camX, camY, camZ);
+            lynx::camera_state::SetLocation(camera, camX, camY, camZ);
         }
     }
 }
@@ -10811,4 +10855,226 @@ static void DrawPostProcessWindow()
         editorWindows.postProcess = false;
         SaveEditorWindowVisibility();
     }
+}
+
+
+// =============================================================================
+// 2D Lighting window
+// =============================================================================
+
+static void DrawLighting2DWindow()
+{
+    namespace l2 = lynx::lighting2d;
+
+    bool open = true;
+    if (!ImGui::Begin("2D Lighting", &open))
+    {
+        ImGui::End();
+        if (!open) { editorWindows.lighting2D = false; SaveEditorWindowVisibility(); }
+        return;
+    }
+
+    if (ImGui::Button("Save"))
+        l2::Save();
+    ImGui::SameLine();
+    if (ImGui::Button("Revert"))
+        l2::Load();
+    ImGui::SameLine();
+    if (ImGui::Button("Reset all"))
+        l2::Reset();
+    ImGui::SameLine();
+    ImGui::TextDisabled(l2::IsDirty() ? "assets/lighting2d.json (not saved)" : "assets/lighting2d.json");
+
+    if (!l2::GetError().empty())
+        ImGui::TextColored(ImVec4(1.f, 0.4f, 0.35f, 1.f), "%s", l2::GetError().c_str());
+    else if (l2::IsEnabled())
+        ImGui::TextDisabled("%d light(s) drawn (max %d per view). Add lights : Place Actors > Light2DActor.",
+                            l2::GetDrawnLightCount(), l2::kMaxLights);
+    else
+        ImGui::TextDisabled("Off : tick Enabled to light the level with the 2D lights.");
+
+    ImGui::Separator();
+
+    std::string group;
+    bool group_open = false;
+    for (const l2::ParamInfo& p : l2::GetParams())
+    {
+        if (group != p.group)
+        {
+            group = p.group;
+            group_open = ImGui::CollapsingHeader(p.group, ImGuiTreeNodeFlags_DefaultOpen);
+        }
+        if (!group_open)
+            continue;
+
+        ImGui::PushID(p.name);
+        float v[3] = {};
+        l2::GetValue(p.name, v);
+        bool changed = false;
+        switch (p.type)
+        {
+        case l2::ParamType::Float:
+            changed = ImGui::SliderFloat(p.label, &v[0], p.min, p.max, "%.2f");
+            break;
+        case l2::ParamType::Toggle:
+        {
+            bool b = v[0] != 0.f;
+            if (ImGui::Checkbox(p.label, &b)) { v[0] = b ? 1.f : 0.f; changed = true; }
+            break;
+        }
+        case l2::ParamType::Color:
+            changed = ImGui::ColorEdit3(p.label, v, ImGuiColorEditFlags_Float);
+            break;
+        }
+        if (changed)
+            l2::SetValue(p.name, v, 3);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s%s%s", p.name, p.tooltip[0] ? "\n" : "", p.tooltip);
+        if (l2::IsModified(p.name))
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset"))
+                l2::Reset(p.name);
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::End();
+
+    if (!open)
+    {
+        editorWindows.lighting2D = false;
+        SaveEditorWindowVisibility();
+    }
+}
+
+
+// =============================================================================
+// Command palette (Ctrl+P)
+// =============================================================================
+
+static void OpenCommandPalette(const std::string& prefix)
+{
+    namespace cp = lynx::editor::command_palette;
+    std::vector<cp::Item> items;
+
+    auto command = [&](const char* label, const char* shortcut, std::function<void()> run)
+    {
+        items.push_back({ label, shortcut, cp::Kind::Command, std::move(run) });
+    };
+
+    // --- Commands -------------------------------------------------------------
+    command("Save level", "Ctrl+S", []() { SaveEditor(); });
+    command("Play / Stop", "F3", []() { TogglePlayMode(); });
+    command("Simulate", "Alt+S", []() { TogglePlayMode(true); });
+    command("Undo", "Ctrl+Z", []() { UndoLastEditorAction(); });
+    command("Hot reload game code", "", []() { RequestHotReload(); });
+    command("Options", "", []() { showEditorOptions = true; });
+    command("Plugins", "Options > Plugins", []() { showPluginManager = true; });
+    command("Ask Lynxie (AI assistant)", "Commands window", []()
+    {
+        editorWindows.commands = true;
+        SaveEditorWindowVisibility();
+        ImGui::SetWindowFocus("Commands");
+    });
+    command(lynx::lighting2d::IsEnabled() ? "2D lighting : turn off" : "2D lighting : turn on", "2D Lighting", []()
+    {
+        lynx::lighting2d::SetFloat("enabled", lynx::lighting2d::IsEnabled() ? 0.f : 1.f);
+    });
+    if (editing_actor && IsActorAlive(editing_actor))
+    {
+        command("Focus the selected actor", "camera", []()
+        {
+            if (editing_actor && IsActorAlive(editing_actor))
+            {
+                camX = editing_actor->transform.location.x;
+                camY = editing_actor->transform.location.y;
+            }
+        });
+    }
+
+    // --- Windows --------------------------------------------------------------
+    struct WindowEntry { const char* name; bool* flag; };
+    const WindowEntry windows[] = {
+        { "Viewport", &editorWindows.viewport },
+        { "Outliner", &editorWindows.outliner },
+        { "Place Actors", &editorWindows.placeActors },
+        { "Content Browser", &editorWindows.contentBrowser },
+        { "Details", &editorWindows.details },
+        { "Color Picking", &editorWindows.colorPicking },
+        { "Paint", &editorWindows.config },
+        { "Camera Shake", &editorWindows.cameraShake },
+        { "Post Process", &editorWindows.postProcess },
+        { "2D Lighting", &editorWindows.lighting2D },
+        { "Voxel World", &editorWindows.voxelWorld },
+        { "Input Settings", &editorWindows.inputSettings },
+        { "Commands (Python / AI)", &editorWindows.commands },
+        { "Git", &editorWindows.git },
+        { "Console", &editorWindows.console },
+        { "Profiler", &editorWindows.profiler },
+    };
+    for (const WindowEntry& w : windows)
+    {
+        bool* flag = w.flag;
+        items.push_back({ std::string(*flag ? "Hide " : "Show ") + w.name, "window", cp::Kind::Window, [flag]()
+        {
+            *flag = !*flag;
+            SaveEditorWindowVisibility();
+        } });
+    }
+
+    // --- Actors of the level ----------------------------------------------------
+    if (editor_level)
+    {
+        for (const auto& owned : editor_level->GetActors())
+        {
+            lynx::Actor* actor = owned;
+            std::string label = actor->GetTypeName();
+            if (!actor->object_id_.empty())
+                label += " [" + actor->object_id_ + "]";
+            char where[64];
+            std::snprintf(where, sizeof(where), "%.0f, %.0f", actor->transform.location.x, actor->transform.location.y);
+            items.push_back({ label, where, cp::Kind::Actor, [actor]()
+            {
+                if (!IsActorAlive(actor))
+                    return;
+                SetActorSelected(actor);
+                camX = actor->transform.location.x;
+                camY = actor->transform.location.y;
+            } });
+        }
+    }
+
+    // --- Files of assets/ -------------------------------------------------------
+    {
+        std::error_code error;
+        const std::filesystem::path root = content_browser_root;
+        int count = 0;
+        for (auto it = std::filesystem::recursive_directory_iterator(
+                 root, std::filesystem::directory_options::skip_permission_denied, error);
+             it != std::filesystem::recursive_directory_iterator() && count < 5000;
+             it.increment(error))
+        {
+            if (error)
+                break;
+            const std::string name = it->path().filename().string();
+            if (!name.empty() && name[0] == '.')
+            {
+                if (it->is_directory(error))
+                    it.disable_recursion_pending();
+                continue;
+            }
+            if (!it->is_regular_file(error))
+                continue;
+            const std::filesystem::path path = it->path();
+            const std::string relative = path.lexically_relative(root).generic_string();
+            items.push_back({ name, relative, cp::Kind::File, [path]()
+            {
+                content_browser_actions::OpenEntry(path);
+            } });
+            ++count;
+        }
+    }
+
+    cp::Open(std::move(items), prefix);
 }

@@ -68,6 +68,16 @@ MyGame/
   shadow_strength. JS : `this.addComponent("Light", { type: "point" | "spot" |
   "directional" | "sky", color: {x,y,z}, intensity, offset, attenuation,
   rotation, innerAngle, outerAngle, castShadows, shadowStrength })`.
+- **2D lighting** (lights the level seen from the front, shadows cast by the
+  voxels) : turn it on in the window **2D Lighting** (Windows menu) or JS
+  `Lighting2D.set("enabled", true)` ; settings ambientColor, ambientIntensity
+  (darkness of the level), intensity, shadows, edgeDepth, pixelSnap (square
+  pixel-art light), bands (light in steps), saved in assets/lighting2d.json.
+  Lights : engine actor `Light2DActor` (Place Actors) or component
+  `this.addComponent("Light2D", { color, intensity, radius (voxels), falloff,
+  castShadows, sourceRadius (soft shadows), coneAngle (360 = all around,
+  40-90 = flashlight), direction (degrees), flicker (0.1-0.3 = torch) })`.
+  C++ : `AddComponent<lynx::Light2DComponent>()`.
 
 ## C++ game code
 

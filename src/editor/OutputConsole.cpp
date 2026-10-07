@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <regex>
 #include <thread>
 #include <vector>
 
@@ -79,6 +80,8 @@ namespace lynx::editor::output_console
 			if (file)
 				file << (g_on_screen ? 1 : 0) << ' ' << (g_on_screen_errors_only ? 1 : 0) << '\n';
 		}
+
+		FixHandler g_fix_handler;
 
 		// UI
 		bool g_auto_scroll = true;
@@ -238,6 +241,67 @@ namespace lynx::editor::output_console
 		std::setvbuf(stderr, nullptr, _IONBF, 0);
 	}
 
+	void SetFixHandler(FixHandler handler)
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		g_fix_handler = std::move(handler);
+	}
+
+	std::string BuildFixPrompt(const std::vector<std::string>& lines, size_t error_index, std::string* display)
+	{
+		if (error_index >= lines.size())
+			return {};
+
+		// The error, then its stack ("    at Update (classes/Wanderer.js:12:5)") and the
+		// lines that continue it (indented), at most 14.
+		std::string block = lines[error_index];
+		size_t end = error_index + 1;
+		while (end < lines.size() && end < error_index + 14)
+		{
+			const std::string& next = lines[end];
+			const size_t first = next.find_first_not_of(" \t");
+			const bool stack = first != std::string::npos &&
+			                   (next.compare(first, 3, "at ") == 0 || first > 0);
+			if (!stack)
+				break;
+			block += "\n" + next;
+			++end;
+		}
+		// A few lines before : what the game was doing (the error is often explained there).
+		std::string before;
+		for (size_t i = error_index >= 3 ? error_index - 3 : 0; i < error_index; ++i)
+			if (lines[i].find_first_not_of(" \t") != std::string::npos)
+				before += lines[i] + "\n";
+
+		// Script file and line : "Wanderer.js:12", "classes/Wanderer.js:12:5".
+		std::string file, line_number;
+		static const std::regex location(R"(([A-Za-z0-9_./\\-]+\.js):(\d+))");
+		std::smatch match;
+		if (std::regex_search(block, match, location))
+		{
+			file = match.str(1);
+			line_number = match.str(2);
+		}
+
+		std::string prompt =
+			"The game printed this error in the Console. Find the cause and fix it in the code of the project "
+			"(SEARCH / REPLACE blocks). If the cause is not in the code (a missing asset, a setting), explain "
+			"what to change instead.\n```\n" + block + "\n```\n";
+		if (!before.empty())
+			prompt += "Console lines just before :\n```\n" + before + "```\n";
+		if (!file.empty())
+			prompt += "Script : " + file + (line_number.empty() ? "" : ", line " + line_number) + ".\n";
+
+		if (display)
+		{
+			std::string first = lines[error_index];
+			if (first.size() > 140)
+				first = first.substr(0, 137) + "...";
+			*display = "Fix this error : `" + first + "`" + (file.empty() ? "" : " (" + file + (line_number.empty() ? "" : ":" + line_number) + ")");
+		}
+		return prompt;
+	}
+
 	void Write(const std::string& line)
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
@@ -351,6 +415,29 @@ namespace lynx::editor::output_console
 				all += line.text + "\n";
 			ImGui::SetClipboardText(all.c_str());
 		}
+		// Ask Lynxie (the AI assistant) to fix the last error.
+		size_t last_error = g_lines.size();
+		for (size_t i = g_lines.size(); i > 0; --i)
+			if (g_lines[i - 1].kind == Kind::Error)
+			{
+				last_error = i - 1;
+				break;
+			}
+		std::vector<std::string> fix_lines;   // filled when a fix is asked
+		size_t fix_index = g_lines.size();
+		if (g_fix_handler)
+		{
+			ImGui::SameLine();
+			ImGui::BeginDisabled(last_error >= g_lines.size());
+			if (ImGui::Button("Fix with Lynxie"))
+				fix_index = last_error;
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip(last_error < g_lines.size()
+					? "Sends the last error (with its stack and script) to Lynxie, who fixes the code.\n"
+					  "Hover an error line for its own button."
+					: "No error in the Console.");
+		}
 		ImGui::SameLine();
 		ImGui::Checkbox("Auto-scroll", &g_auto_scroll);
 		ImGui::SameLine();
@@ -403,7 +490,8 @@ namespace lynx::editor::output_console
 		const float view_top = ImGui::GetScrollY() - line_h;
 		const float view_bottom = ImGui::GetScrollY() + ImGui::GetWindowHeight() + line_h;
 
-		auto draw_line = [&](const Line& line)
+		const bool console_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+		auto draw_line = [&](const Line& line, size_t index)
 		{
 			const ImVec2 local = ImGui::GetCursorPos();
 			const ImVec2 screen = ImGui::GetCursorScreenPos();
@@ -421,11 +509,29 @@ namespace lynx::editor::output_console
 			if (line.kind != Kind::Normal)
 				ImGui::PopStyleColor();
 			text_selection::Record(ImGui::GetFont(), ImGui::GetFontSize(), screen, line.text.c_str());
+
+			// Error line under the mouse : "Fix with Lynxie" at the right of the view.
+			if (g_fix_handler && line.kind == Kind::Error && console_hovered)
+			{
+				const float mouse_y = ImGui::GetIO().MousePos.y;
+				if (mouse_y >= screen.y && mouse_y < screen.y + line_h)
+				{
+					const ImVec2 after = ImGui::GetCursorPos();
+					const char* label = "Fix with Lynxie";
+					const float w = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.f;
+					ImGui::SetCursorPos(ImVec2(ImGui::GetScrollX() + ImGui::GetWindowContentRegionMax().x - w, local.y));
+					ImGui::PushID(static_cast<int>(index));
+					if (ImGui::SmallButton(label))
+						fix_index = index;
+					ImGui::PopID();
+					ImGui::SetCursorPos(after);
+				}
+			}
 		};
 
-		for (const Line& line : g_lines)
-			if (!filtered || visible(line))
-				draw_line(line);
+		for (size_t i = 0; i < g_lines.size(); ++i)
+			if (!filtered || visible(g_lines[i]))
+				draw_line(g_lines[i], i);
 
 		text_selection::End();
 
@@ -439,6 +545,18 @@ namespace lynx::editor::output_console
 		g_scroll = false;
 
 		ImGui::EndChild();
+
+		if (fix_index < g_lines.size() && g_fix_handler)
+		{
+			for (const Line& line : g_lines)
+				fix_lines.push_back(line.text);
+			std::string display;
+			const std::string prompt = BuildFixPrompt(fix_lines, fix_index, &display);
+			FixHandler handler = g_fix_handler;
+			if (!prompt.empty())
+				handler(prompt, display);   // under g_mutex : the handler must not print
+		}
+
 		ImGui::End();
 	}
 }

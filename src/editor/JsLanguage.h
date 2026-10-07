@@ -104,6 +104,38 @@ namespace lynx::editor::js_language
 	void SetSyntaxChecker(const std::function<bool(const std::string& code, const std::string& name, std::string& error)>& check);
 
 	// -------------------------------------------------------------------------
+	// Engine API for Lynxie (the AI assistant) : look up, reference, check
+	// -------------------------------------------------------------------------
+
+	struct ApiInfo
+	{
+		std::string owner;       // "" global, "Level", "Actor", "Light2D"...
+		std::string name;
+		std::string signature;   // "spawn(className, options?)"
+		std::string doc;
+		bool function = false;
+	};
+
+	/** Entries whose owner / name / doc match the words of `query` ("" : the owners). */
+	std::vector<ApiInfo> SearchApi(const std::string& query, size_t max_results = 60);
+
+	/**
+	 * Compact reference of the engine API for a request : the globals, Actor,
+	 * and every object / component named in `text` (the request and the files
+	 * it talks about). At most `max_chars`.
+	 */
+	std::string ApiReference(const std::string& text, size_t max_chars = 6000);
+
+	/**
+	 * Engine functions / objects used by `code` that do not exist (Level.fnd,
+	 * an undefined global) and were not already in `previous_code`. One line
+	 * per problem, with the closest real names. Empty : nothing wrong, or the
+	 * engine could not be introspected (then nothing can be checked).
+	 */
+	std::vector<std::string> CheckEngineApi(const std::string& code, const std::filesystem::path& file,
+	                                        const std::string& previous_code);
+
+	// -------------------------------------------------------------------------
 	// A document (one per open .js file)
 	// -------------------------------------------------------------------------
 

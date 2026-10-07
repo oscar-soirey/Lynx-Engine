@@ -23,6 +23,7 @@
 #include "../gameplay/CameraComponent.h"
 #include "../gameplay/Components.h"
 #include "../gameplay/LightComponent.h"
+#include "../gameplay/Light2DComponent.h"
 #include "../gameplay/Private/ECS.h"
 #include "../gameplay/SoundSourceComponent.h"
 #include "../gameplay/SpriteComponents.h"
@@ -1228,6 +1229,25 @@ namespace lynx::script_detail
 				 .field("outerAngle", &LightComponent::outer_angle)
 				 .field("castShadows", &LightComponent::cast_shadows)
 				 .field("shadowStrength", &LightComponent::shadow_strength);
+			}
+
+			// ---------------- Light2D (core/Lighting2D.h) ----------------
+			{
+				Binder<Light2DComponent> b(ctx, "Light2D");
+				b.field("color", &Light2DComponent::color)
+				 .field("intensity", &Light2DComponent::intensity)
+				 .field("radius", &Light2DComponent::radius)
+				 .field("falloff", &Light2DComponent::falloff)
+				 .field("offset", &Light2DComponent::offset)
+				 .field("enabled", &Light2DComponent::enabled)
+				 .field("castShadows", &Light2DComponent::cast_shadows)
+				 .field("shadowStrength", &Light2DComponent::shadow_strength)
+				 .field("sourceRadius", &Light2DComponent::source_radius)
+				 .field("coneAngle", &Light2DComponent::cone_angle)
+				 .field("coneSoftness", &Light2DComponent::cone_softness)
+				 .field("direction", &Light2DComponent::direction)
+				 .field("useActorRotation", &Light2DComponent::use_actor_rotation)
+				 .field("flicker", &Light2DComponent::flicker);
 			}
 
 			// ---------------- Velocity / Lifetime ----------------

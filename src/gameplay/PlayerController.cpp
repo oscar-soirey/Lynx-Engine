@@ -3,6 +3,7 @@
 #include "Actor.h"
 #include "CameraComponent.h"
 #include "../core/Engine.h"
+#include "../core/CameraState.h"
 #include "../scripting/Private/ScriptSystem.h"
 
 #include <hrl/hrl.h>
@@ -177,7 +178,7 @@ namespace lynx
 		}
 
 		if (viewport_ != HRL_INVALID_ID && shown != HRL_INVALID_ID)
-			HRL_SetViewportCamera(viewport_, shown);
+			lynx::camera_state::SetViewportCamera(viewport_, shown);
 	}
 
 
@@ -232,14 +233,16 @@ namespace lynx
 		default_camera_ = HRL_CreateCamera(scene, HRL_PERSPECTIVE);
 		if (default_camera_ != HRL_INVALID_ID)
 		{
-			HRL_SetCameraPerspectiveFov(default_camera_, 20.f);
-			HRL_SetCameraRotation(default_camera_, 0.f, -90.f, 0.f);
+			lynx::camera_state::SetFov(default_camera_, 20.f);
+			lynx::camera_state::SetRotation(default_camera_, 0.f, -90.f, 0.f);
 		}
 
 		if (view_camera_ == HRL_INVALID_ID)
 			view_camera_ = default_camera_;
 
 		viewport_ = HRL_CreateViewport(scene, view_camera_, rect_[0], rect_[1], rect_[2], rect_[3]);
+		if (viewport_ != HRL_INVALID_ID && view_camera_ != HRL_INVALID_ID)
+			camera_state::SetViewportCamera(viewport_, view_camera_);   // remembered (2D lighting)
 
 		if (viewport_ == HRL_INVALID_ID)
 			std::cerr << "[PLAYER] Could not create the viewport of player " << id_ << "\n";

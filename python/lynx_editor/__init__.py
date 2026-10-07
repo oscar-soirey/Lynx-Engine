@@ -236,6 +236,13 @@ class Connection:
     def reload_scripts(self) -> None:
         self.call("editor.reload_scripts")
 
+    def js_api(self, query: str = "") -> list:
+        """Engine JavaScript API entries matching `query` (object / component / function name).
+
+        Each entry : {"owner", "name", "signature", "doc", "function"}. Empty query : the objects.
+        """
+        return self.call("js.api", query=query)["entries"]
+
     def eval_js(self, code: str) -> Any:
         """Runs JavaScript in the engine, returns the last expression."""
         return self.call("script.eval", code=code)["result"]
@@ -661,6 +668,7 @@ def log(message: str) -> None: connection().log(message)
 def compile(wait: bool = True) -> dict: return connection().compile(wait)  # noqa: A001
 def reload_scripts() -> None: connection().reload_scripts()
 def eval_js(code: str) -> Any: return connection().eval_js(code)
+def js_api(query: str = "") -> list: return connection().js_api(query)
 def classes() -> list: return connection().classes()
 def actor(actor_id: str) -> Actor: return connection().actor(actor_id)
 def find(actor_id: str) -> Optional[Actor]: return connection().find(actor_id)

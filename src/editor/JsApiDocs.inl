@@ -72,6 +72,11 @@ static const ApiEntry kApiEntries[] = {
 	{ "PostProcess", "set", "set(name, value)", "Changes a post process setting now (number, bool or color).", "", true },
 	{ "PostProcess", "reset", "reset(name?)", "Back to the default value (all settings without a name).", "", true },
 	{ "PostProcess", "params", "params()", "Names of every post process setting.", "Array", true },
+	{ "", "Lighting2D", "Lighting2D", "2D lighting of the project : ambient light, shadows of the voxels (window 2D Lighting).", "", false },
+	{ "Lighting2D", "get", "get(name)", "Value of a 2D lighting setting (enabled, ambientColor, ambientIntensity, intensity, shadows, pixelSnap, bands...).", "", true },
+	{ "Lighting2D", "set", "set(name, value)", "Changes a 2D lighting setting now : Lighting2D.set(\"enabled\", true), set(\"ambientIntensity\", 0.1).", "", true },
+	{ "Lighting2D", "reset", "reset(name?)", "Back to the default value (all settings without a name).", "", true },
+	{ "Lighting2D", "params", "params()", "Names of every 2D lighting setting.", "Array", true },
 	{ "Interface", "call", "call(actor, iface, fn, ...args)", "Sends fn of the interface to the actor (nothing if it does not implement it). On an interface class : Collectible.call(actor, fn, ...).", "", true },
 	{ "Interface", "broadcast", "broadcast(iface, fn, ...args)", "Sends fn to every actor that implements the interface. Returns how many.", "", true },
 	{ "Interface", "find", "find(iface)", "Actors that implement the interface (Collectible.find()).", "Array", true },
@@ -137,7 +142,7 @@ static const ApiEntry kApiEntries[] = {
 	{ "Actor", "send", "send(iface, fn, ...args)", "Interface message : calls fn if the actor implements the interface, otherwise nothing. Returns the last value.", "", true },
 	{ "Actor", "callNative", "callNative(name, ...args)", "Calls the C++ function (HFUNCTION) even if a JS method has the same name.", "", true },
 	{ "Actor", "destroy", "destroy()", "Destroys the actor at the end of the frame.", "", true },
-	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, Collider, SoundSource, Light, Velocity, Lifetime, AI.", "Component:0", true },
+	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, Collider, SoundSource, Light, Light2D, Velocity, Lifetime, AI.", "Component:0", true },
 	{ "Actor", "getComponent", "getComponent(type)", "The component of this type (or null).", "Component:0", true },
 	{ "Actor", "hasComponent", "hasComponent(type)", "The actor has a component of this type.", "", true },
 	{ "Actor", "removeComponent", "removeComponent(type)", "Removes the component (EndPlay is called).", "", true },
@@ -271,6 +276,22 @@ static const ApiEntry kApiEntries[] = {
 	{ "Light", "offset", "offset : Vec3", "", "Vec3", false },
 	{ "Light", "enabled", "enabled : boolean", "", "", false },
 
+	// Light2D (2D lighting, needs Lighting2D enabled)
+	{ "Light2D", "color", "color : Vec3", "", "Vec3", false },
+	{ "Light2D", "intensity", "intensity : number", "", "", false },
+	{ "Light2D", "radius", "radius : number", "Reach in voxels.", "", false },
+	{ "Light2D", "falloff", "falloff : number", "1 linear, 2 smooth, 4 tight.", "", false },
+	{ "Light2D", "offset", "offset : Vec3", "From the actor location.", "Vec3", false },
+	{ "Light2D", "enabled", "enabled : boolean", "", "", false },
+	{ "Light2D", "castShadows", "castShadows : boolean", "Solid voxels block the light.", "", false },
+	{ "Light2D", "shadowStrength", "shadowStrength : number", "0..1", "", false },
+	{ "Light2D", "sourceRadius", "sourceRadius : number", "0 hard shadows, 1-3 soft edges.", "", false },
+	{ "Light2D", "coneAngle", "coneAngle : number", "Degrees ; 360 = every direction (flashlight : 40-90).", "", false },
+	{ "Light2D", "coneSoftness", "coneSoftness : number", "0..1", "", false },
+	{ "Light2D", "direction", "direction : number", "Degrees, 0 = +X, 90 = +Y (+ actor rotation Z).", "", false },
+	{ "Light2D", "useActorRotation", "useActorRotation : boolean", "", "", false },
+	{ "Light2D", "flicker", "flicker : number", "0 steady, 0.1-0.3 torch.", "", false },
+
 	// AI
 	{ "AI", "behaviorTree", "behaviorTree : string", "Behavior tree asset (.bt) ; changing it reloads the tree.", "", false },
 	{ "AI", "startOnBegin", "startOnBegin : boolean", "", "", false },
@@ -358,7 +379,7 @@ static const ApiEntry kApiEntries[] = {
 
 // Types of component (addComponent("...")).
 static const char* const kComponentTypes[] = {
-	"StaticSprite", "AnimationSprite", "Camera", "Collider", "SoundSource", "Light", "Velocity", "Lifetime", "AI",
+	"StaticSprite", "AnimationSprite", "Camera", "Collider", "SoundSource", "Light", "Light2D", "Velocity", "Lifetime", "AI",
 };
 
 // JavaScript built-ins, when the scripting context can't be read.
@@ -372,6 +393,7 @@ static const char* const kBuiltinGlobals[] = {
 	"decodeURIComponent", "escape", "unescape", "eval", "queueMicrotask", "structuredClone",
 	"print", "console", "vec3", "vec2", "Level", "Input", "Engine", "UI", "BT", "Actor", "UserWidget", "BTTask",
 	"BTDecorator", "BTService", "PointLightActor", "SpotLightActor", "DirectionalLightActor", "SkyLightActor",
+	"Light2DActor", "Lighting2D", "PostProcess",
 	"SpriteActor", "SoundActor", "ColliderActor",
 };
 

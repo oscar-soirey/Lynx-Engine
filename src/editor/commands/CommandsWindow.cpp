@@ -8,6 +8,7 @@
 #include "CommandServer.h"
 #include "ScriptRunner.h"
 #include "FileEdits.h"
+#include "../JsLanguage.h"
 #include "../../scripting/Scripting.h"
 
 #include <imgui/imgui.h>
@@ -1002,6 +1003,7 @@ namespace lynx::editor::commands_window
 		{
 			const std::string python_reference = ReadPythonReference();
 			const std::string knowledge = ReadDoc("LYNXIE_KNOWLEDGE.md");
+			const std::string files_context = SafeFilesContext(prompt);
 			const CallSyntax call_syntax = DetectCallSyntax(python_reference);
 
 			return std::string(
@@ -1064,9 +1066,15 @@ namespace lynx::editor::commands_window
 				"- In a JS class, a new method goes in the class body, at the same level as BeginPlay() / Update(dt), "
 				"NEVER inside `static properties` (that is for values only).\n"
 				"- Several blocks are allowed (several places, several files). Empty SEARCH = new file.\n"
-				"- Never edit a file with a python script (text.replace, write) : it breaks the code.\n\n") +
+				"- Never edit a file with a python script (text.replace, write) : it breaks the code.\n"
+				"- In .js files, call ONLY the engine functions of the JAVASCRIPT API section below (and the methods of "
+				"the classes of the project). Anything else does not exist : the editor refuses the edit and tells you "
+				"the real names. Not listed / unsure ? First read it with a `# lynxie: read` script that prints "
+				"lynx.js_api(\"Light2D\") (search by object or function name).\n\n") +
 				SafeSceneContext(prompt) +
-				SafeFilesContext(prompt) + "\n" +
+				files_context + "\n" +
+				"=== JAVASCRIPT API OF THE ENGINE (scripts in assets/ : the real functions, nothing else exists) ===\n" +
+				js_language::ApiReference(prompt + "\n" + files_context, 5000) + "\n" +
 				WorkedExample(call_syntax) + "\n" +
 				"=== ENGINE GUIDE (how Lynx works : use it to answer questions) ===\n" +
 				(knowledge.empty() ? std::string("(LYNXIE_KNOWLEDGE.md not found next to the editor.)\n") : knowledge) +
@@ -1241,6 +1249,15 @@ namespace lynx::editor::commands_window
 		};
 
 		AiRunState g_ai_run;
+
+		// AskLynxie() : a request waiting until Lynxie is free (and a model is known).
+		struct PendingAsk
+		{
+			std::string prompt;
+			std::string display;
+			bool active = false;
+		};
+		PendingAsk g_pending_ask;
 
 		long long UndoSteps()
 		{
@@ -1499,9 +1516,26 @@ namespace lynx::editor::commands_window
 			return text;
 		}
 
+		// Engine globals / members read from the running scripts : the .js edits
+		// of Lynxie are checked against the real API (js_language::CheckEngineApi).
+		void RefreshJsEnvironment()
+		{
+			js_language::SetProjectRoot(script_runner::ScriptsFolder().parent_path());
+			js_language::SetSyntaxChecker([](const std::string& code, const std::string& name, std::string& error)
+			{
+				return lynx::CheckScriptSyntax(code, name.c_str(), error);
+			});
+			js_language::RefreshEnvironment([](const std::string& code, std::string& json)
+			{
+				std::string error;
+				return lynx::EvaluateScript(code.c_str(), json, error, "<language service>");
+			});
+		}
+
 		// SEARCH / REPLACE blocks of the answer, applied by the editor.
 		bool ApplyAnswerEdits()
 		{
+			RefreshJsEnvironment();
 			const fs::path root = script_runner::ScriptsFolder().parent_path();
 			const file_edits::Result result = file_edits::Apply(g_local_ai.edits, root);
 
@@ -1599,6 +1633,19 @@ namespace lynx::editor::commands_window
 					const int num_ctx = NumCtxFor(system.size() + 4000, estimated);
 					return { {"system", system}, {"estimated_tokens", estimated}, {"num_ctx", num_ctx},
 					         {"temperature", 0.2}, {"max_attempts", g_ai_run.max_attempts} };
+				});
+
+			commands::Register("js.api",
+				"The JavaScript API of the engine (functions and properties usable in the .js scripts) : "
+				"entries matching the words of `query` (object, component or function name). Empty query : the objects.",
+				{ { "query", "string", "Words to look for : \"Level spawn\", \"Light2D\", \"Input\"...", false } },
+				[](const Json& params, const commands::CommandContext&) -> Json
+				{
+					Json entries = Json::array();
+					for (const js_language::ApiInfo& e : js_language::SearchApi(commands::GetString(params, "query", ""), 60))
+						entries.push_back({ {"owner", e.owner}, {"name", e.name}, {"signature", e.signature},
+						                    {"doc", e.doc}, {"function", e.function} });
+					return { {"entries", entries} };
 				});
 
 			commands::Register("ai.fix_message",
@@ -2643,6 +2690,27 @@ namespace lynx::editor::commands_window
 				OnAiScriptFinished(exit_code);
 		}
 
+		// A request from another window (Console > Fix with Lynxie...).
+		if (g_pending_ask.active && !g_local_ai.busy && !g_ai_run.waiting_fix && !g_ai_run.waiting_result &&
+		    !g_ai_run.script_running)
+		{
+			if (!g_local_ai.refresh_started)
+				StartModelRefresh();   // the model list comes back in a moment
+			else if (g_local_ai.selected_model >= 0 &&
+			         g_local_ai.selected_model < static_cast<int>(g_local_ai.models.size()))
+			{
+				g_pending_ask.active = false;
+				g_ai_run.follow_ups = 0;
+				StartChatRequest(g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)],
+				                 g_pending_ask.prompt, g_pending_ask.display);
+			}
+			else
+			{
+				g_pending_ask.active = false;
+				ChatNote("Lynxie could not answer : no local model (" + g_local_ai.status + ").");
+			}
+		}
+
 		bool completed = false;
 		bool was_model_result = false;
 		{
@@ -2685,6 +2753,21 @@ namespace lynx::editor::commands_window
 		// Frames during which the Lynxie tab is forced to the front (a few at
 		// startup : the dock layout and the other windows settle first).
 		int g_show_lynxie = 0;
+	}
+
+	void AskLynxie(const std::string& prompt, const std::string& display)
+	{
+		if (prompt.empty())
+			return;
+		g_pending_ask.prompt = prompt;
+		g_pending_ask.display = display;
+		g_pending_ask.active = true;
+		ShowLynxie(3);
+	}
+
+	bool IsLynxieBusy()
+	{
+		return g_local_ai.busy || g_ai_run.script_running || g_pending_ask.active;
 	}
 
 	void ShowLynxie(int frames)

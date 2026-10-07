@@ -1,6 +1,7 @@
 #include "FileEdits.h"
 
 #include "../../scripting/Scripting.h"
+#include "../JsLanguage.h"
 
 #include <json/json.hpp>
 
@@ -206,7 +207,11 @@ namespace lynx::editor::file_edits
 		}
 
 		// .js : compiled ; .json : parsed. Comments are allowed in voxels.json.
-		bool Validate(const std::string& relative, const std::string& text, std::string& error)
+		// Notes of the last Validate (engine API problems that do not refuse the edit).
+		std::vector<std::string> g_api_notes;
+
+		bool Validate(const std::string& relative, const std::string& text, const std::string& original,
+		              std::string& error)
 		{
 			const std::string extension = Lower(fs::path(relative).extension().string());
 			if (extension == ".js")
@@ -215,6 +220,28 @@ namespace lynx::editor::file_edits
 				if (!lynx::CheckScriptSyntax(text, relative.c_str(), message))
 				{
 					error = relative + " is not valid JavaScript : " + message;
+					return false;
+				}
+
+				// Engine API : functions / objects that do not exist (Level.fnd, Physics.raycast...).
+				// Members of the engine objects and unknown Capitalized names refuse the edit
+				// (always a mistake) ; other unknown names (maybe from another file) are notes.
+				std::string refused;
+				for (const std::string& problem : js_language::CheckEngineApi(text, relative, original))
+				{
+					const size_t q = problem.find(" : '");
+					const bool member = problem.find("' does not exist on '") != std::string::npos;
+					const bool capital = q != std::string::npos && q + 4 < problem.size() &&
+					                     std::isupper(static_cast<unsigned char>(problem[q + 4]));
+					if (member || capital)
+						refused += "\n  " + problem;
+					else
+						g_api_notes.push_back(relative + " " + problem);
+				}
+				if (!refused.empty())
+				{
+					error = relative + " uses engine functions that do not exist (use only the JAVASCRIPT API "
+					        "of the engine ; check with lynx.js_api(\"name\") when unsure) :" + refused;
 					return false;
 				}
 			}
@@ -381,6 +408,7 @@ namespace lynx::editor::file_edits
 
 	Result Apply(const std::vector<Block>& blocks, const fs::path& root)
 	{
+		g_api_notes.clear();
 		Result result;
 		if (blocks.empty())
 		{
@@ -503,7 +531,7 @@ namespace lynx::editor::file_edits
 				text += crlf ? "\r\n" : "\n";
 
 			std::string error;
-			if (errors.empty() && !Validate(relative, text, error))
+			if (errors.empty() && !Validate(relative, text, file.original, error))
 				fail(relative, error);
 			contents[relative] = std::move(text);
 		}
@@ -547,6 +575,12 @@ namespace lynx::editor::file_edits
 
 		g_last_edit = std::move(backups);
 		result.ok = true;
+		if (!g_api_notes.empty())
+		{
+			result.message += "\nCheck these names (not found in the engine API ; fine if they come from another file) :";
+			for (const std::string& note : g_api_notes)
+				result.message += "\n  " + note;
+		}
 		return result;
 	}
 

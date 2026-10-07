@@ -602,6 +602,7 @@ int main(int argc, char** argv)
     // Post process of every player (HRL default shader). Its settings come
     // from assets/postprocess.json (editor : Windows > Post Process).
     lynx::postprocess::Install();
+    lynx::lighting2d::Install();   // 2D lighting pass (before the post process)
 
     // Camera shake settings (editor : Windows > Camera Shake).
     lynx::LoadCameraShakeSettings();

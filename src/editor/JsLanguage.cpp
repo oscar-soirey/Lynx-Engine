@@ -3408,4 +3408,316 @@ namespace lynx::editor::js_language
 		}
 		return loc;
 	}
+
+
+	// =========================================================================
+	// Engine API for Lynxie
+	// =========================================================================
+
+	namespace
+	{
+		std::string LowerAscii(std::string text)
+		{
+			for (char& c : text)
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			return text;
+		}
+
+		std::vector<std::string> Words(const std::string& text)
+		{
+			std::vector<std::string> words;
+			std::string word;
+			for (char c : text)
+			{
+				if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+					word += c;
+				else if (!word.empty())
+				{
+					words.push_back(word);
+					word.clear();
+				}
+			}
+			if (!word.empty())
+				words.push_back(word);
+			return words;
+		}
+
+		int EditDistance(const std::string& a, const std::string& b)
+		{
+			std::vector<int> prev(b.size() + 1), cur(b.size() + 1);
+			for (size_t j = 0; j <= b.size(); ++j)
+				prev[j] = static_cast<int>(j);
+			for (size_t i = 1; i <= a.size(); ++i)
+			{
+				cur[0] = static_cast<int>(i);
+				for (size_t j = 1; j <= b.size(); ++j)
+				{
+					const int cost = std::tolower(static_cast<unsigned char>(a[i - 1])) ==
+					                 std::tolower(static_cast<unsigned char>(b[j - 1])) ? 0 : 1;
+					cur[j] = std::min({ prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost });
+				}
+				std::swap(prev, cur);
+			}
+			return prev[b.size()];
+		}
+
+		// The closest names first (typo, other case, prefix).
+		std::vector<std::string> Closest(const std::string& name, std::vector<std::string> candidates, size_t count)
+		{
+			const std::string lower = LowerAscii(name);
+			std::stable_sort(candidates.begin(), candidates.end(), [&](const std::string& x, const std::string& y)
+			{
+				auto score = [&](const std::string& c)
+				{
+					const std::string lc = LowerAscii(c);
+					int d = EditDistance(lower, lc);
+					if (lc.find(lower) != std::string::npos || lower.find(lc) != std::string::npos)
+						d -= 3;
+					return d;
+				};
+				return score(x) < score(y);
+			});
+			if (candidates.size() > count)
+				candidates.resize(count);
+			return candidates;
+		}
+
+		// Every documented + introspected member name of an owner.
+		std::vector<std::string> MemberNames(const std::string& owner)
+		{
+			Environment& env = Env();
+			std::set<std::string> names;
+			auto d = env.docs.find(owner);
+			if (d != env.docs.end())
+				for (const auto& [name, entry] : d->second)
+					names.insert(name);
+			auto m = env.members.find(owner);
+			if (m != env.members.end())
+				for (const auto& [name, kind] : m->second)
+					names.insert(name);
+			return std::vector<std::string>(names.begin(), names.end());
+		}
+
+		ApiInfo ToInfo(const ApiEntry& e)
+		{
+			return { e.owner, e.name, e.signature, e.doc, e.function };
+		}
+	}
+
+	std::vector<ApiInfo> SearchApi(const std::string& query, size_t max_results)
+	{
+		std::vector<ApiInfo> out;
+		const std::vector<std::string> words = Words(LowerAscii(query));
+
+		if (words.empty())
+		{
+			// The owners : where to look.
+			std::set<std::string> owners;
+			for (const ApiEntry& e : kApiEntries)
+				if (e.owner[0])
+					owners.insert(e.owner);
+			for (const std::string& owner : owners)
+				out.push_back({ owner, "", owner, "", false });
+			return out;
+		}
+
+		std::vector<std::pair<int, ApiInfo>> scored;
+		for (const ApiEntry& e : kApiEntries)
+		{
+			const std::string owner = LowerAscii(e.owner), name = LowerAscii(e.name), doc = LowerAscii(e.doc);
+			int score = 0;
+			for (const std::string& w : words)
+			{
+				if (owner == w) score += 6;
+				else if (!owner.empty() && owner.find(w) != std::string::npos) score += 3;
+				if (name == w) score += 8;
+				else if (name.find(w) != std::string::npos) score += 4;
+				if (w.size() >= 4 && doc.find(w) != std::string::npos) score += 1;
+			}
+			if (score > 0)
+				scored.emplace_back(score, ToInfo(e));
+		}
+
+		// Introspected members without documentation (the game's own objects...).
+		{
+			Environment& env = Env();
+			std::lock_guard<std::mutex> lock(env.mutex);
+			for (const auto& [owner, members] : env.members)
+			{
+				const std::string lo = LowerAscii(owner);
+				for (const auto& [name, kind] : members)
+				{
+					if (Doc(owner, name))
+						continue;
+					const std::string ln = LowerAscii(name);
+					int score = 0;
+					for (const std::string& w : words)
+					{
+						if (lo == w) score += 5;
+						if (ln == w) score += 7;
+						else if (ln.find(w) != std::string::npos) score += 3;
+					}
+					if (score > 0)
+						scored.emplace_back(score, ApiInfo{ owner, name, kind == 'f' ? name + "(...)" : name, "", kind == 'f' });
+				}
+			}
+		}
+
+		std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+		for (auto& [score, info] : scored)
+		{
+			if (out.size() >= max_results)
+				break;
+			out.push_back(std::move(info));
+		}
+		return out;
+	}
+
+	std::string ApiReference(const std::string& text, size_t max_chars)
+	{
+		// Owners named in the text (word match, any case) ; always the globals and Actor.
+		std::set<std::string> owners_all;
+		for (const ApiEntry& e : kApiEntries)
+			owners_all.insert(e.owner);
+
+		std::set<std::string> text_words;
+		for (const std::string& w : Words(text))
+			text_words.insert(LowerAscii(w));
+
+		std::vector<std::string> owners = { "", "Actor" };
+		for (const std::string& owner : owners_all)
+			if (!owner.empty() && owner != "Actor" && text_words.count(LowerAscii(owner)))
+				owners.push_back(owner);
+
+		std::string out;
+		std::vector<std::string> left_out;
+		for (const std::string& owner : owners)
+		{
+			std::string block = owner.empty() ? "Globals :\n" : owner + " :\n";
+			for (const ApiEntry& e : kApiEntries)
+			{
+				if (owner != e.owner)
+					continue;
+				std::string line = "  " + std::string(e.signature);
+				if (e.doc[0])
+				{
+					std::string doc = e.doc;
+					const size_t nl = doc.find('\n');
+					if (nl != std::string::npos)
+						doc.resize(nl);
+					if (doc.size() > 110)
+						doc = doc.substr(0, 107) + "...";
+					line += "  -- " + doc;
+				}
+				block += line + "\n";
+			}
+			if (out.size() + block.size() > max_chars)
+			{
+				left_out.push_back(owner.empty() ? "globals" : owner);
+				continue;
+			}
+			out += block;
+		}
+
+		std::string others;
+		for (const std::string& owner : owners_all)
+			if (!owner.empty() && std::find(owners.begin(), owners.end(), owner) == owners.end())
+				others += (others.empty() ? "" : ", ") + owner;
+		if (!others.empty())
+			out += "Other engine objects / components (members not listed here) : " + others + ".\n";
+		if (!left_out.empty())
+		{
+			out += "Not shown (too long) : ";
+			for (size_t i = 0; i < left_out.size(); ++i)
+				out += (i ? ", " : "") + left_out[i];
+			out += ".\n";
+		}
+		return out;
+	}
+
+	std::vector<std::string> CheckEngineApi(const std::string& code, const fs::path& file, const std::string& previous_code)
+	{
+		std::vector<std::string> problems;
+		if (!Env().introspected)
+			return problems;   // the real globals are unknown : nothing reliable to say
+
+		auto collect = [&](const std::string& text)
+		{
+			std::vector<std::pair<int, std::string>> found;   // line, message
+			Document doc;
+			doc.Update(SplitLines(text), file, false);
+			for (const Diagnostic& d : doc.Diagnostics())
+			{
+				const bool member = d.message.find("' does not exist on '") != std::string::npos;
+				const bool undefined = d.message.find("' is not defined.") != std::string::npos;
+				if (member || undefined)
+					found.emplace_back(d.line, d.message);
+			}
+			return found;
+		};
+
+		std::multiset<std::string> before;
+		if (!previous_code.empty())
+			for (const auto& [line, message] : collect(previous_code))
+				before.insert(message);
+
+		std::set<std::string> reported;
+		for (const auto& [line, message] : collect(code))
+		{
+			auto it = before.find(message);
+			if (it != before.end())
+			{
+				before.erase(it);   // already there before the edit : not Lynxie's
+				continue;
+			}
+			if (!reported.insert(message).second)
+				continue;
+
+			std::string hint;
+			const size_t q1 = message.find('\'');
+			const size_t q2 = message.find('\'', q1 + 1);
+			const std::string name = q1 != std::string::npos && q2 != std::string::npos
+				? message.substr(q1 + 1, q2 - q1 - 1) : std::string();
+			const size_t on = message.find("' does not exist on '");
+			if (on != std::string::npos && !name.empty())
+			{
+				const size_t o1 = on + std::strlen("' does not exist on '");
+				const std::string owner = message.substr(o1, message.find('\'', o1) - o1);
+				std::vector<std::string> members;
+				{
+					std::lock_guard<std::mutex> lock(Env().mutex);
+					members = MemberNames(owner);
+				}
+				const std::vector<std::string> best = Closest(name, members, 8);
+				if (!best.empty())
+				{
+					hint = " Real members of " + owner + " : ";
+					for (size_t i = 0; i < best.size(); ++i)
+						hint += (i ? ", " : "") + best[i];
+					hint += ".";
+				}
+			}
+			else if (!name.empty())
+			{
+				std::vector<std::string> globals;
+				{
+					std::lock_guard<std::mutex> lock(Env().mutex);
+					for (const auto& [g, kind] : Env().globals)
+						globals.push_back(g);
+					for (const auto& [c, info] : Env().classes)
+						globals.push_back(c);
+				}
+				const std::vector<std::string> best = Closest(name, globals, 5);
+				if (!best.empty())
+				{
+					hint = " Closest existing names : ";
+					for (size_t i = 0; i < best.size(); ++i)
+						hint += (i ? ", " : "") + best[i];
+					hint += ".";
+				}
+			}
+			problems.push_back("line " + std::to_string(line + 1) + " : " + message + hint);
+		}
+		return problems;
+	}
 }

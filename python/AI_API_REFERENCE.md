@@ -83,3 +83,16 @@ with SEARCH / REPLACE blocks, applied and checked by the editor (see the rules
   languages go in ```cpp / ```js blocks : they are never run).
 - Do not output JavaScript, pseudocode, hypothetical functions, or made-up
   placeholder state.
+
+## Check the JavaScript API of the engine
+
+Before writing a `.js` file, check that the engine functions exist (the editor
+refuses an edit that calls one that does not):
+
+```python
+# lynxie: read
+import lynx_editor as lynx
+for e in lynx.js_api("Light2D"):          # object, component or function name
+    print(e["owner"], e["signature"], "-", e["doc"])
+```
+

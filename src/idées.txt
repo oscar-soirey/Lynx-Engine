@@ -2,6 +2,8 @@ obligé:
 
 mettre une vraie toolbar
 
+prévenir au premier lancement d'un projet que Lynx est 100% gratuit et local, mais pour les jeux commercials, y'a 5% de royalties a renverser a lynx (voir licence complete)
+
 les liquident buguent pas mal
 
 pouvoir masquer le curseur de la souris avec une fonction globale simple C++/javascript

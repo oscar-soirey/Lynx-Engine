@@ -89,6 +89,39 @@ de voxels), écrit un script Python, *Save and run* le lance.
   (2 à 5 essais). Le contexte est toujours reconstruit pour la demande d'origine.
 - Commandes `ai.context` (le prompt exact pour une demande) et `ai.fix_message` :
   utilisées par l'évaluation (`python/lynxie_eval/`, voir son README).
+- **API JavaScript vérifiée** : le prompt contient la référence de l'API JS du moteur
+  (globaux, `Actor`, et chaque objet / composant nommé dans la demande ou ses fichiers,
+  depuis `JsApiDocs.inl`). Quand Lynxie modifie un `.js`, l'éditeur vérifie les appels avec
+  le service de langage (`js_language::CheckEngineApi`) : un membre qui n'existe pas
+  (`Level.fnd`) ou un nom inconnu en majuscule refuse la modification, et Lynxie reçoit
+  les vrais noms les plus proches (auto-fix). Les noms inconnus en minuscule (peut-être
+  d'un autre fichier) sont seulement signalés. Commande `js.api` / `lynx.js_api("Light2D")`
+  pour chercher dans l'API.
+- **Fix with Lynxie** (fenêtre Console) : sur une ligne d'erreur (au survol) ou pour la
+  dernière erreur (barre du haut), l'erreur, sa pile, les lignes d'avant et le script /
+  la ligne sont envoyés à Lynxie, qui corrige le code (`commands_window::AskLynxie`).
+
+## Palette de commandes (Ctrl+P)
+
+Une recherche pour tout lancer : commandes (Save, Play / Stop, Simulate, Undo, Hot reload,
+Options, Plugins, Lynxie, éclairage 2D, centrer sur l'acteur sélectionné), fenêtres
+(Show / Hide), acteurs du niveau (sélectionne et centre la caméra) et fichiers de
+`assets/` (ouverts comme un double-clic). Recherche floue (les lettres dans l'ordre :
+« savlev » → *Save level*), flèches + Entrée, Échap. Préfixes : `>` commandes et fenêtres,
+`@` acteurs, `#` fichiers ; **Ctrl+Shift+P** ouvre directement avec `>`. Les derniers
+éléments lancés reviennent en tête. Code : `CommandPalette.h/.cpp`.
+
+## Éclairage 2D
+
+Fenêtre **2D Lighting** (menu Windows) : réglages de `lynx::lighting2d`
+(`core/Lighting2D.h`), sauvegardés dans `assets/lighting2d.json` avec le niveau.
+Une passe de post process (avant le post process par défaut) multiplie la scène par la
+lumière : pour chaque pixel, sa position sur le plan des voxels vient de la caméra de la
+vue (`core/CameraState.h` : les caméras doivent être réglées avec
+`lynx::camera_state::SetLocation / SetRotation / SetFov / SetViewportCamera`, pas
+directement avec HRL), puis un rayon par lumière traverse une texture d'occlusion des
+voxels autour de la vue. Lumières : `Light2DActor` (cercle / cône dessiné dans l'éditeur)
+ou `Light2DComponent`.
 
 ## Content Browser
 
