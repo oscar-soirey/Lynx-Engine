@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Robot AI (open it in the editor : Behavior Tree editor). Children run from
+     top to bottom :
+       1. it can see the player and is close enough : shoot, wait a little ;
+       2. it knows where the player is : move towards it ;
+       3. otherwise : wait.
+     Services : FindNearest writes the closest actor tagged "player" in
+     "target", DistanceTo writes the distance in "distance". -->
+<BehaviorTree version="1">
+    <Blackboard>
+        <Key name="target" type="actor"/>
+        <Key name="distance" type="float" default="999"/>
+    </Blackboard>
+    <Node id="1" parent="0" type="Root" x="0" y="0"/>
+    <Node id="2" parent="1" type="Selector" x="0" y="120">
+        <Service id="20" type="FindNearest" tag="player" radius="90" result="target" interval="0.4"/>
+        <Service id="21" type="DistanceTo" target="target" result="distance" interval="0.2"/>
+    </Node>
+    <Node id="3" parent="2" type="Sequence" x="-320" y="260">
+        <Decorator id="22" type="CallFunction" function="CanShoot" abort="both"/>
+    </Node>
+    <Node id="5" parent="3" type="CallFunction" function="Shoot" x="-420" y="400"/>
+    <Node id="6" parent="3" type="Wait" time="0.55" random="0.25" x="-220" y="460"/>
+    <Node id="4" parent="2" type="Sequence" x="0" y="320">
+        <Decorator id="23" type="Blackboard" key="target" op="isSet"/>
+    </Node>
+    <Node id="7" parent="4" type="MoveTo" target="target" speed="9" acceptance="6" timeout="1.2" x="0" y="460"/>
+    <Node id="8" parent="2" type="Wait" time="0.5" x="320" y="380"/>
+</BehaviorTree>

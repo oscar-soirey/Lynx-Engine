@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <TextBlock object_id_="QuestTitle" text="" font_size="40" color="1 0.86 0.4 1">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-40 36 900 50" alignment="1 0" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="QuestObjective" text="" font_size="30" color="1 1 1 0.9">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-40 90 900 40" alignment="1 0" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Prompt" text="E : parler" font_size="36" color="1 1 1 1" visibility="2">
+            <Slot anchor_min="0.5 0.62" anchor_max="0.5 0.62" offsets="0 0 600 50" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Message" text="" font_size="44" color="1 1 1 1" visibility="2">
+            <Slot anchor_min="0.5 0.2" anchor_max="0.5 0.2" offsets="0 0 1500 60" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

@@ -1,0 +1,6 @@
+{
+    "name": "Top-down Shooter",
+    "description": "Top-down arena, all JavaScript: twin-stick controls (WASD + arrows), dash, bullets that destroy voxel crates and walls, robots driven by a Behavior Tree (.bt), enemy waves, health packs, score and HUD.",
+    "order": 5,
+    "no_cpp": true
+}

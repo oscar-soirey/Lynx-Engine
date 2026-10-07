@@ -1,0 +1,17 @@
+{
+    "action-mappings": {
+        "jump": [ "KEY_SPACE", "KEY_W", "KEY_UP", "GAMEPAD_A" ],
+        "dash": [ "KEY_LEFT_SHIFT", "KEY_K", "GAMEPAD_X" ],
+        "pound": [ "KEY_S", "KEY_DOWN", "GAMEPAD_B" ],
+        "restart": [ "KEY_R", "GAMEPAD_START" ]
+    },
+    "axis-mappings": {
+        "move_x": [
+            { "key": "KEY_A", "scale": -1.0 },
+            { "key": "KEY_D", "scale": 1.0 },
+            { "key": "KEY_LEFT", "scale": -1.0 },
+            { "key": "KEY_RIGHT", "scale": 1.0 },
+            { "key": "GAMEPAD_LEFT_X", "scale": 1.0 }
+        ]
+    }
+}

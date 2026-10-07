@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <ProgressBar object_id_="Health" percent="1" background_color="0.12 0.12 0.16 0.85" fill_color="0.3 0.9 0.5 1">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="40 -80 460 30" alignment="0 0"/>
+        </ProgressBar>
+        <TextBlock object_id_="HealthText" text="100 PV" font_size="30" color="1 1 1 1">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="520 -84 300 40" alignment="0 0" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Help" text="WASD bouger   Flèches viser   Espace / J tirer   Shift dash" font_size="24" color="1 1 1 0.6">
+            <Slot anchor_min="1 1" anchor_max="1 1" offsets="-40 -40 1000 36" alignment="1 1" auto_size="true"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

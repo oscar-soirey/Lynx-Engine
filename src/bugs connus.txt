@@ -1,7 +1,3 @@
 lorsque le build de contrôle echoue, ca charge quand meme le projet et peut amener a un crash potentiel
 
-compiler les libs en release avec build-release.bat crash
-
-meme lorsqu'on séléctionne pas le viewport, on peut peindre derriere l'interface
-
 si on séléctionne le gizmo en étant plus au dessus du sprite, c'est comme si on arretait de séléctionner l'actor, donne le gizmo se désactive alors qu'on veut juste deplacer l'actor

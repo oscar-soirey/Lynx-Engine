@@ -1,0 +1,17 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Seen from above : no physics (water would "fall" towards -Y).
+    "voxels": [
+        { "name": "Grass",      "color": "5a9a3a", "collision": "NONE", "texture": "textures/grass.png", "texture_tile": 16 },
+        { "name": "Path",       "color": "c8aa78", "collision": "NONE", "texture": "textures/sand.png", "texture_tile": 16 },
+        { "name": "Tiles",      "color": "9a968c", "collision": "NONE", "texture": "textures/tiles.png", "texture_tile": 16 },
+        { "name": "Stone wall", "color": "7a7870", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 16, "indestructible": true },
+        { "name": "Brick wall", "color": "a85a3a", "collision": "SOLID", "texture": "textures/brick.png", "texture_tile": 16 },
+        { "name": "Water",      "color": "3a6ab0", "collision": "SOLID", "texture": "textures/liquid.png", "texture_tile": 16 },
+        { "name": "Hedge",      "color": "2a6a2a", "collision": "SOLID", "texture": "textures/grass.png", "texture_tile": 8 },
+        { "name": "Gate",       "color": "8a6a4a", "collision": "SOLID", "texture": "textures/wood.png", "texture_tile": 16, "flags": ["GATE"] },
+        { "name": "Torch",      "color": "ffb050", "collision": "SOLID", "emissive": "ff9a40" },
+        { "name": "Crystal",    "color": "8ae0ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 16, "emissive": "4ab8ff" },
+        { "name": "Wood floor", "color": "b88048", "collision": "NONE", "texture": "textures/wood.png", "texture_tile": 16 }
+    ]
+}

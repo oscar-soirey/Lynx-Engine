@@ -86,6 +86,11 @@ namespace lynx::script_detail
 	bool IsWidgetClassConstructor(JSContext* ctx, JSValueConst value);
 	void RegisterWidgetClass(JSContext* ctx, const std::string& name, JSValueConst ctor, const std::string& file);
 
+	// ---- QueryBindings.cpp (Voxels, Physics) ------------------------------
+
+	/** Voxels.destroyCircle / fillRect..., Physics.raycast / overlapCircle... */
+	void RegisterQueryGlobals(JSContext* ctx);
+
 	// ---- AIBindings.cpp (Behavior Trees) ------------------------------------
 
 	/** BTTask, BTDecorator, BTService, BT.*, Blackboard. */

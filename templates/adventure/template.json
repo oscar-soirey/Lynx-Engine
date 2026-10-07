@@ -1,0 +1,10 @@
+{
+    "name": "Adventure / RPG",
+    "description": "Top-down, all JavaScript, Dialogue and CineCamera plugins: intro cutscene, villagers with branching dialogues, a quest with objectives, a chest and a key, a ruined gate that crumbles (voxel destruction + camera), torches and crystals lighting the night.",
+    "order": 4,
+    "no_cpp": true,
+    "plugins": [
+        "Dialogue",
+        "CineCamera"
+    ]
+}

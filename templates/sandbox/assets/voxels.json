@@ -1,0 +1,20 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Editor : Paint window > Voxel types (texture, physics presets, emissive...).
+    "voxels": [
+        { "name": "Dirt",    "color": "9a6634", "collision": "SOLID", "texture": "textures/dirt.png", "texture_tile": 16 },
+        { "name": "Stone",   "color": "7c7a74", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 16, "flags": ["HARD"] },
+        { "name": "Bedrock", "color": "3a3846", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 16, "indestructible": true },
+        { "name": "Sand",    "color": "e8c878", "collision": "SOLID", "texture": "textures/sand.png", "texture_tile": 16, "physics": { "preset": "Sand" } },
+        { "name": "Gravel",  "color": "8c8478", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 8, "physics": { "preset": "Gravel" } },
+        { "name": "Water",   "color": "3f7fd0", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "physics": { "preset": "Water" } },
+        { "name": "Oil",     "color": "3a2a20", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "physics": { "preset": "Oil" } },
+        { "name": "Lava",    "color": "ff5a18", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "emissive": "ff6a20", "physics": { "preset": "Lava" } },
+        { "name": "Acid",    "color": "8aff3a", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "emissive": "306a10", "physics": { "preset": "Acid" } },
+        { "name": "Gold",    "color": "ffd25a", "collision": "SOLID", "texture": "textures/gold_ore.png", "texture_tile": 16, "flags": ["HARD", "ORE"] },
+        { "name": "Crystal", "color": "8ae0ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 16, "emissive": "4ab8ff", "flags": ["ORE"] },
+        { "name": "Wood",    "color": "b88048", "collision": "SOLID", "texture": "textures/wood.png", "texture_tile": 16 },
+        { "name": "Smoke",   "color": "8a8a90", "collision": "NONE", "physics": { "preset": "Smoke" } },
+        { "name": "Brick",   "color": "b85a3a", "collision": "SOLID", "texture": "textures/brick.png", "texture_tile": 16 }
+    ]
+}

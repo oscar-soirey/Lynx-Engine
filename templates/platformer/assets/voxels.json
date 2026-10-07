@@ -1,0 +1,19 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Editor : Paint window > Voxel types (texture, physics presets, emissive...).
+    "voxels": [
+        { "name": "Grass",   "color": "8fd85a", "collision": "SOLID", "texture": "textures/grass.png", "texture_tile": 16 },
+        { "name": "Dirt",    "color": "9a6634", "collision": "SOLID", "texture": "textures/dirt.png", "texture_tile": 16 },
+        { "name": "Stone",   "color": "8a8780", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 16, "indestructible": true },
+        { "name": "Brick",   "color": "c0643a", "collision": "SOLID", "texture": "textures/brick.png", "texture_tile": 16, "flags": ["BREAKABLE"] },
+        { "name": "Planks",  "color": "c8924e", "collision": ["TOP"], "texture": "textures/wood.png", "texture_tile": 16 },
+        { "name": "Ice",     "color": "b8e8ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 16, "physics": { "preset": "Ice" } },
+        { "name": "Mud",     "color": "6a4a2a", "collision": "SOLID", "texture": "textures/dirt.png", "texture_tile": 16, "physics": { "preset": "Mud" } },
+        { "name": "Rubber",  "color": "ff5aa0", "collision": "SOLID", "physics": { "preset": "Rubber" } },
+        { "name": "Spikes",  "color": "d0d0d8", "collision": "SOLID", "texture": "textures/metal.png", "texture_tile": 16, "physics": { "preset": "Spikes" } },
+        { "name": "Water",   "color": "4f8fd6", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "physics": { "preset": "Water" } },
+        { "name": "Lava",    "color": "ff6a20", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "emissive": "ff7a28", "physics": { "preset": "Lava" } },
+        { "name": "Crystal", "color": "7ad8ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 16, "emissive": "5ac8ff" },
+        { "name": "Sand",    "color": "e8c878", "collision": "SOLID", "texture": "textures/sand.png", "texture_tile": 16, "physics": { "preset": "Sand" } }
+    ]
+}

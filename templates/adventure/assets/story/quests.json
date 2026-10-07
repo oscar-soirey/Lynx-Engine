@@ -1,0 +1,19 @@
+[
+    {
+        "id": "lost_key",
+        "title": "La clé perdue",
+        "description": "L'ancien a perdu la clé des ruines quelque part dans la forêt, à l'est de la rivière.",
+        "objectives": [
+            { "id": "find_key", "text": "Trouver la clé dans la forêt" },
+            { "id": "return_key", "text": "Rapporter la clé à l'ancien" }
+        ]
+    },
+    {
+        "id": "relic",
+        "title": "Le cœur des ruines",
+        "description": "La porte des ruines est ouverte. Quelque chose brille au fond.",
+        "objectives": [
+            { "id": "touch_relic", "text": "Toucher la relique des ruines" }
+        ]
+    }
+]

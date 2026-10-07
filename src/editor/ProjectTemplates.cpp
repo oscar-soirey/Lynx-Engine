@@ -22,6 +22,7 @@ namespace lynx::editor::project_templates
 	{
 		constexpr const char* kCommonFolder = "_common";
 		constexpr const char* kTemplateFile = "template.json";
+		constexpr const char* kIconFile = "icon.png";
 		constexpr const char* kStarterTerrainFile = ".lynx/starter_terrain.txt";
 
 		// UTF-8 <-> path (C++20 : u8string() is a std::u8string). Accents in a
@@ -95,8 +96,8 @@ namespace lynx::editor::project_templates
 				if (ec)
 					break;
 
-				// template.json describes the template : not part of the project.
-				if (relative == kTemplateFile)
+				// template.json and icon.png describe the template : not part of the project.
+				if (relative == kTemplateFile || relative == kIconFile)
 					continue;
 
 				const fs::path destination = target / FromUtf8(replacements.Apply(ToUtf8(relative)));
@@ -171,6 +172,8 @@ namespace lynx::editor::project_templates
 			t.id = entry.path().filename().string();
 			t.name = t.id;
 			t.folder = entry.path();
+			if (fs::is_regular_file(entry.path() / kIconFile, ec))
+				t.icon = entry.path() / kIconFile;
 
 			const Json info = Json::parse(ReadText(entry.path() / kTemplateFile), nullptr, false, true);
 			if (info.is_object())

@@ -1,0 +1,19 @@
+{
+    "length": 9,
+    "cuts": [
+        { "t": 0, "camera": "cam_ruins", "blend": 0 },
+        { "t": 3, "camera": "cam_forest", "blend": 2 },
+        { "t": 6, "camera": "cam_village", "blend": 2 }
+    ],
+    "tracks": [],
+    "events": [
+        { "t": 0.5, "name": "IntroTitle", "script": "" }
+    ],
+    "fades": [
+        { "t": 0, "value": 1, "color": [0, 0, 0] },
+        { "t": 1.5, "value": 0, "color": [0, 0, 0] },
+        { "t": 8.2, "value": 0, "color": [0, 0, 0] },
+        { "t": 8.6, "value": 1, "color": [0, 0, 0] },
+        { "t": 9, "value": 0, "color": [0, 0, 0] }
+    ]
+}

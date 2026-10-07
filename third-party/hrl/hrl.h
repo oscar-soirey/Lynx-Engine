@@ -1255,10 +1255,46 @@ extern "C" {
 	 * @brief Assigns the emissive RGB color associated with a voxel type.
 	 *
 	 * Emissive RGB is HDR and defaults to (0, 0, 0). A non-zero emissive
-	 * color is added to the voxel appearance and also acts as a global
-	 * light source for the voxel world.
+	 * color is added to the voxel appearance and also lights the voxel world,
+	 * the sprites and the meshes around it (OpenGL : light field, any number
+	 * of emissive voxels, see HRL_SetVoxelEmissiveLighting).
 	 */
 	HRL_API void HRL_SetVoxelTypeEmissiveColor(HRL_id _sceneid, uint32_t _type, float _r, float _g, float _b);
+
+	/**
+	 * @brief Assigns a texture to a voxel type (optional, OpenGL backend).
+	 *
+	 * The texture is sampled in world space, so it continues seamlessly from one
+	 * voxel to the next, and repeats every `_tileVoxels` voxels (1 : the whole
+	 * texture on each voxel, 16 : one copy every 16x16 voxels). It is multiplied
+	 * by the type color (use white for the raw texture) and its alpha by the
+	 * type alpha. Pixel-art friendly : nearest filtering.
+	 * Textures of every textured type are packed in one texture array (each one
+	 * is resized, nearest, to the largest textured size, at most 256x256).
+	 * Emissive types keep their emissive color ; the texture modulates the
+	 * emission seen on the voxel itself.
+	 *
+	 * @param _texture    Texture ID (HRL_CreateTexture), or HRL_INVALID_ID to
+	 *                    go back to the plain color.
+	 * @param _tileVoxels Voxels covered by one copy of the texture (> 0).
+	 */
+	HRL_API void HRL_SetVoxelTypeTexture(HRL_id _sceneid, uint32_t _type, HRL_id _texture, float _tileVoxels);
+
+	/**
+	 * @brief Configures the light cast by emissive voxels (OpenGL backend).
+	 *
+	 * Emissive voxels light the voxel world, sprites and meshes around them
+	 * through a GPU light field computed once per viewport : the cost does not
+	 * depend on the number of emissive voxels (any amount is allowed). Light
+	 * is not occluded.
+	 *
+	 * @param _enabled   HRL_FALSE : emissive voxels still glow, but light nothing.
+	 * @param _intensity Multiplier of the light (default 1).
+	 * @param _falloff   Distance in voxels of the soft falloff (default 8). The
+	 *                   light reaches about four times this distance; a larger
+	 *                   value streams more voxel chunks around the cameras.
+	 */
+	HRL_API void HRL_SetVoxelEmissiveLighting(HRL_id _sceneid, int _enabled, float _intensity, float _falloff);
 
 	/**
 	 * @brief Selects how the surface of the scene's voxel world is drawn.

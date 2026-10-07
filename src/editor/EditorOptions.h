@@ -9,7 +9,8 @@
 //
 //   Interface : global UI scale (fonts + sizes), theme (Pixel, Light, Classic,
 //               Lynx), rounded corners ;
-//   Plugins   : (later) the list of the editor plugins.
+//   Plugins   : the plugins (enable / disable, new plugin, their tools),
+//               drawn by EditorMain (SetPluginsPage).
 //
 //   Project   : the settings of the open project (vsync, volume, camera
 //               speed, voxels... : settings.cfg of the project), drawn by
@@ -40,6 +41,14 @@ namespace lynx::editor::options
 
 	/** Content of the "Project" page (the editor's project settings). */
 	void SetProjectPage(const std::function<void()>& draw);
+
+	/** Content of the "Plugins" page. */
+	void SetPluginsPage(const std::function<void()>& draw);
+
+	enum class Page { Interface = 0, Project, Plugins };
+
+	/** Shows this page the next time the window is drawn (open it with the bool of Draw). */
+	void OpenPage(Page page);
 
 	/** The Options window. */
 	void Draw(bool* open);

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <Image object_id_="CoinIcon" texture="sprites/coin.png" image_size="56 56">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="40 32 56 56" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Coins" text="0 / 0" font_size="44" color="1 0.86 0.35 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="110 36 400 56" alignment="0 0"/>
+        </TextBlock>
+        <Image object_id_="Heart1" texture="sprites/heart.png" image_size="56 56">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-360 32 56 56" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Heart2" texture="sprites/heart.png" image_size="56 56">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-296 32 56 56" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Heart3" texture="sprites/heart.png" image_size="56 56">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-232 32 56 56" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Heart4" texture="sprites/heart.png" image_size="56 56">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-168 32 56 56" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Heart5" texture="sprites/heart.png" image_size="56 56">
+            <Slot anchor_min="1 0" anchor_max="1 0" offsets="-104 32 56 56" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Message" text="" font_size="64" color="1 1 1 1" visibility="2">
+            <Slot anchor_min="0.5 0.3" anchor_max="0.5 0.3" offsets="0 0 1400 90" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Help" text="A/D bouger   Espace sauter (x2)   Shift dash   S frappe au sol   R checkpoint" font_size="26" color="1 1 1 0.7">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -40 1600 40" alignment="0.5 1" auto_size="true"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

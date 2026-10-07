@@ -1,17 +1,32 @@
 obligé:
 
-projets sans C++, ou on ne compile pas, on charge tout depuis une dll déja buildée
+les liquident buguent pas mal
 
 parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
 plugins téléchargeables en ligne dans le launcher
 
-revoir la toolbar parcque ca commence a etre le bordel, mettre les plugins dans la section plugins des options, et enlever le bouton plugin
+revoir le logo et les banieres tout ca
 
-pouvoir acceder super facilement a la destruction/reconstruction des voxels en C++ et javascript
+revoir les templates pour utiliser les nouvelles fonctionnalités et faire des trucs un peu plus poussés
 
-physics queries (traces et autres)
+pouvoir choisir la taille du monde voxel
 
+revoir l'editeur camera shake (on voudrait une preview de ce que pourrait donner le camera shake)
+
+améliorer l'UX (pouvoir resize certains trucs, aggrandir tres légerement la hauteur des boutons et des onglets), ajouter quelques icones
+
+le curseur de text-hover ne s'affiche pas dans l'editeur de text, json, js. on garde le curseur normal de windows
+
+quand on se fait ensevlir sous du sable par exemple, on peut plus du tout bouger, il faudrait faire un truc pour eviter ca
+
+le plugin dialogue gere mal l'editeur de nodes, on ne peux pas placer de nouveau nodes, pas de ctrl+z, certains textes dépassent de l'interface
+
+afficher les sprites au dessus des voxels dans hrl
+
+revoir le template rpg il est completement bugué avec la camera (elle fait une rotation sur un axe noramlement pas utilisé en 2D, ducoup on voit le level sur le coté, fin c'est bizarre, et pareil dans l'autre top down
+
+le template C++ ne peut pas etre compilé dans l'editeur, je sais pas pourquoi, il n'y a pas le bouton compile
 
 
 
@@ -28,13 +43,18 @@ pouvoir avoir plusieurs .xml dans un seul level (world partition, level streamin
 
 kiffe:
 
-component d'objets 3D
-
 séléction automatique du modele d'IA, pour generer des pixelart par exemple
 
 editeur de post process
 
+
+
+
+plugins:
+
 editeur de sprites pixel art integré a l'editeur (qui exporte pas en png ou autre, il exporte directement en .lsprite), comme ca on peut l'editer a tout moment, a aucun moment c'est convertit en image par contre ca n'utilise pas les voxels du monde
+
+component d'objets 3D
 
 
 
@@ -44,7 +64,7 @@ editeur de sprites pixel art integré a l'editeur (qui exporte pas en png ou aut
 
 HRL:
 
-bugs quand on met plusieurs lights dans une scene
+ca cache les sprites quand on met plusieurs lights dans une scene
 
 textures de voxels au lieu de juste couleur (optionel a chaque voxel type)
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level voxels="world.hrlv">
+    <Miner object_id_="hero" transform="transform:930,1670,0;0,0,0;1,1,1"/>
+    <SupplyCrate object_id_="crate" transform="transform:936,1670,0;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:930,1700,10;0,0,0;1,1,1" color="vec3:0.6,0.7,1" intensity="0.18"/>
+    <DirectionalLightActor object_id_="sun" transform="transform:930,1710,10;-60,-50,0;1,1,1" color="vec3:1,0.9,0.75" intensity="0.6"/>
+</Level>

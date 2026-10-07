@@ -417,6 +417,56 @@ namespace lynx::editor::voxel_types
 			if (ImGui::ColorEdit3("##emissive", t.emissive_color, ImGuiColorEditFlags_NoInputs))
 				changed = true;
 		}
+		// Texture : asset path (drop a .png from the Content Browser), repeated
+		// every `tile` voxels, multiplied by the color (white : raw texture).
+		{
+			char texture[260];
+			std::snprintf(texture, sizeof(texture), "%s", t.texture.c_str());
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
+			if (ImGui::InputTextWithHint("Texture", "drop a .png here", texture, sizeof(texture)))
+			{
+				t.texture = texture;
+				changed = true;
+			}
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LYNX_ASSET_FILE"))
+				{
+					std::string dropped(static_cast<const char*>(payload->Data), static_cast<size_t>(payload->DataSize));
+					if (!dropped.empty() && dropped.back() == '\0')
+						dropped.pop_back();
+					// Full path -> path inside assets/.
+					std::string generic = std::filesystem::path(dropped).generic_string();
+					const size_t at = generic.rfind("assets/");
+					if (at != std::string::npos)
+						generic = generic.substr(at + 7);
+					t.texture = generic;
+					changed = true;
+				}
+				ImGui::EndDragDropTarget();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Image of assets/ (drag it from the Content Browser).\n"
+				                  "Multiplied by the color : white shows the raw texture.");
+			if (!t.texture.empty())
+			{
+				ImGui::SameLine();
+				if (ImGui::SmallButton("x##cleartexture"))
+				{
+					t.texture.clear();
+					changed = true;
+				}
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.f);
+				if (ImGui::DragFloat("Tile (voxels)", &t.texture_tile, 0.1f, 0.25f, 256.f, "%.2f"))
+				{
+					t.texture_tile = std::max(t.texture_tile, 0.01f);
+					changed = true;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Voxels covered by one copy of the texture\n(1 : the whole image on each voxel).");
+			}
+		}
+
 		if (ImGui::Checkbox("Indestructible", &t.indestructible))
 			changed = true;
 		{

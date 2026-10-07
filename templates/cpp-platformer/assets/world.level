@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level voxels="world.hrlv">
+    <Hero object_id_="hero" transform="transform:910,1643,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_1" transform="transform:920,1645,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_2" transform="transform:924,1645,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_3" transform="transform:928,1644,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_4" transform="transform:932,1644,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_5" transform="transform:976,1647.5,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_6" transform="transform:978,1647.5,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_7" transform="transform:985,1650.5,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_8" transform="transform:987,1650.5,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_9" transform="transform:1004,1639,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_10" transform="transform:1010,1639,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_11" transform="transform:1016,1640,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_12" transform="transform:1022,1641,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_13" transform="transform:1028,1641,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_14" transform="transform:1034,1641,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_15" transform="transform:1048,1639,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_16" transform="transform:1052,1639,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_17" transform="transform:1056,1639,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_18" transform="transform:1098,1648,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_19" transform="transform:1098,1652,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_20" transform="transform:1098,1656,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_21" transform="transform:1098,1660,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_22" transform="transform:1110,1655,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_23" transform="transform:1115,1659,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_24" transform="transform:1120,1659,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_25" transform="transform:1125,1655,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_26" transform="transform:1130,1655,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_27" transform="transform:1135,1655,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_28" transform="transform:1074,1649,0;0,0,0;1,1,1"/>
+    <Coin object_id_="coin_29" transform="transform:1082,1653,0;0,0,0;1,1,1"/>
+    <Slime object_id_="slime_1" transform="transform:945,1641.5,0;0,0,0;1,1,1"/>
+    <Slime object_id_="slime_2" transform="transform:1020,1639.5,0;0,0,0;1,1,1"/>
+    <Slime object_id_="slime_3" transform="transform:1055,1637.5,0;0,0,0;1,1,1"/>
+    <Slime object_id_="slime_4" transform="transform:1170,1637.5,0;0,0,0;1,1,1"/>
+    <Slime object_id_="slime_5" transform="transform:1200,1640.5,0;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:940,1660,10;0,0,0;1,1,1" color="vec3:0.75,0.85,1" intensity="0.55"/>
+    <DirectionalLightActor object_id_="sun" transform="transform:930,1665,10;-45,-60,0;1,1,1" color="vec3:1,0.96,0.88" intensity="0.9"/>
+    <PointLightActor object_id_="cave_light" transform="transform:1122,1660,5;0,0,0;1,1,1" color="vec3:0.5,0.8,1" intensity="1.0"/>
+</Level>

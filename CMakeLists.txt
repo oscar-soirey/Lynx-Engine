@@ -41,6 +41,7 @@ add_library(Lynx SHARED
 		src/core/PostProcess.cpp
 		src/core/Plugins.cpp
 		src/core/VoxelPhysics.cpp
+		src/core/VoxelEdit.cpp
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
 		src/core/Profiler.cpp
@@ -60,6 +61,7 @@ add_library(Lynx SHARED
 		src/gameplay/SpriteComponents.cpp
 		src/gameplay/CameraComponent.cpp
 		src/gameplay/BoxColliderComponent.cpp
+		src/gameplay/PhysicsQueries.cpp
 		src/gameplay/SoundSourceComponent.cpp
 		src/gameplay/LightComponent.cpp
 		src/gameplay/EngineActors.cpp
@@ -84,6 +86,7 @@ add_library(Lynx SHARED
 		src/scripting/ScriptSystem.cpp
 		src/scripting/ComponentBindings.cpp
 		src/scripting/GameplayBindings.cpp
+		src/scripting/QueryBindings.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
@@ -92,9 +95,9 @@ target_compile_definitions(Lynx PRIVATE
 
 target_compile_definitions(Lynx
 		PRIVATE
-		LYNX_VERSION_YEAR=2026
+		LYNX_VERSION_YEAR=26
 		LYNX_VERSION_MAJOR=0
-		LYNX_VERSION_MINOR=5
+		LYNX_VERSION_MINOR=6
 )
 
 target_link_libraries(Lynx PRIVATE
@@ -227,7 +230,10 @@ endif()
 
 # Project templates next to the editor : "New project" in the project browser
 # (see src/editor/ProjectTemplates.h). Edit or add templates in templates/.
+# The copy is emptied first : a template removed or renamed in templates/ must
+# not stay next to the editor.
 add_custom_command(TARGET LynxEditor POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:LynxEditor>/templates"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory
 				"${CMAKE_CURRENT_SOURCE_DIR}/templates"
 				"$<TARGET_FILE_DIR:LynxEditor>/templates"

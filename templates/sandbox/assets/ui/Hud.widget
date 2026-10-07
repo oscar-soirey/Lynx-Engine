@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <ProgressBar object_id_="Health" percent="1" background_color="0.15 0.1 0.1 0.85" fill_color="0.9 0.25 0.3 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="40 36 420 28" alignment="0 0"/>
+        </ProgressBar>
+        <TextBlock object_id_="Tool" text="[1] Pioche" font_size="40" color="1 0.9 0.6 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="40 80 1200 50" alignment="0 0" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Inventory" text="" font_size="30" color="1 1 1 0.9">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="40 136 1800 40" alignment="0 0" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Message" text="" font_size="60" color="1 1 1 1" visibility="2">
+            <Slot anchor_min="0.5 0.3" anchor_max="0.5 0.3" offsets="0 0 1400 90" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Help" text="A/D bouger  Espace sauter  Flèches viser  J / Ctrl / clic utiliser  1-4 outils  F matériau  R départ" font_size="24" color="1 1 1 0.7">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -40 1700 36" alignment="0.5 1" auto_size="true"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

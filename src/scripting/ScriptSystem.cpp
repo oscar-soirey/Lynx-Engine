@@ -1381,6 +1381,9 @@ namespace lynx
 			// Engine.createPlayer..., UI, UserWidget
 			script_detail::RegisterGameplayGlobals(ctx);
 
+			// Voxels (destroy / fill), Physics (raycast, overlaps)
+			script_detail::RegisterQueryGlobals(ctx);
+
 			// BTTask, BTDecorator, BTService, BT, Blackboard
 			script_detail::RegisterAIGlobals(ctx);
 		}

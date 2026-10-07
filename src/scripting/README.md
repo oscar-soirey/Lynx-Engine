@@ -150,6 +150,67 @@ caméras. `VoxelPhysics.setEnabled(false)`, `setRadius(128)`, `setRate(30)`,
 Événements : `static interfaces = ["VoxelEvents"]` puis `OnVoxelContact(name, type)` /
 `OnVoxelContactEnd(name, type)` ; les dégâts arrivent par `Damageable.TakeDamage(amount, null)`.
 
+## Destruction / construction de voxels (`Voxels`)
+
+Unités monde (1 = 1 voxel). Un point : `{x, y}`, `[x, y]` ou un acteur (sa position).
+Un type : son nom dans `voxels.json` (`"Stone"`) ou son id.
+
+```js
+// Explosion
+const r = Voxels.destroyCircle(this, 6);
+print(r.count, r.types.Gold);          // nombre détruit, par type : { Dirt: 40, Gold: 2 }
+for (const c of r.cells) {}            // { x, y, type, typeName, world: {x, y} }
+// r.perType : [{ type, typeName, count }], r.min / r.max / r.center
+
+Voxels.destroyRect(center, {x: 4, y: 2});          // centre + taille (comme les colliders)
+Voxels.destroyLine(from, to, 2);                   // épaisseur 2
+Voxels.destroyAt(point); Voxels.destroyCell(vx, vy);
+
+// Options (destroy*, count*) :
+//   types: ["Dirt", "Grass"]   ignoreTypes: [...]   flags: "ROCK" | ["A", "B"]
+//   includeIndestructible: false   events: true (on_destroyed)   cells: true (liste des cellules)
+Voxels.destroyCircle(p, 5, { types: ["Dirt"], cells: false });
+
+// Construction : cases vides seulement, sauf replace: true (+ les options ci-dessus pour choisir
+// ce qui peut être remplacé). Même résultat (type = type d'avant, 0 = vide).
+Voxels.fillRect({x: 10, y: 5}, {x: 2, y: 8}, "Stone");
+Voxels.fillCircle(p, 3, "Water", { replace: true, types: ["Dirt"] });
+Voxels.fillLine(a, b, 1, "Wood"); Voxels.fillAt(p, "Sand"); Voxels.fillCell(vx, vy, 3);
+
+// Lecture
+Voxels.countCircle(p, 4, { flags: "ROCK" });       // comme destroy, sans rien changer
+Voxels.typeAt(p); Voxels.typeAtCell(vx, vy); Voxels.typeId("Stone"); Voxels.typeName(3);
+Voxels.worldToCell(p);  /* {x, y} */  Voxels.cellToWorld(vx, vy);  /* centre {x, y} */
+```
+
+C++ : `lynx::voxels::DestroyCircle(center, radius, filter)`, `FillRect(...)`, `FindType("Stone")`,
+`VoxelFilter`, `VoxelEditResult` (voir `core/VoxelEdit.h`).
+
+## Requêtes physiques (`Physics`)
+
+```js
+const hit = Physics.raycast(this, target, { ignore: this, debug: true });
+if (hit) {
+    // hit.point, hit.normal, hit.distance, hit.fraction (0..1), hit.initialOverlap
+    // hit.actor (ou null), hit.voxel : { x, y, type, typeName } (ou null)
+}
+Physics.raycastAll(a, b, opts);   // acteurs traversés jusqu'au premier blocage, triés par distance
+Physics.lineOfSight(a, b, opts);  // true : rien entre les deux
+
+const o = Physics.overlapCircle(center, 5, { triggers: true });
+// o.actors : [Actor], o.voxels : comme Voxels.countCircle (count, types, cells...), o.any
+Physics.overlapBox(center, {x: 4, y: 2}, opts);
+
+// Options : actors: true, voxels: true, triggers: false, layers: 0xFFFFFFFF (layer des colliders),
+//   ignore: acteur | [acteurs], voxelFlags: "SOLID" | [...] (traces : voxels bloquants par
+//   défaut, l'eau est traversée ; overlaps : tous les voxels), types / ignoreTypes,
+//   debug: true (dessine 1 frame), duration: 2 (secondes)
+Physics.setDebugDraw(true);       // dessine toutes les requêtes (F4 dans l'éditeur aussi)
+```
+
+C++ : `lynx::physics::Raycast(from, to, params)`, `RaycastAll`, `LineOfSight`, `OverlapBox`,
+`OverlapCircle`, `QueryParams`, `HitResult` (voir `gameplay/PhysicsQueries.h`).
+
 ## Post process
 
 `PostProcess.set("exposure", 0.5)`, `PostProcess.set("tintColor", [1, 0.9, 0.8])`,

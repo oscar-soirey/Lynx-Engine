@@ -1,0 +1,12 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Seen from above : no physics. Crates and bricks are destroyed by the bullets.
+    "voxels": [
+        { "name": "Metal floor", "color": "5a5e6a", "collision": "NONE", "texture": "textures/metal.png", "texture_tile": 16 },
+        { "name": "Tiles",       "color": "7a7e88", "collision": "NONE", "texture": "textures/tiles.png", "texture_tile": 16 },
+        { "name": "Wall",        "color": "3a3e4a", "collision": "SOLID", "texture": "textures/metal.png", "texture_tile": 8, "indestructible": true },
+        { "name": "Crate",       "color": "b8844a", "collision": "SOLID", "texture": "textures/wood.png", "texture_tile": 16, "flags": ["COVER"] },
+        { "name": "Brick",       "color": "a8583a", "collision": "SOLID", "texture": "textures/brick.png", "texture_tile": 16, "flags": ["COVER"] },
+        { "name": "Glow",        "color": "40e0ff", "collision": "NONE", "emissive": "30c0ff" }
+    ]
+}

@@ -444,12 +444,22 @@ namespace lynx::editor::plugins
 
 	void DrawWindowsMenuItems()
 	{
-		if (g_windows.empty())
+		if (g_windows.empty() && g_menu.empty())
 			return;
 		ImGui::Separator();
 		ImGui::TextDisabled("Plugins");
 		for (Window& w : g_windows)
 			ImGui::Checkbox(w.title.c_str(), &w.open);
+
+		// Menu items of the plugins (actions).
+		for (size_t i = 0; i < g_menu.size(); ++i)
+		{
+			const MenuItem item = g_menu[i];
+			if (ImGui::MenuItem(item.label.c_str()))
+				item.callback(item.user);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", item.plugin.c_str());
+		}
 	}
 
 	bool HasMenuItems()
@@ -512,11 +522,15 @@ namespace lynx::editor::plugins
 	void DrawManager(bool* open)
 	{
 		ImGui::SetNextWindowSize(ImVec2(760.f, 480.f), ImGuiCond_FirstUseEver);
-		if (!ImGui::Begin("Plugins", open))
-		{
-			ImGui::End();
-			return;
-		}
+		if (ImGui::Begin("Plugins", open))
+			DrawManagerContent();
+		ImGui::End();
+	}
+
+	void DrawManagerContent()
+	{
+		ImGui::SeparatorText("Plugins");
+		ImGui::TextDisabled("Engine plugins : <editor>/plugins ; project plugins : <project>/plugins.");
 
 		auto& list = lynx::plugins::GetPlugins();
 
@@ -531,7 +545,7 @@ namespace lynx::editor::plugins
 
 		if (ImGui::BeginTable("##plugins", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
 		                                        ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
-		                      ImVec2(0.f, -ImGui::GetFrameHeightWithSpacing() * 3.f)))
+		                      ImVec2(0.f, ImGui::GetFrameHeightWithSpacing() * 9.f)))
 		{
 			ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 34.f);
 			ImGui::TableSetupColumn("Plugin", ImGuiTableColumnFlags_WidthFixed, 170.f);
@@ -609,6 +623,27 @@ namespace lynx::editor::plugins
 		if (!g_new_message.empty())
 			ImGui::TextWrapped("%s", g_new_message.c_str());
 
-		ImGui::End();
+		// Tools of the loaded plugins : their windows and their menu items.
+		if (!g_windows.empty() || !g_menu.empty())
+		{
+			ImGui::SeparatorText("Tools of the plugins");
+			ImGui::TextDisabled("Also in the toolbar : Windows.");
+			for (Window& w : g_windows)
+				ImGui::Checkbox(w.title.c_str(), &w.open);
+			std::string plugin;
+			for (size_t i = 0; i < g_menu.size(); ++i)
+			{
+				const MenuItem item = g_menu[i];
+				if (item.plugin != plugin)
+				{
+					plugin = item.plugin;
+					ImGui::TextDisabled("%s", plugin.c_str());
+				}
+				ImGui::PushID(static_cast<int>(i));
+				if (ImGui::Button(item.label.c_str()))
+					item.callback(item.user);
+				ImGui::PopID();
+			}
+		}
 	}
 }

@@ -9,6 +9,9 @@
 //
 //   templates/<id>/template.json   { "name": ..., "description": ..., "order": 1,
 //                                    "no_cpp": false, "plugins": [ "Dialogue" ] }
+//   templates/<id>/icon.png        optional : icon shown in "New project" (pixel art,
+//                                    drawn with nearest filtering ; 32x32 works well)
+// template.json and icon.png describe the template : they are not copied.
 //
 // In text files (and file names), these words are replaced :
 //   {{PROJECT_NAME}}    identifier : CMake target, DLL name   (ex : MyGame)
@@ -32,6 +35,8 @@ namespace lynx::editor::project_templates
 		std::string description;
 		int order = 100;
 		std::filesystem::path folder;
+		/** <folder>/icon.png, empty if the template has none. */
+		std::filesystem::path icon;
 
 		/**
 		 * "no_cpp": true in template.json : project without C++. The build

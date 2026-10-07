@@ -12,6 +12,7 @@
 #include "Level.h"
 #include "Plugins.h"
 #include "VoxelPhysics.h"
+#include "../gameplay/PhysicsQueries.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/EngineActors.h"
 #include "../gameplay/PlayerController.h"
@@ -189,6 +190,9 @@ namespace lynx
 		// Le listener suit l'acteur attache (AttachAudioListener) : sans cet appel,
 		// il reste a (0,0,0) et il n'y a aucune attenuation.
 		UpdateAudioListener();
+
+		// Debug drawings of the physics queries that last (debug_duration).
+		physics::TickDebug(dt);
 
 		{
 			// Widgets : clicks of the last frame, changes, layout. Real time

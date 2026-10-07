@@ -14,6 +14,8 @@
 //                                           // ["LEFT", "RIGHT", "TOP", "BOTTOM", "INSIDE"]
 //               "flags": ["ROCK"],          // game flags (any name), see GetFlagMask()
 //               "emissive": "ffffff",       // optional : emissive color
+//               "texture": "textures/stone.png", // optional : texture (multiplied by the color)
+//               "texture_tile": 8,          // optional : voxels covered by one copy (default 1)
 //               "indestructible": true,     // optional : attacks cannot destroy it
 //               "on_destroyed": "example",  // optional : event, see RegisterDestroyedEvent()
 //               "physics": {                // optional : see VoxelPhysicsProps (VoxelPhysics.h)
@@ -99,6 +101,11 @@ namespace lynx::voxels
 		uint32_t flags = 0;
 
 		bool indestructible = false;
+
+		// Texture (asset path, "" = color only), repeated every texture_tile
+		// voxels in world space and multiplied by the color (white = raw texture).
+		std::string texture;
+		float texture_tile = 1.f;
 
 		// Name of the event called when the voxel is destroyed ("" = none).
 		std::string on_destroyed;

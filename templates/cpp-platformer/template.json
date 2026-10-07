@@ -1,0 +1,5 @@
+{
+    "name": "2D Platformer (C++)",
+    "description": "The same base as \"2D Platformer\", written in C++: lynx::Humanoid hero (double jump, ground pound breaking bricks with lynx::voxels), coins and interfaces, slimes using lynx::physics::Raycast, widget HUD. Needs compiling (Compile button).",
+    "order": 6
+}

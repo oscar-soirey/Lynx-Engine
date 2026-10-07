@@ -1,0 +1,6 @@
+{
+    "name": "Voxel Sandbox",
+    "description": "Noita-like, all JavaScript: a fully destructible cave world. Pickaxe, building, bombs and laser; simulated sand, water, oil, acid and lava; glowing gold and crystals. Inventory and HUD.",
+    "order": 3,
+    "no_cpp": true
+}

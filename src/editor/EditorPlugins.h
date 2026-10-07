@@ -66,4 +66,7 @@ namespace lynx::editor::plugins
 
 	/** Window "Plugins" : list, enable, new plugin. */
 	void DrawManager(bool* open);
+
+	/** Same content, inside another window (Options > Plugins) : list, tools, new plugin. */
+	void DrawManagerContent();
 }

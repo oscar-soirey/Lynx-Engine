@@ -1,5 +1,6 @@
 {
-    "name": "Plateforme 2D",
-    "description": "Un joueur en C++ (gravité, saut, collisions avec les voxels), des pièces en JavaScript et un premier niveau. Flèches / A D pour bouger, Espace pour sauter.",
-    "order": 2
+    "name": "2D Platformer",
+    "description": "All JavaScript, nothing to compile. Animated hero (double jump, dash, ground pound that breaks bricks), coins, slimes, checkpoints, finish flag and HUD. Textured voxels, ice, mud, rubber, spikes, water and glowing lava.",
+    "order": 2,
+    "no_cpp": true
 }

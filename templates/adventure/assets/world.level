@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level voxels="world.hrlv">
+    <Adventurer object_id_="hero" transform="transform:940,1670,0;0,0,0;1,1,1"/>
+    <Elder object_id_="elder" transform="transform:940,1680,0;0,0,0;1,1,1"/>
+    <Smith object_id_="smith" transform="transform:980,1680,0;0,0,0;1,1,1"/>
+    <Chest object_id_="chest" transform="transform:1080,1630,0;0,0,0;1,1,1"/>
+    <Signpost object_id_="sign_forest" transform="transform:1006,1676,0;0,0,0;1,1,1" text="Forêt à l&apos;est. Les ruines au nord-est."/>
+    <Signpost object_id_="sign_village" transform="transform:924,1676,0;0,0,0;1,1,1" text="Bienvenue au village !"/>
+    <Gate object_id_="gate" transform="transform:1070,1701,0;0,0,0;1,1,1"/>
+    <RuinsRelic object_id_="relic" transform="transform:1070,1718,0;0,0,0;1,1,1"/>
+    <DialogueTrigger object_id_="forest_trigger" transform="transform:1038,1670,0;0,0,0;1,1,1" dialogue="dialogues/forest.dialogue" size="vec2:4,10"/>
+    <CineCameraActor object_id_="cam_village" transform="transform:960,1672,70;0,-90,0;1,1,1"/>
+    <CineCameraActor object_id_="cam_forest" transform="transform:1060,1650,90;0,-90,0;1,1,1"/>
+    <CineCameraActor object_id_="cam_ruins" transform="transform:1070,1712,60;0,-90,0;1,1,1"/>
+    <SequencePlayer object_id_="intro" transform="transform:940,1666,0;0,0,0;1,1,1" sequence="cine/intro.sequence" play_on_start="true"/>
+    <Firefly object_id_="firefly_1" transform="transform:1050,1620,2;0,0,0;1,1,1"/>
+    <Firefly object_id_="firefly_2" transform="transform:1060,1660,2;0,0,0;1,1,1"/>
+    <Firefly object_id_="firefly_3" transform="transform:1085,1690,2;0,0,0;1,1,1"/>
+    <Firefly object_id_="firefly_4" transform="transform:1040,1720,2;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:960,1690,10;0,0,0;1,1,1" color="vec3:0.7,0.75,1" intensity="0.35"/>
+    <DirectionalLightActor object_id_="moon" transform="transform:960,1690,10;-50,-70,0;1,1,1" color="vec3:0.7,0.8,1" intensity="0.5"/>
+</Level>

@@ -1,0 +1,32 @@
+{
+    "start": "e_done",
+    "nodes": [
+        { "id": "e_done", "type": "branch", "condition": "Quest.state('lost_key') === 'completed'", "next": "e_after", "else": "e_key", "x": 0, "y": 0 },
+        { "id": "e_after", "type": "line", "speaker": "Ancien", "text": "La porte est ouverte. Le cœur des ruines t'attend au nord-est.", "next": "e_end", "x": 260, "y": -120 },
+
+        { "id": "e_key", "type": "branch", "condition": "Story.get('has_key') === true", "next": "e_thanks", "else": "e_active", "x": 260, "y": 60 },
+        { "id": "e_thanks", "type": "line", "speaker": "Ancien", "text": "Ma clé ! Merci, {player_name}. Allons ouvrir ces vieilles ruines.", "next": "e_obj", "x": 520, "y": 0 },
+        { "id": "e_obj", "type": "quest", "quest": "lost_key", "action": "objective", "objective": "return_key", "next": "e_complete", "x": 780, "y": 0 },
+        { "id": "e_complete", "type": "quest", "quest": "lost_key", "action": "complete", "next": "e_open", "x": 1040, "y": 0 },
+        { "id": "e_open", "type": "event", "event": "OpenGate", "next": "e_relic", "x": 1300, "y": 0 },
+        { "id": "e_relic", "type": "quest", "quest": "relic", "action": "start", "next": "e_end", "x": 1560, "y": 0 },
+
+        { "id": "e_active", "type": "branch", "condition": "Quest.state('lost_key') === 'active'", "next": "e_remind", "else": "e_intro", "x": 520, "y": 200 },
+        { "id": "e_remind", "type": "line", "speaker": "Ancien", "text": "La clé doit être dans un coffre, dans la forêt de l'autre côté de la rivière.", "next": "e_end", "x": 780, "y": 160 },
+
+        { "id": "e_intro", "type": "line", "speaker": "Ancien", "text": "Bonjour, étranger. J'ai perdu la clé des ruines en fuyant les loups...", "next": "e_ask", "x": 780, "y": 320 },
+        { "id": "e_ask", "type": "choice", "speaker": "Ancien", "text": "Voudrais-tu la retrouver pour moi ?",
+          "choices": [
+              { "text": "Bien sûr, j'y vais.", "next": "e_name" },
+              { "text": "Quelles ruines ?", "next": "e_ruins" },
+              { "text": "Pas maintenant.", "next": "e_later" }
+          ], "x": 1040, "y": 320 },
+        { "id": "e_ruins", "type": "line", "speaker": "Ancien", "text": "Au nord-est, derrière une porte que seule cette clé peut ouvrir.", "next": "e_ask", "x": 1300, "y": 440 },
+        { "id": "e_name", "type": "set", "variable": "player_name", "op": "set", "value": "voyageur", "next": "e_start", "x": 1300, "y": 260 },
+        { "id": "e_start", "type": "quest", "quest": "lost_key", "action": "start", "next": "e_go", "x": 1560, "y": 260 },
+        { "id": "e_go", "type": "line", "speaker": "Ancien", "text": "Merci ! Traverse le pont vers l'est, la forêt est juste après.", "next": "e_end", "x": 1820, "y": 260 },
+        { "id": "e_later", "type": "line", "speaker": "Ancien", "text": "Reviens quand tu veux.", "next": "e_end", "x": 1300, "y": 560 },
+
+        { "id": "e_end", "type": "end", "x": 2080, "y": 100 }
+    ]
+}

@@ -1,0 +1,18 @@
+{
+    "start": "s1",
+    "nodes": [
+        { "id": "s1", "type": "branch", "condition": "Story.get('talked_smith') === true", "next": "s_again", "else": "s_hello", "x": 0, "y": 0 },
+        { "id": "s_hello", "type": "line", "speaker": "Forgeronne", "text": "Salut ! Tu n'as pas l'air d'ici.", "next": "s_set", "x": 260, "y": 80 },
+        { "id": "s_set", "type": "set", "variable": "talked_smith", "op": "set", "value": true, "next": "s_choice", "x": 520, "y": 80 },
+        { "id": "s_again", "type": "line", "speaker": "Forgeronne", "text": "Encore toi !", "next": "s_choice", "x": 260, "y": -80 },
+        { "id": "s_choice", "type": "choice", "speaker": "Forgeronne", "text": "Je peux t'aider ?",
+          "choices": [
+              { "text": "Parle-moi de la forêt.", "next": "s_forest" },
+              { "text": "J'ai trouvé une clé.", "next": "s_key", "condition": "Story.get('has_key') === true" },
+              { "text": "Au revoir.", "next": "s_end" }
+          ], "x": 780, "y": 0 },
+        { "id": "s_forest", "type": "line", "speaker": "Forgeronne", "text": "Les lucioles y brillent la nuit. Un vieux coffre traîne près des grands arbres, au sud-est.", "next": "s_choice", "x": 1040, "y": -100 },
+        { "id": "s_key", "type": "line", "speaker": "Forgeronne", "text": "La clé de l'ancien ! Ne la garde pas, il la cherche partout.", "next": "s_choice", "x": 1040, "y": 100 },
+        { "id": "s_end", "type": "end", "x": 1300, "y": 0 }
+    ]
+}

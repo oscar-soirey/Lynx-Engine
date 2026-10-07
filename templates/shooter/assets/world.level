@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level voxels="world.hrlv">
+    <Gunner object_id_="hero" transform="transform:975,1655,0;0,0,0;1,1,1"/>
+    <WaveDirector object_id_="waves" transform="transform:975,1660,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_1" transform="transform:910,1610,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_2" transform="transform:975,1608,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_3" transform="transform:1040,1610,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_4" transform="transform:910,1700,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_5" transform="transform:975,1702,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_6" transform="transform:1040,1700,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_7" transform="transform:908,1655,0;0,0,0;1,1,1"/>
+    <SpawnPoint object_id_="spawn_8" transform="transform:1042,1655,0;0,0,0;1,1,1"/>
+    <!-- Lights (engine actors : Place Actors > Engine). z = in front of the level. Units : voxels. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:975,1655,10;0,0,0;1,1,1" color="vec3:0.6,0.7,0.9" intensity="0.3"/>
+    <SpotLightActor object_id_="spot_center" transform="transform:975,1655,30;0,-90,0;1,1,1" color="vec3:1,0.95,0.85" intensity="2.0" outer_angle="40.0"/>
+</Level>

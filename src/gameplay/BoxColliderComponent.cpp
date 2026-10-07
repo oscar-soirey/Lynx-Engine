@@ -485,9 +485,21 @@ namespace lynx
 		overlapping_.clear();
 	}
 
+	static bool g_debug_draw_all = false;
+
+	void ColliderComponent::SetDebugDrawAll(bool enabled)
+	{
+		g_debug_draw_all = enabled;
+	}
+
+	bool ColliderComponent::IsDebugDrawAll()
+	{
+		return g_debug_draw_all;
+	}
+
 	void ColliderComponent::Update(float)
 	{
-		if (!debug_draw)
+		if (!debug_draw && !g_debug_draw_all)
 			return;
 
 		float cx, cy, w, h;

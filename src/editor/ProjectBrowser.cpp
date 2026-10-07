@@ -9,7 +9,15 @@
 #include <imgui/imgui_impl_opengl3.h>
 #include <glfw/glfw3.h>
 
+// Implementation compiled in EditorMain.cpp (STB_IMAGE_IMPLEMENTATION).
+#include "../../third-party/stb/stb_image.h"
+
+#include <fstream>
+#include <iterator>
+#include <unordered_map>
+
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +28,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shobjidl.h>
+#endif
+
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
 #endif
 
 namespace fs = std::filesystem;
@@ -304,22 +316,83 @@ namespace lynx::editor
 		}
 
 
-		// One template : its name, then its description (wrapped), as one selectable row.
+		// Icons of the templates (templates/<id>/icon.png), OpenGL textures of the
+		// browser window. 0 : no icon (or unreadable), never loaded twice.
+		std::unordered_map<std::string, GLuint> g_template_icons;
+
+		GLuint TemplateIcon(const project_templates::Template& t)
+		{
+			const auto it = g_template_icons.find(t.id);
+			if (it != g_template_icons.end())
+				return it->second;
+
+			GLuint texture = 0;
+			if (!t.icon.empty())
+			{
+				std::ifstream file(t.icon, std::ios::binary);
+				const std::vector<unsigned char> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+				int width = 0, height = 0;
+				stbi_uc* pixels = data.empty() ? nullptr
+					: stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, nullptr, 4);
+				if (pixels)
+				{
+					glGenTextures(1, &texture);
+					glBindTexture(GL_TEXTURE_2D, texture);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);   // sharp pixels
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+					glBindTexture(GL_TEXTURE_2D, 0);
+					stbi_image_free(pixels);
+				}
+				else
+				{
+					std::cerr << "[Templates] Could not read " << t.icon.string() << "\n";
+				}
+			}
+			g_template_icons[t.id] = texture;
+			return texture;
+		}
+
+		void ReleaseTemplateIcons()
+		{
+			for (auto& [id, texture] : g_template_icons)
+				if (texture)
+					glDeleteTextures(1, &texture);
+			g_template_icons.clear();
+		}
+
+
+		// One template : its icon, its name, then its description (wrapped), as one selectable row.
 		bool TemplateRow(const project_templates::Template& t, bool selected)
 		{
 			const ImGuiStyle& style = ImGui::GetStyle();
 			const float width = ImGui::GetContentRegionAvail().x;
-			const float wrap = width - style.FramePadding.x * 2.f;
 			const float line = ImGui::GetTextLineHeight();
+
+			const GLuint icon = TemplateIcon(t);
+			const float icon_size = icon ? std::floor(line * 3.f) : 0.f;
+			const float text_x = style.FramePadding.x + (icon ? icon_size + style.ItemSpacing.x * 1.5f : 0.f);
+			const float wrap = width - text_x - style.FramePadding.x;
+
 			const ImVec2 description_size = ImGui::CalcTextSize(t.description.c_str(), nullptr, false, wrap);
-			const float height = line + style.ItemSpacing.y * 0.5f + description_size.y + style.FramePadding.y * 2.f;
+			const float text_height = line + style.ItemSpacing.y * 0.5f + description_size.y;
+			const float height = std::max(text_height, icon_size) + style.FramePadding.y * 2.f;
 
 			ImGui::PushID(t.id.c_str());
 			const bool clicked = ImGui::Selectable("##template", selected, 0, ImVec2(width, height));
 			const ImVec2 min = ImGui::GetItemRectMin();
 			ImDrawList* draw = ImGui::GetWindowDrawList();
-			const ImVec2 text_pos(min.x + style.FramePadding.x, min.y + style.FramePadding.y);
 
+			if (icon)
+			{
+				const ImVec2 icon_min(min.x + style.FramePadding.x, min.y + (height - icon_size) * 0.5f);
+				draw->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(icon))),
+				               icon_min, ImVec2(icon_min.x + icon_size, icon_min.y + icon_size));
+			}
+
+			const ImVec2 text_pos(min.x + text_x, min.y + std::max(style.FramePadding.y, (height - text_height) * 0.5f));
 			draw->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), t.name.c_str());
 			draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
 			              ImVec2(text_pos.x, text_pos.y + line + style.ItemSpacing.y * 0.5f),
@@ -799,6 +872,7 @@ namespace lynx::editor
 			}
 		}
 
+		ReleaseTemplateIcons();   // GL textures of this window, before its context goes
 		ImGui_ImplOpenGL3_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext(context);

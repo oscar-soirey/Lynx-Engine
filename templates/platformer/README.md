@@ -1,22 +1,26 @@
 # {{PROJECT_TITLE}}
 
-Jeu de plateforme pour le moteur Lynx (template « Plateforme 2D »).
+Jeu de plateforme pour le moteur Lynx (template « Plateforme 2D »), **tout en JavaScript** :
+rien à compiler, les `.js` sont rechargés dès qu'ils changent.
 
 ```
 assets/
-  world.xml          le niveau (joueur, pièces)
-  voxels.json        types de voxels (herbe, terre, pierre...)
-  classes/Coin.js    pièce, en JavaScript
-  sprites/           images
-src/
-  Player.h / .cpp    le joueur : gravité, saut, collisions avec les voxels
-  Module.cpp         classes du jeu + caméra qui suit "player"
-commands/            scripts Python lancés depuis l'éditeur
-input.json           touches (fenêtre Input Settings)
+  world.level / world.hrlv   le niveau (acteurs) et son monde de voxels
+  voxels.json                types de voxels : textures, glace, boue, caoutchouc, pics, eau, lave...
+  classes/Hero.js            le héros (Humanoid du moteur) : double saut, dash, frappe au sol, vie
+  classes/Enemies.js         Slime : patrouille (raycasts), écrasé par un saut
+  classes/Pickups.js         pièces et cœurs (interface Collector)
+  classes/LevelActors.js     checkpoints et drapeau d'arrivée (ColliderActor en trigger)
+  classes/Interfaces.js      les interfaces du jeu (Collector, Respawnable, Finisher)
+  classes/Effects.js         petits effets (étincelles, débris)
+  ui/Hud.widget              le HUD (Widget Editor)
+input.json                   touches (fenêtre Input Settings)
 ```
 
-- **Jouer** : Play dans l'éditeur. Flèches ou A / D pour bouger, Espace / W / Haut pour sauter.
-- **Lumières** : `sky_light` (ambiance), `sun` (soleil, tourné avec la rotation) et des `PointLightActor` / `SpotLightActor` dans `world.xml`. Ajouter une lumière : Place Actors > Engine. Leurs réglages (couleur, intensité, ombres...) sont dans Details.
-- **Régler le joueur** : sélectionner `player`, fenêtre Details (vitesse, saut, gravité...).
-- **Compiler** : bouton Compile de l'éditeur, ou `Build.bat`.
-- **Ajouter une classe JS** : un fichier `assets/classes/MaClasse.js` (`class MaClasse extends Actor`).
+- **Jouer** : Play. A / D bouger, Espace sauter (deux fois : double saut), Shift dash,
+  S en l'air : frappe au sol (casse les briques, écrase les slimes), R : dernier checkpoint.
+- **Voxels** : glace (on glisse), boue (on colle), caoutchouc (on rebondit), pics (dégâts),
+  eau (on nage), lave (dégâts + lumière), sable qui tombe quand les briques en dessous cassent,
+  cristaux qui éclairent. Tout se règle dans *Paint > Voxel types*.
+- **Communication** : les classes ne se modifient jamais entre elles, elles s'envoient des
+  messages d'interface (`other.send("Collector", "OnCollected", "coin", 1)`).

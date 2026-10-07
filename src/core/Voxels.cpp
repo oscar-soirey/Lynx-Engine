@@ -210,6 +210,11 @@ namespace lynx::voxels
 				}
 			}
 
+			out.texture = j.value("texture", std::string());
+			out.texture_tile = j.value("texture_tile", 1.f);
+			if (!std::isfinite(out.texture_tile) || out.texture_tile <= 0.f)
+				out.texture_tile = 1.f;
+
 			out.indestructible = j.value("indestructible", false);
 			out.on_destroyed = j.value("on_destroyed", std::string());
 
@@ -313,12 +318,38 @@ namespace lynx::voxels
 	}
 
 
+	// Textures of the voxel types : loaded once per asset path (HRL texture).
+	static HRL_id VoxelTexture(const std::string& path)
+	{
+		static std::unordered_map<std::string, HRL_id> cache;
+		const auto it = cache.find(path);
+		if (it != cache.end())
+			return it->second;
+
+		HRL_id id = HRL_INVALID_ID;
+		const std::vector<std::uint8_t> data = fs::ReadBinary(path.c_str());
+		if (!data.empty())
+			id = HRL_CreateTexture(reinterpret_cast<const char*>(data.data()), data.size());
+		if (id == HRL_INVALID_ID)
+			WarnOnce("texture:" + path, "voxel texture \"" + path + "\" could not be loaded");
+		cache[path] = id;
+		return id;
+	}
+
 	void ApplyToScene(uint32_t scene)
 	{
+		// A type removed in the editor keeps no texture.
+		if (g_types.size() < 255)
+			HRL_SetVoxelTypeTexture(scene, static_cast<uint32_t>(g_types.size()) + 1u, HRL_INVALID_ID, 1.f);
+
 		for (size_t i = 0; i < g_types.size(); ++i)
 		{
 			const VoxelType& t = g_types[i];
 			const int type = static_cast<int>(i) + 1;
+
+			HRL_SetVoxelTypeTexture(scene, static_cast<uint32_t>(type),
+			                        t.texture.empty() ? HRL_INVALID_ID : VoxelTexture(t.texture),
+			                        t.texture_tile);
 
 			HRL_SetVoxelTypeColor(scene, type, t.color[0], t.color[1], t.color[2], t.color[3]);
 			HRL_SetVoxelTypeCollisionFlags(scene, type, t.flags);
@@ -514,6 +545,12 @@ namespace lynx::voxels
 					j["emissive"] = true;
 				else
 					j["emissive"] = ColorHex(t.emissive_color);
+			}
+			if (!t.texture.empty())
+			{
+				j["texture"] = t.texture;
+				if (t.texture_tile != 1.f)
+					j["texture_tile"] = t.texture_tile;
 			}
 			if (t.indestructible)
 				j["indestructible"] = true;

@@ -1,12 +1,16 @@
 {
     // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
-    // Edited by the editor too (Paint window).
+    // Edited by the editor too (Paint window > Voxel types : color, texture,
+    // collision, emissive light, physics presets...).
     "voxels": [
-        { "name": "Grass",      "color": "6fbf3a", "collision": "SOLID" },
-        { "name": "Dirt",       "color": "8b5a2b", "collision": "SOLID" },
-        { "name": "Stone",      "color": "8a8780", "collision": "SOLID", "indestructible": true },
-        { "name": "Floor",      "color": "c9b68f", "collision": "NONE" },
-        { "name": "Floor dark", "color": "b09c76", "collision": "NONE" },
-        { "name": "Water",      "color": "4f8fd6", "collision": "NONE" }
+        { "name": "Grass",      "color": "8fd85a", "collision": "SOLID", "texture": "textures/grass.png", "texture_tile": 16 },
+        { "name": "Dirt",       "color": "9a6634", "collision": "SOLID", "texture": "textures/dirt.png", "texture_tile": 16 },
+        { "name": "Stone",      "color": "8a8780", "collision": "SOLID", "texture": "textures/stone.png", "texture_tile": 16, "indestructible": true },
+        { "name": "Floor",      "color": "c9b68f", "collision": "NONE", "texture": "textures/tiles.png", "texture_tile": 16 },
+        { "name": "Floor dark", "color": "b09c76", "collision": "NONE", "texture": "textures/tiles.png", "texture_tile": 16 },
+        { "name": "Water",      "color": "4f8fd6", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "physics": { "preset": "Water" } },
+        { "name": "Sand",       "color": "e8c878", "collision": "SOLID", "texture": "textures/sand.png", "texture_tile": 16, "physics": { "preset": "Sand" } },
+        { "name": "Lava",       "color": "ff6a20", "collision": "NONE", "texture": "textures/liquid.png", "texture_tile": 16, "emissive": "ff7a28", "physics": { "preset": "Lava" } },
+        { "name": "Crystal",    "color": "7ad8ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 16, "emissive": "5ac8ff" }
     ]
 }

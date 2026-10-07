@@ -23,6 +23,8 @@ namespace lynx::editor::options
 		float g_scale_edit = 1.f;   // slider value (applied when released)
 		int g_page = 0;             // 0 Interface, 1 Project, 2 Plugins
 		std::function<void()> g_project_page;
+		std::function<void()> g_plugins_page;
+		bool g_focus = false;       // OpenPage : bring the window to the front
 
 		constexpr float kMinScale = 0.5f;
 		constexpr float kMaxScale = 2.f;
@@ -288,16 +290,10 @@ namespace lynx::editor::options
 
 		void PagePlugins()
 		{
-			ImGui::SeparatorText("Plugins");
-			ImGui::TextWrapped("Editor plugins will be listed here : enable / disable them, see their version and their author.");
-			ImGui::Spacing();
-			ImGui::BeginDisabled();
-			ImGui::Button("Open the plugins folder");
-			ImGui::SameLine();
-			ImGui::Button("Reload plugins");
-			ImGui::EndDisabled();
-			ImGui::Spacing();
-			ImGui::TextDisabled("Coming later.");
+			if (g_plugins_page)
+				g_plugins_page();
+			else
+				ImGui::TextDisabled("No plugin system.");
 		}
 	}
 
@@ -333,6 +329,17 @@ namespace lynx::editor::options
 		g_project_page = draw;
 	}
 
+	void SetPluginsPage(const std::function<void()>& draw)
+	{
+		g_plugins_page = draw;
+	}
+
+	void OpenPage(Page page)
+	{
+		g_page = static_cast<int>(page);
+		g_focus = true;
+	}
+
 	const Options& Get()
 	{
 		return g_options;
@@ -345,6 +352,11 @@ namespace lynx::editor::options
 
 		const float k = ImGui::GetFontSize() / 24.f;
 		ImGui::SetNextWindowSize(ImVec2(820.f * k, 520.f * k), ImGuiCond_FirstUseEver);
+		if (g_focus)
+		{
+			ImGui::SetNextWindowFocus();
+			g_focus = false;
+		}
 		if (!ImGui::Begin("Options", open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse))
 		{
 			ImGui::End();

@@ -451,6 +451,7 @@ void InitImGui(GLFWwindow* window)
     // Theme and UI scale : the user's options (Options window).
     lynx::editor::options::Init();
     lynx::editor::options::SetProjectPage(DrawProjectSettingsPage);
+    lynx::editor::options::SetPluginsPage([] { lynx::editor::plugins::DrawManagerContent(); });
 
     ImGui_ImplGlfw_InitForOpenGL(
         window,
@@ -4828,8 +4829,49 @@ static void DrawProjectSettingsPage()
 }
 
 // Top bar. Every button has a keyboard shortcut that keeps working.
+// -----------------------------------------------------------------------------
+// Toolbar
+// -----------------------------------------------------------------------------
+// Left  : [Project v][IDE]  |  Save Undo  |  T R S  |  Play Simulate  |  [Compile|v] status
+// Right : [Speed / Volume]  Windows  Options  Lynxie
+// The menus (v) group what is used less often : project, code editors, Ship
+// Game, Reload Game, build options. Plugins : Options > Plugins (and their
+// windows / tools in the Windows menu).
+
+// Small "v" button glued to the previous one (split buttons).
+static bool ToolbarArrowButton(const char* id)
+{
+    const float frame_h = ImGui::GetFrameHeight();
+    ImGui::SameLine(0.f, 1.f);
+    const bool clicked = ImGui::Button(id, ImVec2(frame_h * 0.9f, frame_h));
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f + 1.f);
+    const float r = frame_h * 0.16f;
+    const ImVec2 chevron[3] = { ImVec2(c.x - r, c.y - r * 0.5f), ImVec2(c.x, c.y + r * 0.5f), ImVec2(c.x + r, c.y - r * 0.5f) };
+    ImGui::GetWindowDrawList()->AddPolyline(chevron, 3, ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_None, 1.5f);
+    return clicked;
+}
+
+static void ToolbarSeparator()
+{
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+}
+
+// Popup under the last item, left-aligned with `left_x`.
+static bool ToolbarBeginPopup(const char* id, float left_x)
+{
+    ImGui::SetNextWindowPos(ImVec2(left_x, ImGui::GetItemRectMax().y + 4.f), ImGuiCond_Appearing);
+    return ImGui::BeginPopup(id);
+}
+
 static void DrawToolbar()
 {
+    namespace ide = lynx::editor::external_ide;
+    namespace icons = lynx::editor::icons;
+
     ImGuiViewport* main_viewport = ImGui::GetMainViewport();
 
     const float height =
@@ -4845,120 +4887,206 @@ static void DrawToolbar()
     {
         auto tooltip = [](const char* text)
         {
-            if (ImGui::IsItemHovered())
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("%s", text);
         };
 
-        // -----------------------------------------------------------------
-        // Project : which project is open, switch to another one
-        // -----------------------------------------------------------------
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float frame_h = ImGui::GetFrameHeight();
+        const float icon_size = ImGui::GetTextLineHeight();
+
+        const std::filesystem::path game_folder =
+            currentProject.root.empty() ? std::filesystem::current_path() : currentProject.root;
+
+        // Icon of a code editor : the real one, else the generic code icon.
+        auto draw_ide_icon = [&](ImDrawList* dl, ide::Ide which, ImVec2 at, float size, bool disabled)
         {
+            const unsigned int tex = ide::IconTexture(which);
+            const ImU32 tint = ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, disabled ? 0.4f : 1.f));
+            if (tex != 0)
+                dl->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(tex))),
+                             at, ImVec2(at.x + size, at.y + size), ImVec2(0.f, 1.f), ImVec2(1.f, 0.f), tint);
+            else
+                icons::DrawAt(dl, icons::Icon::FileCode, at, size,
+                              ImGui::GetColorU32(ImGuiCol_Text, disabled ? 0.4f : 1.f));
+        };
+
+        auto open_in = [&](ide::Ide which)
+        {
+            std::string error;
+            if (ide::Open(which, game_folder, error))
+                ide::SetLastUsed(which);
+            else
+                ShowEditorWarning(error);
+        };
+
+        // A menu row : [icon] text.
+        auto icon_row = [&](const char* id, const char* text, bool selected, bool disabled,
+                            const std::function<void(ImDrawList*, ImVec2, float)>& draw_icon) -> bool
+        {
+            const float row_icon = ImGui::GetTextLineHeight() * 1.25f;
+            const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
+            const float row_w = std::max(240.f, ImGui::CalcTextSize(text).x + row_icon + 40.f);
+            const ImVec2 row_pos = ImGui::GetCursorScreenPos();
+            const bool clicked = ImGui::Selectable(id, selected, 0, ImVec2(row_w, row_h));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            draw_icon(dl, ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon);
+            dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
+                        ImGui::GetColorU32(disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text), text);
+            return clicked;
+        };
+
+        // =================================================================
+        // Project v : infos, other project, code editors, Explorer, Ship Game
+        // =================================================================
+        {
+            const float left_x = ImGui::GetCursorScreenPos().x;
             const std::string project_label =
                 (currentProject.name.empty() ? std::string("Project") : currentProject.name) +
                 "##ProjectButton";
 
-            if (lynx::editor::icons::ButtonWithLabel(project_label.c_str(), lynx::editor::icons::Icon::Project))
+            const bool open_project_menu =
+                icons::ButtonWithLabel(project_label.c_str(), icons::Icon::Project);
+            tooltip("Project : open another one, code editors, Ship Game");
+            if (ToolbarArrowButton("##ProjectArrow") || open_project_menu)
                 ImGui::OpenPopup("ProjectPopup");
 
-            tooltip("Project");
-
-            if (ImGui::BeginPopup("ProjectPopup"))
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
+            if (ToolbarBeginPopup("ProjectPopup", left_x))
             {
                 std::error_code relative_error;
                 const std::filesystem::path module_relative =
-                    std::filesystem::relative(
-                        currentProject.module_path,
-                        currentProject.root,
-                        relative_error
-                    );
+                    std::filesystem::relative(currentProject.module_path, currentProject.root, relative_error);
 
-                ImGui::TextDisabled("Project");
-                ImGui::Separator();
                 ImGui::TextUnformatted(currentProject.name.c_str());
                 ImGui::TextDisabled("%s", currentProject.root.string().c_str());
                 ImGui::TextDisabled(
                     "Game DLL : %s",
-                    (relative_error ? currentProject.module_path : module_relative)
-                        .generic_string().c_str()
-                );
-                ImGui::Separator();
+                    currentProject.script_only
+                        ? "none (JavaScript only)"
+                        : (relative_error ? currentProject.module_path : module_relative).generic_string().c_str());
 
+                ImGui::SeparatorText("Project");
                 if (ImGui::MenuItem("Open another project...", nullptr, false, !isPlaying))
                 {
                     switch_project_requested = true;
                     show_close_confirmation = true;
                 }
+                if (ImGui::MenuItem("Ship Game...", nullptr, false, !isPlaying && !lynx::editor::ship_game::IsBusy()))
+                    lynx::editor::ship_game::Open();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    ImGui::SetTooltip("Make the game playable without the editor :\n"
+                                      "compile it, pack assets/ inside the executable,\n"
+                                      "copy it with its DLLs to a folder.");
+                if (ImGui::MenuItem("Project settings..."))
+                {
+                    showEditorOptions = true;
+                    lynx::editor::options::OpenPage(lynx::editor::options::Page::Project);
+                }
+
+                ImGui::SeparatorText("Open the game folder with");
+                const bool searching = !ide::DetectionDone();
+                const ide::Ide last = ide::LastUsed();
+                for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+                {
+                    const auto which = static_cast<ide::Ide>(i);
+                    const bool missing = !searching && !ide::IsInstalled(which);
+                    const std::string text = std::string(ide::Name(which)) + (missing ? "  (not found)" : "");
+                    ImGui::PushID(i);
+                    if (icon_row("##ide", text.c_str(), which == last, missing,
+                                 [&](ImDrawList* dl, ImVec2 at, float size) { draw_ide_icon(dl, which, at, size, missing); }))
+                        open_in(which);
+                    ImGui::PopID();
+                }
+                if (icon_row("##explorer", "Show in Explorer", false, false,
+                             [&](ImDrawList* dl, ImVec2 at, float size)
+                             { icons::DrawAt(dl, icons::Icon::Folder, at, size, ImGui::GetColorU32(ImGuiCol_Text)); }))
+                {
+#ifdef _WIN32
+                    ShellExecuteW(nullptr, L"open", game_folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+                }
+                if (searching)
+                    ImGui::TextDisabled("Searching the code editors...");
 
                 ImGui::EndPopup();
             }
+            ImGui::PopStyleVar();
 
+            // One click : the game folder in the last code editor used.
             ImGui::SameLine();
-            ImGui::TextDisabled("|");
-            ImGui::SameLine();
+            const ide::Ide last = ide::LastUsed();
+            if (ImGui::Button("##OpenWithLast", ImVec2(frame_h, frame_h)))
+                open_in(last);
+            {
+                const ImVec2 min = ImGui::GetItemRectMin();
+                draw_ide_icon(ImGui::GetWindowDrawList(), last,
+                              ImVec2(min.x + (frame_h - icon_size) * 0.5f, min.y + (frame_h - icon_size) * 0.5f),
+                              icon_size, false);
+            }
+            tooltip((std::string("Open the game folder in ") + ide::Name(last) +
+                     "\n(Project menu : another code editor)").c_str());
         }
 
-        // Editing tools are unavailable while the game is running.
+        ToolbarSeparator();
+
+        // =================================================================
+        // Edit : Save (dot : unsaved changes), Undo, gizmo modes
+        // =================================================================
         ImGui::BeginDisabled(isPlaying);
 
-        if (lynx::editor::icons::Button("Save", lynx::editor::icons::Icon::Save))
+        if (icons::Button("Save", icons::Icon::Save))
             SaveEditor();
-        tooltip("Save the level (Ctrl+S)");
+        if (editor_dirty && !isPlaying)
+        {
+            const ImVec2 max = ImGui::GetItemRectMax();
+            const ImVec2 min = ImGui::GetItemRectMin();
+            ImGui::GetWindowDrawList()->AddCircleFilled(
+                ImVec2(max.x - 4.f, min.y + 4.f), 3.5f, IM_COL32(240, 160, 40, 255));
+        }
+        tooltip(editor_dirty ? "Save the level (Ctrl+S)\nThere are unsaved changes." : "Save the level (Ctrl+S)");
 
         ImGui::SameLine();
-
-        if (lynx::editor::icons::Button("Undo", lynx::editor::icons::Icon::Undo) && !brushPainting)
+        if (icons::Button("Undo", icons::Icon::Undo) && !brushPainting)
             UndoLastEditorAction();
         tooltip("Undo (Ctrl+Z)");
 
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        ToolbarSeparator();
 
-        auto mode_button = [&](const char* label, lynx::editor::icons::Icon icon, int index, const char* tip)
+        auto mode_button = [&](const char* label, icons::Icon icon, int index, const char* tip)
         {
-            const bool active = (gizmoModeIndex == index);
-
-            if (lynx::editor::icons::Button(label, icon, lynx::editor::icons::kThemeTint, active))
+            if (icons::Button(label, icon, icons::kThemeTint, gizmoModeIndex == index))
                 SetGizmoModeIndex(index);
-
             tooltip(tip);
         };
-
-        mode_button("Translate", lynx::editor::icons::Icon::Translate, 0, "Translate (Space cycles the gizmo modes)");
+        mode_button("Translate", icons::Icon::Translate, 0, "Translate (Space cycles the gizmo modes)");
         ImGui::SameLine();
-        mode_button("Rotate", lynx::editor::icons::Icon::Rotate, 1, "Rotate (Space cycles the gizmo modes)");
+        mode_button("Rotate", icons::Icon::Rotate, 1, "Rotate (Space cycles the gizmo modes)");
         ImGui::SameLine();
-        mode_button("Scale", lynx::editor::icons::Icon::Scale, 2, "Scale (Space cycles the gizmo modes)");
+        mode_button("Scale", icons::Icon::Scale, 2, "Scale (Space cycles the gizmo modes)");
 
         ImGui::EndDisabled();
 
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        ToolbarSeparator();
 
-        // Play / Stop stays available in both modes (green triangle / red square).
-        if (lynx::editor::icons::ButtonWithLabel(
+        // =================================================================
+        // Play / Stop, Simulate
+        // =================================================================
+        if (icons::ButtonWithLabel(
                 isPlaying ? "Stop##PlayStop" : "Play##PlayStop",
-                isPlaying ? lynx::editor::icons::Icon::Stop : lynx::editor::icons::Icon::Play,
+                isPlaying ? icons::Icon::Stop : icons::Icon::Play,
                 isPlaying ? ImVec4(0.82f, 0.22f, 0.20f, 1.f) : ImVec4(0.22f, 0.62f, 0.26f, 1.f)))
             TogglePlayMode();
-
         tooltip(isPlaying
             ? (isSimulating ? "Stop the simulation, back to the editor (F3 / Alt+S)"
                             : "Stop the game, back to the editor (F3)")
             : "Play the game in the editor (F3)");
 
-        // Simulate : the game runs, nobody is possessed, the editor camera
-        // (and its movements) stays. Hidden while the game runs (Stop above).
         if (!isPlaying)
         {
             ImGui::SameLine();
-            if (lynx::editor::icons::ButtonWithLabel(
-                    "Simulate##Simulate",
-                    lynx::editor::icons::Icon::Camera,
-                    ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
+            if (icons::ButtonWithLabel("Simulate##Simulate", icons::Icon::Camera, ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
                 TogglePlayMode(true);
-
             tooltip("Simulate : run the game without possessing any actor,\n"
                     "keep the editor camera and its movements (Alt+S)");
         }
@@ -4968,229 +5096,101 @@ static void DrawToolbar()
             ImGui::TextColored(ImVec4(0.25f, 0.55f, 0.85f, 1.f), "Simulating");
         }
 
-        // Reload the game DLL. Only a REQUEST is raised here : the actual reload
-        // happens in main(), between two frames, never in the middle of the ImGui
-        // frame (the panels are still holding actor pointers at this point).
-        ImGui::SameLine();
+        ToolbarSeparator();
 
-        // Compile the game (Build.bat of the project) while the editor runs :
-        // the editor uses a copy of the DLL, build/<game>.dll is free.
-        // A project without C++ (generic game DLL) has nothing to compile.
-        ImGui::BeginDisabled(lynx::editor::game_build::IsRunning() || currentProject.script_only);
-
-        if (lynx::editor::icons::ButtonWithLabel("Compile", lynx::editor::icons::Icon::Compile))
-            lynx::editor::game_build::Start();
-
-        ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        // =================================================================
+        // Game : [Compile | v] (Reload Game, build output, options)
+        // A JavaScript-only project has nothing to compile : the main part
+        // reloads the game.
+        // =================================================================
         {
-            ImGui::SetTooltip(
-                "Compile the game (Build.bat of the project)%s",
-                appSettings.reloadAfterBuild
-                    ? "\nthen reload it if the build succeeded."
-                    : "."
-            );
-        }
+            const float left_x = ImGui::GetCursorScreenPos().x;
+            const bool building = lynx::editor::game_build::IsRunning();
 
-        ImGui::SameLine();
-
-        // Ship Game : compiled game + packed assets in a folder (ShipGame.h).
-        ImGui::BeginDisabled(isPlaying || lynx::editor::ship_game::IsBusy());
-        if (lynx::editor::icons::ButtonWithLabel("Ship Game", lynx::editor::icons::Icon::Project))
-            lynx::editor::ship_game::Open();
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Make the game playable without the editor :\n"
-                              "compile it, pack assets/ inside the executable,\n"
-                              "copy it with its DLLs to a folder.");
-
-        ImGui::SameLine();
-
-        if (lynx::editor::icons::ButtonWithLabel("Reload Game", lynx::editor::icons::Icon::Reload))
-        {
-            module_changed_notice = false;
-            reload_game_requested = true;
-        }
-
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip(
-                "Reload %s\n"
-                "Stops the game, saves pending level edits, destroys every actor,\n"
-                "unloads the DLL, loads it again and rebuilds the level.",
-                currentProject.module_path.filename().string().c_str()
-            );
-        }
-
-        // Open with : split button. The main part opens the game folder
-        // (project root, not src/) in the last code editor used ; the arrow
-        // chooses another one (with the icons of the installed programs).
-        ImGui::SameLine();
-        {
-            namespace ide = lynx::editor::external_ide;
-            const std::filesystem::path game_folder =
-                currentProject.root.empty() ? std::filesystem::current_path() : currentProject.root;
-
-            const ImGuiStyle& style = ImGui::GetStyle();
-            const float icon_size = ImGui::GetTextLineHeight();
-            const float frame_h = ImGui::GetFrameHeight();
-
-            // Icon of a code editor : the real one, else the generic code icon.
-            auto draw_ide_icon = [&](ImDrawList* dl, ide::Ide which, ImVec2 at, float size, bool disabled)
+            auto request_reload = [&]()
             {
-                const unsigned int tex = ide::IconTexture(which);
-                const ImU32 tint = ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, disabled ? 0.4f : 1.f));
-                if (tex != 0)
-                    dl->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(tex))),
-                                 at, ImVec2(at.x + size, at.y + size), ImVec2(0.f, 1.f), ImVec2(1.f, 0.f), tint);
-                else
-                    lynx::editor::icons::DrawAt(dl, lynx::editor::icons::Icon::FileCode, at, size,
-                                                ImGui::GetColorU32(ImGuiCol_Text, disabled ? 0.4f : 1.f));
+                module_changed_notice = false;
+                reload_game_requested = true;
             };
 
-            auto open_in = [&](ide::Ide which)
+            if (currentProject.script_only)
             {
-                std::string error;
-                if (ide::Open(which, game_folder, error))
-                    ide::SetLastUsed(which);
-                else
-                    ShowEditorWarning(error);
-            };
-
-            const ide::Ide last = ide::LastUsed();
-            const char* last_name = ide::Name(last);
-
-            // Main part : [icon] Open with <last>
-            const std::string label = std::string("Open with ") + last_name;
-            const ImVec2 text_size = ImGui::CalcTextSize(label.c_str());
-            const ImVec2 main_size(style.FramePadding.x * 2.f + icon_size + style.ItemInnerSpacing.x + text_size.x, frame_h);
-            const float arrow_w = frame_h * 0.9f;
-
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.f, style.ItemSpacing.y));
-
-            const bool open_main = ImGui::Button("##OpenWithMain", main_size);
-            {
-                const ImVec2 min = ImGui::GetItemRectMin();
-                ImDrawList* dl = ImGui::GetWindowDrawList();
-                draw_ide_icon(dl, last, ImVec2(min.x + style.FramePadding.x, min.y + (frame_h - icon_size) * 0.5f), icon_size, false);
-                dl->AddText(ImVec2(min.x + style.FramePadding.x + icon_size + style.ItemInnerSpacing.x,
-                                   min.y + (frame_h - text_size.y) * 0.5f),
-                            ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+                if (icons::ButtonWithLabel("Reload Game##GameMain", icons::Icon::Reload))
+                    request_reload();
+                tooltip("Reload the game : stops it, saves pending level edits,\n"
+                        "destroys every actor and rebuilds the level (scripts reloaded).");
             }
-            if (open_main)
-                open_in(last);
-            tooltip(("Open the game folder in " + std::string(last_name) + "\n(the arrow : another code editor)").c_str());
-
-            // Arrow part : chooses the code editor.
-            ImGui::SameLine();
-            const bool open_menu = ImGui::Button("##OpenWithArrow", ImVec2(arrow_w, frame_h));
+            else
             {
-                const ImVec2 min = ImGui::GetItemRectMin();
-                const ImVec2 max = ImGui::GetItemRectMax();
-                const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f + 1.f);
-                const float r = frame_h * 0.16f;
-                const ImVec2 chevron[3] = { ImVec2(c.x - r, c.y - r * 0.5f), ImVec2(c.x, c.y + r * 0.5f), ImVec2(c.x + r, c.y - r * 0.5f) };
-                ImGui::GetWindowDrawList()->AddPolyline(chevron, 3, ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_None, 1.5f);
+                ImGui::BeginDisabled(building);
+                if (icons::ButtonWithLabel("Compile##GameMain", icons::Icon::Compile))
+                    lynx::editor::game_build::Start();
+                ImGui::EndDisabled();
+                tooltip(appSettings.reloadAfterBuild
+                    ? "Compile the game (Build.bat of the project)\nthen reload it if the build succeeded."
+                    : "Compile the game (Build.bat of the project).");
             }
-            if (open_menu)
-                ImGui::OpenPopup("OpenWithPopup");
-            tooltip("Choose the code editor");
 
-            ImGui::PopStyleVar();
+            if (ToolbarArrowButton("##GameArrow"))
+                ImGui::OpenPopup("GamePopup");
+            tooltip("Reload Game, build output, build options");
 
-            // The menu opens under the arrow, right-aligned with it.
-            ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMax().y + 4.f),
-                                    ImGuiCond_Appearing, ImVec2(1.f, 0.f));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
-            if (ImGui::BeginPopup("OpenWithPopup"))
+            if (ToolbarBeginPopup("GamePopup", left_x))
             {
-                const bool searching = !ide::DetectionDone();
-                const float row_icon = ImGui::GetTextLineHeight() * 1.25f;
+                if (!currentProject.script_only &&
+                    ImGui::MenuItem("Compile", nullptr, false, !building))
+                    lynx::editor::game_build::Start();
 
-                for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+                if (ImGui::MenuItem("Reload Game"))
+                    request_reload();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip(
+                        "Reload %s\n"
+                        "Stops the game, saves pending level edits, destroys every actor,\n"
+                        "unloads the DLL, loads it again and rebuilds the level.",
+                        currentProject.module_path.filename().string().c_str());
+
+                if (!currentProject.script_only)
                 {
-                    const auto which = static_cast<ide::Ide>(i);
-                    const bool installed = ide::IsInstalled(which);
-                    const bool missing = !searching && !installed;
+                    if (ImGui::MenuItem("Build output", nullptr, lynx::editor::game_build::WindowOpen()))
+                        lynx::editor::game_build::WindowOpen() = !lynx::editor::game_build::WindowOpen();
 
-                    ImGui::PushID(i);
-                    const ImVec2 row_pos = ImGui::GetCursorScreenPos();
-                    const std::string text = std::string(ide::Name(which)) + (missing ? "  (not found)" : "");
-                    const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
-                    const float row_w = std::max(220.f, ImGui::CalcTextSize(text.c_str()).x + row_icon + 40.f);
-
-                    if (ImGui::Selectable("##ide", which == last, 0, ImVec2(row_w, row_h)))
-                        open_in(which);
-
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
-                    draw_ide_icon(dl, which, ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon, missing);
-                    dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
-                                ImGui::GetColorU32(missing ? ImGuiCol_TextDisabled : ImGuiCol_Text), text.c_str());
-                    ImGui::PopID();
+                    ImGui::SeparatorText("Options");
+                    if (ImGui::MenuItem("Reload after Compile", nullptr, appSettings.reloadAfterBuild))
+                    {
+                        appSettings.reloadAfterBuild = !appSettings.reloadAfterBuild;
+                        SaveSettings();
+                    }
+                    if (ImGui::MenuItem("Reload when the DLL is rebuilt", nullptr, appSettings.autoReloadOnChange))
+                    {
+                        appSettings.autoReloadOnChange = !appSettings.autoReloadOnChange;
+                        SaveSettings();
+                    }
                 }
 
                 ImGui::Separator();
+                if (ImGui::MenuItem("Ship Game...", nullptr, false, !isPlaying && !lynx::editor::ship_game::IsBusy()))
+                    lynx::editor::ship_game::Open();
 
-                {
-                    const ImVec2 row_pos = ImGui::GetCursorScreenPos();
-                    const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
-                    if (ImGui::Selectable("##explorer", false, 0, ImVec2(220.f, row_h)))
-                    {
-#ifdef _WIN32
-                        ShellExecuteW(nullptr, L"open", game_folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#endif
-                    }
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
-                    lynx::editor::icons::DrawAt(dl, lynx::editor::icons::Icon::Folder,
-                                                ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon,
-                                                ImGui::GetColorU32(ImGuiCol_Text));
-                    dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
-                                ImGui::GetColorU32(ImGuiCol_Text), "Show in Explorer");
-                }
-
-                if (searching)
-                    ImGui::TextDisabled("Searching the code editors...");
-                ImGui::TextDisabled("%s", game_folder.string().c_str());
                 ImGui::EndPopup();
             }
             ImGui::PopStyleVar();
-        }
 
-        // Plugins : manager + the menu items of the editor modules.
-        ImGui::SameLine();
-        if (lynx::editor::icons::ButtonWithLabel("Plugins", lynx::editor::icons::Icon::Settings))
-            ImGui::OpenPopup("PluginsPopup");
-        tooltip("Plugins : enable / disable, and the tools of the plugins");
-        if (ImGui::BeginPopup("PluginsPopup"))
-        {
-            lynx::editor::plugins::DrawPluginsMenu(&showPluginManager);
-            ImGui::EndPopup();
-        }
-
-        // Build state / DLL rebuilt outside the editor.
-        {
+            // Build state / DLL rebuilt outside the editor.
             const std::string build_status = lynx::editor::game_build::ToolbarStatus();
-
             if (!build_status.empty())
             {
                 ImGui::SameLine();
-
                 const bool failed = build_status == "Build failed";
-
                 if (failed)
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
-
                 ImGui::TextUnformatted(build_status.c_str());
-
                 if (failed)
                     ImGui::PopStyleColor();
-
                 if (ImGui::IsItemClicked())
                     lynx::editor::game_build::WindowOpen() = true;
-
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Click : build output");
+                tooltip("Click : build output");
             }
             else if (hot_reload_pending)
             {
@@ -5203,123 +5203,100 @@ static void DrawToolbar()
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.35f, 1.f));
                 ImGui::TextUnformatted("DLL rebuilt");
                 ImGui::PopStyleColor();
-
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("The game DLL was rebuilt : \"Reload Game\" to use it.");
+                if (ImGui::IsItemClicked())
+                    request_reload();
+                tooltip("The game DLL was rebuilt : click to reload it.");
             }
         }
 
-        ImGui::SameLine();
-
-
-        // Options : interface (theme, scale), project settings, plugins.
-        ImGui::SameLine();
-        if (lynx::editor::icons::ButtonWithLabel("Options", lynx::editor::icons::Icon::Settings, lynx::editor::icons::kThemeTint, showEditorOptions))
-            showEditorOptions = !showEditorOptions;
-        tooltip("Options : interface, project settings, plugins");
-
-        ImGui::SameLine();
-
-        // Use a regular button + popup instead of BeginMenu().
-        // BeginMenu() can open its submenu when merely hovering a toolbar item,
-        // which makes the rest of the toolbar difficult to use.
-        if (lynx::editor::icons::ButtonWithLabel("Windows", lynx::editor::icons::Icon::Windows))
-            ImGui::OpenPopup("WindowsPopup");
-
-        if (ImGui::BeginPopup("WindowsPopup"))
+        // =================================================================
+        // Right side : [speed / volume]  Windows  Options  Lynxie
+        // Right-aligned with the width measured on the previous frame.
+        // =================================================================
+        static float right_width = 0.f;
         {
-            ImGui::TextDisabled("Editor windows");
-            ImGui::Separator();
-            EditorWindowCheckbox("Viewport", &editorWindows.viewport, lynx::editor::icons::Icon::Camera);
-            EditorWindowCheckbox("Outliner", &editorWindows.outliner, lynx::editor::icons::Icon::Outliner);
-            EditorWindowCheckbox("Place Actors", &editorWindows.placeActors, lynx::editor::icons::Icon::PlaceActors);
-            EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser, lynx::editor::icons::Icon::ContentBrowser);
-            EditorWindowCheckbox("Details", &editorWindows.details, lynx::editor::icons::Icon::Details);
-            EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, lynx::editor::icons::Icon::ColorPick);
-            EditorWindowCheckbox("Paint", &editorWindows.config, lynx::editor::icons::Icon::Paint);
-            EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, lynx::editor::icons::Icon::Camera);
-            EditorWindowCheckbox("Post Process", &editorWindows.postProcess, lynx::editor::icons::Icon::Settings);
-            EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, lynx::editor::icons::Icon::Input);
-            EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, lynx::editor::icons::Icon::Commands);
-            EditorWindowCheckbox("Git", &editorWindows.git, lynx::editor::icons::Icon::Git);
-            EditorWindowCheckbox("Console", &editorWindows.console, lynx::editor::icons::Icon::Console);
-            EditorWindowCheckbox("Profiler", &editorWindows.profiler, lynx::editor::icons::Icon::Profiler);
-            EditorWindowCheckbox("Plugins", &showPluginManager, lynx::editor::icons::Icon::Settings);
-            lynx::editor::plugins::DrawWindowsMenuItems();
-            ImGui::Separator();
-            ImGui::TextDisabled("All editor windows are hidden during Play.");
-            ImGui::EndPopup();
-        }
-        tooltip("Show or hide editor windows");
+            ImGui::SameLine();
+            const float content_right = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - style.WindowPadding.x;
+            const float start = content_right - right_width;
+            if (start > ImGui::GetCursorScreenPos().x)
+                ImGui::SetCursorScreenPos(ImVec2(start, ImGui::GetCursorScreenPos().y));
+            const float right_begin = ImGui::GetCursorScreenPos().x;
 
-        // Lynxie : opens Commands on her tab.
-        ImGui::SameLine();
-        {
-            // Same height as the text buttons of the toolbar.
-            const float icon_height =
-                ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.y * 2.f;
+            // Camera speed + master volume : one button, a popup with both.
+            char view_label[96];
+            std::snprintf(view_label, sizeof(view_label), "Speed %.0f  Vol %d%%##ViewSettings",
+                          cameraSpeed, static_cast<int>(std::lround(appSettings.masterVolume * 100.f)));
+            const float view_left = ImGui::GetCursorScreenPos().x;
+            if (ImGui::Button(view_label))
+                ImGui::OpenPopup("ViewSettingsPopup");
+            tooltip("Editor camera speed and master volume");
 
+            if (ToolbarBeginPopup("ViewSettingsPopup", view_left))
+            {
+                ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
+                if (ImGui::SliderFloat("Camera speed", &cameraSpeed, 1.f, 400.f, "%.0f"))
+                {
+                    appSettings.cameraSpeed = cameraSpeed;
+                    SaveSettings();
+                }
+                ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
+                if (ImGui::SliderFloat("Master volume", &appSettings.masterVolume, 0.f, 2.f, "%.2f"))
+                {
+                    lynx::SetMasterVolume(appSettings.masterVolume);
+                    SaveSettings();
+                }
+                ImGui::EndPopup();
+            }
+
+            // Windows : editor windows, then the windows / tools of the plugins.
+            ImGui::SameLine();
+            const float windows_left = ImGui::GetCursorScreenPos().x;
+            if (icons::ButtonWithLabel("Windows", icons::Icon::Windows))
+                ImGui::OpenPopup("WindowsPopup");
+            tooltip("Show or hide editor windows");
+
+            if (ToolbarBeginPopup("WindowsPopup", windows_left))
+            {
+                ImGui::TextDisabled("Editor windows");
+                ImGui::Separator();
+                EditorWindowCheckbox("Viewport", &editorWindows.viewport, icons::Icon::Camera);
+                EditorWindowCheckbox("Outliner", &editorWindows.outliner, icons::Icon::Outliner);
+                EditorWindowCheckbox("Place Actors", &editorWindows.placeActors, icons::Icon::PlaceActors);
+                EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser, icons::Icon::ContentBrowser);
+                EditorWindowCheckbox("Details", &editorWindows.details, icons::Icon::Details);
+                EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, icons::Icon::ColorPick);
+                EditorWindowCheckbox("Paint", &editorWindows.config, icons::Icon::Paint);
+                EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, icons::Icon::Camera);
+                EditorWindowCheckbox("Post Process", &editorWindows.postProcess, icons::Icon::Settings);
+                EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, icons::Icon::Input);
+                EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, icons::Icon::Commands);
+                EditorWindowCheckbox("Git", &editorWindows.git, icons::Icon::Git);
+                EditorWindowCheckbox("Console", &editorWindows.console, icons::Icon::Console);
+                EditorWindowCheckbox("Profiler", &editorWindows.profiler, icons::Icon::Profiler);
+                lynx::editor::plugins::DrawWindowsMenuItems();
+                ImGui::Separator();
+                ImGui::TextDisabled("All editor windows are hidden during Play.");
+                ImGui::EndPopup();
+            }
+
+            // Options : interface, project settings, plugins.
+            ImGui::SameLine();
+            if (icons::ButtonWithLabel("Options", icons::Icon::Settings, icons::kThemeTint, showEditorOptions))
+                showEditorOptions = !showEditorOptions;
+            tooltip("Options : interface, project settings, plugins");
+
+            // Lynxie : opens Commands on her tab.
+            ImGui::SameLine();
+            const float icon_height = frame_h - style.FramePadding.y * 2.f;
             if (lynx::editor::lynxie_icon::Button("Lynxie", icon_height))
             {
                 editorWindows.commands = true;
                 SaveEditorWindowVisibility();
                 lynx::editor::commands_window::ShowLynxie();
             }
-        }
-        tooltip("Lynxie : ask a question about the engine, or what to change in the level");
+            tooltip("Lynxie : ask a question about the engine, or what to change in the level");
 
-        // Master volume stays available in both modes.
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
-        ImGui::SetNextItemWidth(
-            ImGui::GetFontSize() * 8.f
-        );
-
-        if (ImGui::SliderFloat(
-                "##MasterVolume",
-                &appSettings.masterVolume,
-                0.f,
-                2.f,
-                "Volume %.2f"
-            ))
-        {
-            lynx::SetMasterVolume(
-                appSettings.masterVolume
-            );
-
-            SaveSettings();
-        }
-
-        tooltip("Master volume");
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
-        ImGui::SetNextItemWidth(
-            ImGui::GetFontSize() * 8.f
-        );
-
-        if (ImGui::SliderFloat(
-                "##CameraSpeed",
-                &cameraSpeed,
-                1.f,
-                400.f,
-                "Camera %.0f"
-            ))
-        {
-            appSettings.cameraSpeed = cameraSpeed;
-            SaveSettings();
-        }
-
-        tooltip("Camera speed");
-
-        if (editor_dirty && !isPlaying)
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("* unsaved changes");
+            right_width = ImGui::GetItemRectMax().x - right_begin;
         }
     }
 
@@ -5582,6 +5559,11 @@ static bool show_collision_debug = false;
 
 static void ApplyCollisionDebugToGame()
 {
+    // Every ColliderComponent of the level (editor, Play, Simulate).
+    lynx::ColliderComponent::SetDebugDrawAll(show_collision_debug);
+    // ... and every physics query (traces, overlaps).
+    lynx::physics::SetDebugDrawAll(show_collision_debug);
+
     // Optional : a game without collision debug simply does not export it.
     if (gameHooks.set_collision_debug_enabled)
     {
@@ -8553,8 +8535,13 @@ namespace editor
             DrawPostProcessWindow();
 
         // Plugins : manager and the windows of the editor modules.
+        // Plugins : a page of the Options window (old entry points open it).
         if (showPluginManager)
-            lynx::editor::plugins::DrawManager(&showPluginManager);
+        {
+            showPluginManager = false;
+            showEditorOptions = true;
+            lynx::editor::options::OpenPage(lynx::editor::options::Page::Plugins);
+        }
         lynx::editor::plugins::DrawWindows();
 
         // --------------------------------------------------------

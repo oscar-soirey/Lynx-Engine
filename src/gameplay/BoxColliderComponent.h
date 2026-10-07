@@ -73,6 +73,13 @@ namespace lynx
 		/** Dessine la boite (aussi dans l'editeur). */
 		bool debug_draw = false;
 
+		/**
+		 * Dessine TOUS les colliders (editeur : F4), en plus de debug_draw.
+		 * Vert : trigger, rouge : bloquant.
+		 */
+		static void SetDebugDrawAll(bool enabled);
+		static bool IsDebugDrawAll();
+
 		std::function<void(ColliderComponent& other)> on_begin_overlap;
 		std::function<void(ColliderComponent& other)> on_end_overlap;
 		/** Contact bloquant : other = nullptr pour un voxel ; normal : vers cet acteur. */

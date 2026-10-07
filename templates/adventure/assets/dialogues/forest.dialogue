@@ -1,0 +1,7 @@
+{
+    "start": "f1",
+    "nodes": [
+        { "id": "f1", "type": "line", "speaker": "Toi", "text": "La forêt... Il fait sombre ici. Les lucioles éclairent un peu le chemin.", "next": "f2", "x": 0, "y": 0 },
+        { "id": "f2", "type": "end", "x": 260, "y": 0 }
+    ]
+}

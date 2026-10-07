@@ -1,0 +1,8 @@
+{
+    "start": "w1",
+    "nodes": [
+        { "id": "w1", "type": "line", "speaker": "Voix", "text": "Te voilà enfin, voyageur. Le village a besoin d'aide.", "next": "w2", "x": 0, "y": 0 },
+        { "id": "w2", "type": "line", "speaker": "Voix", "text": "Va parler à l'ancien, juste au nord du chemin (E pour parler).", "next": "w3", "x": 260, "y": 0 },
+        { "id": "w3", "type": "end", "x": 520, "y": 0 }
+    ]
+}
