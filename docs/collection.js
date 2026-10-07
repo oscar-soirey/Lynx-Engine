@@ -7,6 +7,19 @@
   function fmt(d) { var x = new Date(d + 'T00:00:00'); return isNaN(x) ? esc(d) : x.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); }
   function safeSrc(u) { return /^(https?:\/\/|[\w@.\-\/%]+$)/.test(u || '') ? u : ''; }
   function badges(p) { return (p.level ? '<span class="plug-tag lvl">' + esc(p.level) + '</span>' : '') + (p.tags || []).map(function (t) { return '<span class="plug-tag">' + esc(t) + '</span>'; }).join(''); }
+  /* Content is read from the site's own files. When the page is opened straight from disk (file://),
+     browsers block fetch(), so it falls back to <dir>/data.js, built by bump-assets.py. */
+  function local() { return (window.LYNX_DATA || {})[C.dir]; }
+  function getIndex() {
+    return fetch(C.dir + '/index.json', { cache: 'no-cache' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .catch(function (e) { var D = local(); if (D && D.index) return D.index; throw e; });
+  }
+  function getMd(slug) {
+    return fetch(C.dir + '/' + encodeURIComponent(slug) + '.md', { cache: 'no-cache' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .catch(function (e) { var D = local(); if (D && D.md && D.md[slug] != null) return D.md[slug]; throw e; });
+  }
   function failure(msg) { app.innerHTML = '<p class="plug-msg">' + esc(msg) + '</p>'; }
 
   function list() {
@@ -27,8 +40,7 @@
     hero.hidden = true;
     if (!p) { failure('This page does not exist.'); app.insertAdjacentHTML('beforeend', '<p class="plug-msg"><a class="button" href="' + C.page + '">Back to ' + esc(C.title.toLowerCase()) + '</a></p>'); return; }
     document.title = p.title + ' — Lynx ' + C.title;
-    fetch(C.dir + '/' + encodeURIComponent(p.slug) + '.md', { cache: 'no-cache' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    getMd(p.slug)
       .then(function (md) {
         var older = posts[idx + 1], newer = posts[idx - 1], words = md.split(/\s+/).filter(Boolean).length;
         app.innerHTML = '<article class="card dev-post"><a class="dev-back" href="' + C.page + '">&larr; All ' + esc(C.plural) + '</a><span class="dev-date">' + fmt(p.date) + ' &middot; ' + Math.max(1, Math.round(words / 200)) + ' min read</span><h1>' + esc(p.title) + '</h1><div class="dev-tags">' + badges(p) + '</div><div class="md" id="md-out">' + LynxMD.render(md) + '</div></article>' +
@@ -39,13 +51,12 @@
       .catch(function (e) { failure('Could not load this page (' + e.message + ').'); });
   }
 
-  fetch(C.dir + '/index.json', { cache: 'no-cache' })
-    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  getIndex()
     .then(function (d) {
       if (!Array.isArray(d)) throw new Error('Invalid index');
       posts = d.filter(function (p) { return p && /^[\w-]+$/.test(p.slug || '') && p.title; }).sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
       var s = new URLSearchParams(location.search).get(C.param);
       if (s) post(s); else list();
     })
-    .catch(function (e) { failure('Could not load ' + C.title.toLowerCase() + ' (' + e.message + '). If you opened this page as a local file, serve the folder with a local web server.'); });
+    .catch(function (e) { failure('Could not load ' + C.title.toLowerCase() + ' (' + e.message + '). Run `python bump-assets.py` to refresh the local data.'); });
 })();

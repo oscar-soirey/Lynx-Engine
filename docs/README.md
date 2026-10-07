@@ -24,3 +24,6 @@ Open `index.html` in a browser.
 
 ## Source of truth
 The JavaScript documentation was built from the engine source, including `src/scripting/ScriptSystem.cpp`, `src/gameplay/Actor.*`, `src/gameplay/Components.h`, `src/gameplay/Component.h`, `src/core/Level.h`, `src/core/Engine.h`, and related systems present in the project.
+
+## Publishing on GitHub Pages
+Run `python bump-assets.py` after adding or editing a post or tutorial, and before each commit. It rebuilds `posts/data.js` and `tutorials/data.js` (so the devlog and tutorials also work when a page is opened directly from disk, without a web server) and it adds `?v=<hash>` to the CSS/JS links of every page so browsers never keep serving an outdated `styles.css` or script (a stale stylesheet breaks the toolbar and the devlog cards). `.nojekyll` disables Jekyll processing.

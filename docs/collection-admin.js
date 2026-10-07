@@ -178,7 +178,7 @@
     f.text().then(function (t) { var d = JSON.parse(t); if (!Array.isArray(d)) throw 0; setIndex(d); }).catch(function () { $('idx-status').textContent = 'Invalid index.json'; });
     this.value = '';
   });
-  fetch(C.dir + '/index.json', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(setIndex).catch(function () { $('idx-status').textContent = 'Not loaded (open this page through a web server, or load the file)'; });
+  fetch(C.dir + '/index.json', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw 0; return r.json(); }).catch(function () { var D = (window.LYNX_DATA || {})[C.dir]; if (D && D.index) return D.index; throw 0; }).then(setIndex).catch(function () { $('idx-status').textContent = 'Not loaded (open this page through a web server, or load the file)'; });
 
   function fill(e, body) {
     S.editing = e.slug; S.slugTouched = true; S.images = {}; S.coverTouched = false;
@@ -189,7 +189,7 @@
     var b = ev.target.closest('button[data-edit]'); if (!b) return;
     var e = S.index.filter(function (p) { return p.slug === b.dataset.edit; })[0];
     if (S.dirty && !confirm('Discard the current changes?')) return;
-    fetch(C.dir + '/' + e.slug + '.md', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw 0; return r.text(); }).then(function (t) { fill(e, t); })
+    fetch(C.dir + '/' + e.slug + '.md', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw 0; return r.text(); }).catch(function () { var D = (window.LYNX_DATA || {})[C.dir]; if (D && D.md && D.md[e.slug] != null) return D.md[e.slug]; throw 0; }).then(function (t) { fill(e, t); })
       .catch(function () {
         var inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.md,text/markdown,text/plain';
         inp.onchange = function () { if (inp.files[0]) inp.files[0].text().then(function (t) { fill(e, t); }); };

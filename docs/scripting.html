@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx — JavaScript Scripting</title><link rel="icon" href="app-icon.png"><link rel="stylesheet" href="styles.css"><style>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx — JavaScript Scripting</title><link rel="icon" href="app-icon.png"><link rel="stylesheet" href="styles.css?v=46a16258"><style>
 /* Shared Lynx navigation: identical chrome across every section */
 .site-shared-toolbar,
 header,
@@ -81,4 +81,4 @@ parent.position = { x: 10, y: 4, z: 0 };</pre></article>
 }</pre><h3>Communication between scripts</h3><p><code>actor.call(name, ...args)</code> calls the requested function in the scripts attached to that Actor. If multiple scripts define the same function, the engine calls them in instance order and the last return value becomes the final result.</p></article>
 <article><h2>12. What JavaScript does not do</h2><ul><li>It does not replace the C++ engine or native gameplay classes.</li><li>It does not create an Actor class hierarchy through JavaScript inheritance.</li><li>It does not automatically expose every C++ component: only bridges explicitly registered in the JS API are available.</li><li>Calls use the current level and QuickJS runtime; a script remains behavior attached to an Actor.</li></ul></article>
 </div></section></main><section class="section lynxie-doc"><div class="section-head"><p class="eyebrow">LYNXIE + JAVASCRIPT</p><h2>Describe the result. Let Lynxie write the glue.</h2></div><p>Lynxie can create and edit project JavaScript for you, while still working with the same scripting API documented here. It can inspect the current project, generate scripts, apply them through the editor, and iterate on the result.</p><p>It can also go beyond scripting: file management, scene changes, terrain and voxel editing, and game compilation are part of the integrated editor workflow.</p></section>
-<footer><span>LYNX ENGINE</span><span>JavaScript / QuickJS</span><span>Developed by Oscar Soirey</span></footer><script src="site.js" defer></script></body></html>
+<footer><span>LYNX ENGINE</span><span>JavaScript / QuickJS</span><span>Developed by Oscar Soirey</span></footer><script src="site.js?v=3624c473" defer></script></body></html>
