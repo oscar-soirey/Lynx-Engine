@@ -1,5 +1,6 @@
 #include "Launcher.h"
 #include "Process.h"
+#include "../src/editor/MarkdownText.h"
 
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>   // DC.CurrLineTextBaseOffset (alignement des pastilles)
@@ -909,12 +910,13 @@ void Launcher::DrawEngine()
 	const float line = ImGui::GetTextLineHeightWithSpacing();
 	const float gap = style.ItemSpacing.x * 2.0f;
 	const float card_pad = ImGui::GetTextLineHeight() * 0.9f;
-	const float min_width = ButtonWidth("Lancer") + ButtonWidth("Dossier") + ButtonWidth("Retirer") +
-	                        style.ItemSpacing.x * 2 + card_pad * 2 + 4.0f;
+	const float min_width = std::max(ButtonWidth("Lancer") + ButtonWidth("Dossier") + ButtonWidth("Retirer") +
+	                                 style.ItemSpacing.x * 2 + card_pad * 2 + 4.0f,
+	                                 ImGui::GetTextLineHeight() * 20.0f);   // assez large pour les notes
 	const float avail = ImGui::GetContentRegionAvail().x;
 	const int columns = std::max(1, int((avail + gap) / (min_width + gap)));
 	const float width = (avail - gap * (columns - 1)) / columns;
-	const float height = line * 9.5f + ImGui::GetFrameHeight();   // ~4 lignes de notes
+	const float height = line * 15.0f + ImGui::GetFrameHeight();   // ~10 lignes de notes
 
 	for (size_t i = 0; i < m_releases.size(); ++i)
 	{
@@ -996,7 +998,7 @@ void Launcher::DrawReleaseCard(size_t index, const ImVec2& size)
 		if (notes.empty())
 			notes = "Pas de notes pour cette version.";
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.81f, 0.85f, 1));
-		ImGui::TextWrapped("%s", notes.c_str());
+		lynx::editor::markdown::Render(notes);
 		ImGui::PopStyleColor();
 		ImGui::EndChild();
 	}
@@ -1396,7 +1398,7 @@ void Launcher::DrawPluginCard(const CatalogPlugin* catalog, size_t catalog_index
 	{
 		ImGui::BeginChild("##desc", ImVec2(0, desc_height), ImGuiChildFlags_None);
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.81f, 0.85f, 1));
-		ImGui::TextWrapped("%s", description.empty() ? "Pas de description." : description.c_str());
+		lynx::editor::markdown::Render(description.empty() ? std::string("Pas de description.") : description);
 		ImGui::PopStyleColor();
 		ImGui::EndChild();
 	}

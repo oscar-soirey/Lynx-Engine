@@ -1,0 +1,9 @@
+[
+  {
+    "slug": "welcome",
+    "title": "Welcome to the Lynx devlog",
+    "date": "2026-10-07",
+    "summary": "How the devlog works and how to publish a post. This is a sample post: delete it when you publish your first real one.",
+    "tags": ["meta"]
+  }
+]

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx Engine — Plugins</title><meta name="description" content="Browse and publish Lynx Engine plugins."><link rel="icon" href="app-icon.png"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header class="topbar"><a class="brand" href="index.html"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></a><button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="main-nav"><span></span><span></span><span></span></button><nav class="main-nav" id="main-nav" aria-label="Main"><a href="index.html">Home</a><div class="nav-group"><button class="nav-drop" type="button" aria-haspopup="true" aria-expanded="false">Docs</button><div class="nav-menu"><a href="documentation.html">Documentation</a><a href="tutorials.html">Tutorials</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></div></div><a class="active" href="plugins.html" aria-current="page">Plugins</a><a href="devlog.html">Devlog</a><a class="lynxie-link" href="lynxie.html"><img class="lynxie-nav-icon" src="assets/lynxie.png" alt="">Lynxie</a><a class="nav-cta" href="download.html">Download</a></nav></header>
+<main class="docs">
+<section class="doc-hero"><p class="eyebrow">LYNX ENGINE // PLUGINS</p><h1>Plugins</h1><p>Community plugins listed in the official registry. Each plugin lives in its own GitHub repository and can be installed from the Plugins tab of the launcher.</p><div class="actions"><a class="button primary" href="#publish">Publish a plugin</a><a class="button" href="https://github.com/oscar-soirey/Lynx-Engine/blob/main/registry/plugins.json" target="_blank" rel="noopener">View registry on GitHub</a></div></section>
+
+<section class="section plug-section" id="browse">
+<div class="section-head"><p class="eyebrow">REGISTRY</p><h2>Available plugins</h2></div>
+<div class="plug-tools"><input id="q" type="search" placeholder="Search plugins..." aria-label="Search plugins"><select id="cat" aria-label="Category"><option value="">All categories</option></select><span id="count" class="plug-count"></span></div>
+<div id="list" class="plug-grid"><p class="plug-msg">Loading registry...</p></div>
+</section>
+
+<section class="section plug-section" id="publish">
+<div class="section-head"><p class="eyebrow">PUBLISH</p><h2>Publish a plugin</h2><p>Fill in the form to generate your registry entry, then send it as a request. The entry is added to <code>registry/plugins.json</code> once it is reviewed.</p></div>
+<div class="plug-publish">
+<form id="form" class="card plug-form" novalidate>
+<label>Name<input id="f-name" required placeholder="Weather"><small>Must match the <code>name</code> in your plugin's <code>plugin.json</code>.</small></label>
+<label>Repository<input id="f-repo" required placeholder="oscar-soirey/Lynx-Weather"><small><code>owner/name</code> or a full GitHub URL.</small></label>
+<label>Description<input id="f-desc" required maxlength="140" placeholder="Rain, snow, day / night cycle."></label>
+<label>Category<input id="f-cat" required list="cats" placeholder="Gameplay"><datalist id="cats"></datalist></label>
+<label>Author<input id="f-author" required placeholder="Oscar"></label>
+<p id="err" class="plug-err" role="alert"></p>
+</form>
+<div class="card plug-preview">
+<h3>Registry entry</h3>
+<pre id="json" data-lang="JSON" data-fixed="1">{}</pre>
+<div class="actions">
+<a id="send-issue" class="button primary" href="#" target="_blank" rel="noopener">Send publish request</a>
+<button id="copy" class="button" type="button">Copy entry</button>
+<a id="send-pr" class="button" href="#" target="_blank" rel="noopener">Edit registry (pull request)</a>
+</div>
+<p class="plug-hint"><b>Send publish request</b> opens a pre-filled GitHub issue on the main repo. <b>Edit registry</b> opens <code>plugins.json</code> in GitHub's editor: paste the copied entry in the array and GitHub creates the pull request for you. A GitHub account is required.</p>
+</div>
+</div>
+<div class="card plug-rules"><h3>Before you publish</h3>
+<p>Your releases must be tagged <code>v&lt;plugin version&gt;-&lt;Lynx version&gt;</code>, for example <code>v1.2.4-26.0.6</code> is plugin 1.2.4 built for Lynx 26.0.6. The launcher picks the highest plugin version whose Lynx version is lower than or equal to the selected engine, so a plugin for 26.0.1 works on 26.0.6.</p>
+<p>The asset is the first <code>.zip</code> of the release, with <code>plugin.json</code> (and <code>bin/</code>) at the root or in a subfolder. Pre-releases are only offered when "Beta versions" is enabled. Tags of any other form are ignored.</p></div>
+</section>
+</main>
+<footer><span>LYNX ENGINE</span><span>Plugin registry</span><span>Developed by Oscar Soirey</span></footer>
+<script src="plugins.js" defer></script><script src="site.js" defer></script></body></html>

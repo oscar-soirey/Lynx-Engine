@@ -8,7 +8,11 @@ A simple static documentation website for Lynx Engine, a game engine for small g
 - `scripting.html` — complete JavaScript scripting guide
 - `api.html` — compact JavaScript API reference
 - `thirdparty.html` — third-party libraries (HRL, EnTT, QuickJS, GLFW, Dear ImGui; drop real logos in assets/libs/<id>.png)
-- `site.js` — pipeline highlight and hero jump
+- `plugins.html` + `plugins.js` — plugin registry browser (reads registry/plugins.json from the main repo) and publish form
+- `devlog.html`, `tutorials.html` + `collection.js` + `md.js` — public content collections (read `<dir>/index.json` and `<dir>/<slug>.md`; devlog uses `posts/`, tutorials use `tutorials/`). A collection is configured by `window.LYNX_COLLECTION` in the page
+- `devlog-admin.html`, `tutorials-admin.html` + `collection-admin.js` — local editors: preview, image/GIF/YouTube support, exports a zip to unzip at the site root (tutorials also have a level field)
+- to add another collection, copy a pair of pages and change the config
+- `site.js` — pipeline highlight, toolbar, hero jump
 - `assets/` — pixel art sprites (cubes, hero sheet, mushroom, pixelated logo)
 - `styles.css` — pixel-art UI and responsive layout
 

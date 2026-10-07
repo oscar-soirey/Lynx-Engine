@@ -49,9 +49,26 @@
     }
     return out + esc(src.slice(last));
   }
-  document.querySelectorAll('pre').forEach(function (pre) {
-    var src = pre.textContent;
-    pre.innerHTML = highlight(src);
-    pre.setAttribute('data-lang', /#include|::|->|\bstruct\b|\bvoid\b|\bfloat\b|AddComponent|\bclass\b|LYNX_/.test(src) ? 'C++' : 'JavaScript');
-  });
+  function apply(root) {
+    (root || document).querySelectorAll('pre').forEach(function (pre) {
+      var src = pre.textContent;
+      pre.innerHTML = highlight(src);
+      if (!pre.hasAttribute('data-fixed')) pre.setAttribute('data-lang', /#include|::|->|\bstruct\b|\bvoid\b|\bfloat\b|AddComponent|\bclass\b|LYNX_/.test(src) ? 'C++' : 'JavaScript');
+    });
+  }
+  apply(document);
+  window.LynxHL = { apply: apply };
+})();
+
+/* toolbar : menu mobile + dropdown Docs */
+(function () {
+  var bar = document.querySelector('.topbar'); if (!bar) return;
+  var toggle = bar.querySelector('.nav-toggle'), group = bar.querySelector('.nav-group'), drop = group && group.querySelector('.nav-drop');
+  function setGroup(open) { if (!group) return; group.classList.toggle('open', open); drop.setAttribute('aria-expanded', String(open)); }
+  function setMenu(open) { bar.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); if (!open) setGroup(false); }
+  toggle.addEventListener('click', function () { setMenu(!bar.classList.contains('open')); });
+  if (drop) drop.addEventListener('click', function (e) { e.stopPropagation(); setGroup(!group.classList.contains('open')); });
+  document.addEventListener('click', function (e) { if (group && !group.contains(e.target)) setGroup(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { setGroup(false); setMenu(false); } });
+  window.addEventListener('resize', function () { if (window.innerWidth > 900) setMenu(false); });
 })();

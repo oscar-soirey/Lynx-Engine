@@ -2,15 +2,11 @@ obligé:
 
 mettre une vraie toolbar
 
-publier un plugin sur le site
-
 les liquident buguent pas mal
 
 pouvoir masquer le curseur de la souris avec une fonction globale simple C++/javascript
 
 parler du moteur sur reddit, linkedin, twitter, discord, etc...
-
-plugins téléchargeables en ligne dans le launcher
 
 revoir le logo et les banieres tout ca
 
@@ -29,7 +25,7 @@ plus tard:
 
 Lynxie doit absolument pouvoir chercher sur internet
 
-pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>
+pouvoir avoir plusieurs .xml dans un seul level (world partition, level streaming, etc...), par contre tous dans un seul fichier xml (juste avec plusieurs balises <Level>)
 
 
 
@@ -47,6 +43,8 @@ editeur de post process
 plugins:
 
 convertir image haute définition en pixel art
+
+
 
 
 

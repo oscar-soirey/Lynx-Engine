@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lynx Engine — Tutorial editor</title><meta name="description" content="Local editor to write tutorials."><meta name="robots" content="noindex"><link rel="icon" href="app-icon.png"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header class="topbar"><a class="brand" href="index.html"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></a><button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="main-nav"><span></span><span></span><span></span></button><nav class="main-nav" id="main-nav" aria-label="Main"><a href="index.html">Home</a><div class="nav-group"><button class="nav-drop" type="button" aria-haspopup="true" aria-expanded="false">Docs</button><div class="nav-menu"><a href="documentation.html">Documentation</a><a href="tutorials.html">Tutorials</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></div></div><a href="plugins.html">Plugins</a><a href="devlog.html">Devlog</a><a class="lynxie-link" href="lynxie.html"><img class="lynxie-nav-icon" src="assets/lynxie.png" alt="">Lynxie</a><a class="nav-cta" href="download.html">Download</a></nav></header>
+<main class="docs adm-page">
+<section class="doc-hero"><p class="eyebrow">LYNX ENGINE // TUTORIAL EDITOR</p><h1>New tutorial</h1><p>Write your tutorial, preview it, then download the package and drop it at the root of the site repo. Nothing is uploaded: everything stays in your browser.</p></section>
+
+<section class="card adm-posts"><div class="adm-row"><h3>Existing tutorials</h3><span id="idx-status" class="plug-count"></span><label class="button" id="idx-load-btn" for="idx-file">Load tutorials/index.json...</label><input id="idx-file" type="file" accept=".json,application/json" hidden><button class="button" id="new-post" type="button">New tutorial</button></div><div id="post-list" class="adm-list"></div></section>
+
+<div class="adm">
+<section class="adm-col">
+<div class="card adm-form">
+<label>Title<input id="a-title" placeholder="Your first script in Lynx"></label>
+<div class="adm-2"><label>Slug<input id="a-slug" placeholder="first-script"><small>File name and URL of the post.</small></label><label>Date<input id="a-date" type="date"></label></div>
+<label>Tags<input id="a-tags" placeholder="scripting, beginner"><small>Separated by commas.</small></label>
+<label>Summary<input id="a-sum" maxlength="200" placeholder="Shown on the list. Left empty, it is taken from the first paragraph."></label>
+<label>Level<select id="a-level"><option value="">Not specified</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>
+<label>Cover image<select id="a-cover"><option value="">None</option></select></label>
+</div>
+<div class="card adm-edit">
+<div class="adm-tb" role="toolbar" aria-label="Formatting">
+<button type="button" data-act="h2" title="Heading">H</button><button type="button" data-act="h3" title="Sub-heading">h</button><button type="button" data-act="bold" title="Bold"><b>B</b></button><button type="button" data-act="italic" title="Italic"><i>I</i></button><button type="button" data-act="code" title="Inline code">&lt;/&gt;</button><button type="button" data-act="codeblock" title="Code block">{ }</button><button type="button" data-act="link" title="Link">Link</button><button type="button" data-act="list" title="List">List</button><button type="button" data-act="quote" title="Quote">Quote</button><button type="button" data-act="image" title="Add image or GIF">Image</button><button type="button" data-act="video" title="Embed a YouTube video">Video</button><input id="a-files" type="file" accept="image/*" multiple hidden>
+</div>
+<textarea id="a-body" spellcheck="true" placeholder="Write in Markdown. Use ## for each step. Drop or paste images here. A YouTube link alone on a line becomes a video."></textarea>
+<div id="imgs" class="adm-imgs"></div>
+</div>
+<div class="card adm-actions">
+<p id="a-err" class="plug-err" role="alert"></p>
+<div class="actions"><button id="dl-zip" class="button primary" type="button">Download package (.zip)</button><button id="dl-md" class="button" type="button">Download .md only</button><button id="cp-entry" class="button" type="button">Copy index entry</button></div>
+<p class="plug-hint" id="a-hint"></p>
+</div>
+</section>
+<section class="adm-col adm-prev"><div class="card"><h3>Preview</h3><div id="preview" class="md"></div></div></section>
+</div>
+</main>
+<footer><span>LYNX ENGINE</span><span>Tutorial editor</span><span>Developed by Oscar Soirey</span></footer>
+<script src="md.js" defer></script><script>window.LYNX_COLLECTION={dir:'tutorials',page:'tutorials.html',param:'tutorial',title:'Tutorials',plural:'tutorials',docTitle:'Lynx Engine — Tutorials',zip:'tutorial'};</script><script src="collection-admin.js" defer></script><script src="site.js" defer></script></body></html>
