@@ -66,6 +66,7 @@ namespace lynx
 	protected:
 		void OnAttach() override;
 		void Update(float dt) override;
+		void LateUpdate(float dt) override;
 
 		/** Materiau sprite de la texture (cache par chemin). 0xFFFFFFFF si introuvable. */
 		static uint32_t MaterialForTexture(const std::string& texture);

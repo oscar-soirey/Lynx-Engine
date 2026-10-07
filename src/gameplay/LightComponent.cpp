@@ -43,6 +43,12 @@ namespace lynx
 		Sync(false);
 	}
 
+	void LightComponent::LateUpdate(float)
+	{
+		// Position finale de la frame (apres le mouvement du gameplay).
+		Sync(false);
+	}
+
 	void LightComponent::Refresh()
 	{
 		Sync(true);

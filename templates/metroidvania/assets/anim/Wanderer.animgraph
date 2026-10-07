@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AnimGraph version="2">
+    <Output source="1" x="420" y="0"/>
+    <Parameter name="speed" type="float" default="0"/>
+    <Parameter name="vy" type="float" default="0"/>
+    <Parameter name="grounded" type="bool" default="0"/>
+    <Parameter name="wall" type="bool" default="0"/>
+    <Parameter name="dashing" type="bool" default="0"/>
+    <Parameter name="focus" type="bool" default="0"/>
+    <Parameter name="sit" type="bool" default="0"/>
+    <Parameter name="attack1" type="trigger" default="0"/>
+    <Parameter name="attack2" type="trigger" default="0"/>
+    <Parameter name="attack3" type="trigger" default="0"/>
+    <Parameter name="attack_up" type="trigger" default="0"/>
+    <Parameter name="attack_down" type="trigger" default="0"/>
+    <Parameter name="parry" type="trigger" default="0"/>
+    <Parameter name="hurt" type="trigger" default="0"/>
+    <Parameter name="die" type="trigger" default="0"/>
+    <Animation name="idle" texture="sprites/hero_idle.png" frames="4" frame_time="0.2" loop="true"/>
+    <Animation name="run" texture="sprites/hero_run.png" frames="6" frame_time="0.07" loop="true">
+        <Notify frame="2" event="OnFootstep"/>
+        <Notify frame="5" event="OnFootstep"/>
+    </Animation>
+    <Animation name="jump" texture="sprites/hero_jump.png" frames="2" frame_time="0.1" loop="true"/>
+    <Animation name="fall" texture="sprites/hero_fall.png" frames="2" frame_time="0.12" loop="true"/>
+    <Animation name="wallslide" texture="sprites/hero_wallslide.png" frames="2" frame_time="0.12" loop="true"/>
+    <Animation name="dash" texture="sprites/hero_dash.png" frames="3" frame_time="0.05" loop="true"/>
+    <Animation name="attack1" texture="sprites/hero_attack1.png" frames="3" frame_time="0.055" loop="false"/>
+    <Animation name="attack2" texture="sprites/hero_attack2.png" frames="3" frame_time="0.055" loop="false"/>
+    <Animation name="attack3" texture="sprites/hero_attack3.png" frames="4" frame_time="0.06" loop="false"/>
+    <Animation name="attack_up" texture="sprites/hero_attack_up.png" frames="3" frame_time="0.06" loop="false"/>
+    <Animation name="attack_down" texture="sprites/hero_attack_down.png" frames="3" frame_time="0.06" loop="false"/>
+    <Animation name="parry" texture="sprites/hero_parry.png" frames="3" frame_time="0.07" loop="false"/>
+    <Animation name="hurt" texture="sprites/hero_hurt.png" frames="2" frame_time="0.12" loop="false"/>
+    <Animation name="focus" texture="sprites/hero_focus.png" frames="4" frame_time="0.1" loop="true"/>
+    <Animation name="death" texture="sprites/hero_death.png" frames="6" frame_time="0.12" loop="false"/>
+    <Animation name="sit" texture="sprites/hero_sit.png" frames="1" frame_time="1.0" loop="true"/>
+    <PoseNode id="1" type="statemachine" source="Locomotion" x="0" y="0"/>
+    <StateMachine id="2" name="Locomotion" entry="Idle">
+        <Entry x="-260" y="0"/>
+        <AnyState x="-260" y="420"/>
+        <State id="101" name="Idle" motion="idle" interruptible="true" restart_on_enter="true" x="0" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="102" name="Run" motion="run" interruptible="true" restart_on_enter="true" x="260" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="103" name="Jump" motion="jump" interruptible="true" restart_on_enter="true" x="0" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="104" name="Fall" motion="fall" interruptible="true" restart_on_enter="true" x="260" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="105" name="WallSlide" motion="wallslide" interruptible="true" restart_on_enter="true" x="520" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="106" name="Dash" motion="dash" interruptible="true" restart_on_enter="true" x="520" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="107" name="Attack1" motion="attack1" interruptible="true" restart_on_enter="true" next="Idle" x="0" y="560" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="108" name="Attack2" motion="attack2" interruptible="true" restart_on_enter="true" next="Idle" x="200" y="560" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="109" name="Attack3" motion="attack3" interruptible="true" restart_on_enter="true" next="Idle" x="400" y="560" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="110" name="AttackUp" motion="attack_up" interruptible="true" restart_on_enter="true" next="Idle" x="600" y="560" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="111" name="AttackDown" motion="attack_down" interruptible="true" restart_on_enter="true" next="Idle" x="800" y="560" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="112" name="Parry" motion="parry" interruptible="true" restart_on_enter="true" next="Idle" x="0" y="760" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="113" name="Hurt" motion="hurt" interruptible="true" restart_on_enter="true" next="Idle" x="200" y="760" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="114" name="Focus" motion="focus" interruptible="true" restart_on_enter="true" x="400" y="760" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="115" name="Death" motion="death" interruptible="false" restart_on_enter="true" next="Death" x="600" y="760" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="116" name="Sit" motion="sit" interruptible="true" restart_on_enter="true" x="800" y="760" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <Transition id="117" from="Idle" to="Run" priority="0" wait_finished="false">
+            <Condition kind="isTrue" param="grounded"/>
+            <Condition kind="compare" param="speed" op="&gt;" value="1"/>
+        </Transition>
+        <Transition id="118" from="Run" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="compare" param="speed" op="&lt;=" value="1"/>
+        </Transition>
+        <Transition id="119" from="Idle" to="Jump" priority="2" wait_finished="false">
+            <Condition kind="isFalse" param="grounded"/>
+            <Condition kind="compare" param="vy" op="&gt;" value="0.5"/>
+        </Transition>
+        <Transition id="120" from="Idle" to="Fall" priority="2" wait_finished="false">
+            <Condition kind="isFalse" param="grounded"/>
+            <Condition kind="compare" param="vy" op="&lt;=" value="0.5"/>
+        </Transition>
+        <Transition id="121" from="Run" to="Jump" priority="2" wait_finished="false">
+            <Condition kind="isFalse" param="grounded"/>
+            <Condition kind="compare" param="vy" op="&gt;" value="0.5"/>
+        </Transition>
+        <Transition id="122" from="Run" to="Fall" priority="2" wait_finished="false">
+            <Condition kind="isFalse" param="grounded"/>
+            <Condition kind="compare" param="vy" op="&lt;=" value="0.5"/>
+        </Transition>
+        <Transition id="123" from="Jump" to="Fall" priority="0" wait_finished="false">
+            <Condition kind="compare" param="vy" op="&lt;=" value="0.5"/>
+        </Transition>
+        <Transition id="124" from="Jump" to="Idle" priority="3" wait_finished="false">
+            <Condition kind="isTrue" param="grounded"/>
+        </Transition>
+        <Transition id="125" from="Fall" to="Idle" priority="3" wait_finished="false">
+            <Condition kind="isTrue" param="grounded"/>
+        </Transition>
+        <Transition id="126" from="WallSlide" to="Idle" priority="3" wait_finished="false">
+            <Condition kind="isTrue" param="grounded"/>
+        </Transition>
+        <Transition id="127" from="Fall" to="WallSlide" priority="2" wait_finished="false">
+            <Condition kind="isTrue" param="wall"/>
+        </Transition>
+        <Transition id="128" from="Jump" to="WallSlide" priority="2" wait_finished="false">
+            <Condition kind="isTrue" param="wall"/>
+            <Condition kind="compare" param="vy" op="&lt;" value="0"/>
+        </Transition>
+        <Transition id="129" from="WallSlide" to="Fall" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="wall"/>
+        </Transition>
+        <Transition id="130" from="WallSlide" to="Jump" priority="1" wait_finished="false">
+            <Condition kind="isFalse" param="wall"/>
+            <Condition kind="compare" param="vy" op="&gt;" value="0.5"/>
+        </Transition>
+        <Transition id="131" from="Dash" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="dashing"/>
+        </Transition>
+        <Transition id="132" from="Focus" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="focus"/>
+        </Transition>
+        <Transition id="133" from="Sit" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="sit"/>
+        </Transition>
+        <Transition id="134" from="*" to="Dash" priority="15" wait_finished="false">
+            <Condition kind="isTrue" param="dashing"/>
+        </Transition>
+        <Transition id="135" from="*" to="Attack1" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="attack1"/>
+        </Transition>
+        <Transition id="136" from="*" to="Attack2" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="attack2"/>
+        </Transition>
+        <Transition id="137" from="*" to="Attack3" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="attack3"/>
+        </Transition>
+        <Transition id="138" from="*" to="AttackUp" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="attack_up"/>
+        </Transition>
+        <Transition id="139" from="*" to="AttackDown" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="attack_down"/>
+        </Transition>
+        <Transition id="140" from="*" to="Parry" priority="12" wait_finished="false">
+            <Condition kind="trigger" param="parry"/>
+        </Transition>
+        <Transition id="141" from="*" to="Focus" priority="8" wait_finished="false">
+            <Condition kind="isTrue" param="focus"/>
+        </Transition>
+        <Transition id="142" from="*" to="Sit" priority="25" wait_finished="false">
+            <Condition kind="isTrue" param="sit"/>
+        </Transition>
+        <Transition id="143" from="*" to="Hurt" priority="20" wait_finished="false">
+            <Condition kind="trigger" param="hurt"/>
+        </Transition>
+        <Transition id="144" from="*" to="Death" priority="30" wait_finished="false">
+            <Condition kind="trigger" param="die"/>
+        </Transition>
+    </StateMachine>
+</AnimGraph>

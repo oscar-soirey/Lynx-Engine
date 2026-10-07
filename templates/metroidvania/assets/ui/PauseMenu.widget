@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="PauseMenu" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <Image object_id_="Dim" texture="ui/img/white.png" tint="0.02 0.02 0.05 0.78">
+            <Slot anchor_min="0 0" anchor_max="1 1" offsets="0 0 0 0" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Title" text="PAUSED" font_size="80" color="0.9 0.92 1 1">
+            <Slot anchor_min="0.5 0.25" anchor_max="0.5 0.25" offsets="0 0 800 100" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <Button object_id_="Resume" text="Resume" font_size="34" text_color="0.92 0.94 1 1" normal_color="0.12 0.13 0.2 0.95" hovered_color="0.22 0.3 0.45 1" pressed_color="0.1 0.5 0.6 1" padding="20 10 20 10">
+            <Slot anchor_min="0.5 0.42" anchor_max="0.5 0.42" offsets="0 0 560 70" alignment="0.5 0"/>
+        </Button>
+        <Button object_id_="Bench" text="Back to the last bench" font_size="34" text_color="0.92 0.94 1 1" normal_color="0.12 0.13 0.2 0.95" hovered_color="0.22 0.3 0.45 1" pressed_color="0.1 0.5 0.6 1" padding="20 10 20 10">
+            <Slot anchor_min="0.5 0.42" anchor_max="0.5 0.42" offsets="0 90 560 70" alignment="0.5 0"/>
+        </Button>
+        <Button object_id_="TitleScreen" text="Title screen" font_size="34" text_color="0.92 0.94 1 1" normal_color="0.12 0.13 0.2 0.95" hovered_color="0.22 0.3 0.45 1" pressed_color="0.1 0.5 0.6 1" padding="20 10 20 10">
+            <Slot anchor_min="0.5 0.42" anchor_max="0.5 0.42" offsets="0 180 560 70" alignment="0.5 0"/>
+        </Button>
+        <TextBlock object_id_="Controls" text="" font_size="24" color="0.7 0.75 0.85 1">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -60 1700 200" alignment="0.5 1"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

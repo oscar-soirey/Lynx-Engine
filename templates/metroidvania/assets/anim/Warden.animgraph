@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AnimGraph version="2">
+    <Output source="1" x="420" y="0"/>
+    <Parameter name="speed" type="float" default="0"/>
+    <Parameter name="charging" type="bool" default="0"/>
+    <Parameter name="winding" type="bool" default="0"/>
+    <Parameter name="slam" type="trigger" default="0"/>
+    <Parameter name="roar" type="trigger" default="0"/>
+    <Parameter name="die" type="trigger" default="0"/>
+    <Animation name="idle" texture="sprites/warden_idle.png" frames="4" frame_time="0.18" loop="true"/>
+    <Animation name="walk" texture="sprites/warden_walk.png" frames="4" frame_time="0.12" loop="true">
+        <Notify frame="1" event="OnStomp"/>
+        <Notify frame="3" event="OnStomp"/>
+    </Animation>
+    <Animation name="windup" texture="sprites/warden_windup.png" frames="2" frame_time="0.15" loop="true"/>
+    <Animation name="slam" texture="sprites/warden_slam.png" frames="3" frame_time="0.08" loop="false">
+        <Notify frame="2" event="OnSlamImpact"/>
+    </Animation>
+    <Animation name="charge" texture="sprites/warden_charge.png" frames="4" frame_time="0.07" loop="true"/>
+    <Animation name="roar" texture="sprites/warden_roar.png" frames="2" frame_time="0.12" loop="true"/>
+    <Animation name="hurt" texture="sprites/warden_hurt.png" frames="1" frame_time="1.0" loop="true"/>
+    <PoseNode id="1" type="statemachine" source="Warden" x="0" y="0"/>
+    <StateMachine id="2" name="Warden" entry="Idle">
+        <Entry x="-260" y="0"/>
+        <AnyState x="-260" y="420"/>
+        <State id="101" name="Idle" motion="idle" interruptible="true" restart_on_enter="true" x="0" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="102" name="Walk" motion="walk" interruptible="true" restart_on_enter="true" x="260" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="103" name="Windup" motion="windup" interruptible="true" restart_on_enter="true" x="0" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="104" name="Slam" motion="slam" interruptible="false" restart_on_enter="true" next="Idle" x="260" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="105" name="Charge" motion="charge" interruptible="true" restart_on_enter="true" x="520" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="106" name="Roar" motion="roar" interruptible="true" restart_on_enter="true" x="520" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <State id="107" name="Dead" motion="hurt" interruptible="false" restart_on_enter="true" next="Dead" x="780" y="200" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+        <Transition id="108" from="Idle" to="Walk" priority="0" wait_finished="false">
+            <Condition kind="compare" param="speed" op="&gt;" value="0.5"/>
+        </Transition>
+        <Transition id="109" from="Walk" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="compare" param="speed" op="&lt;=" value="0.5"/>
+        </Transition>
+        <Transition id="110" from="*" to="Windup" priority="5" wait_finished="false">
+            <Condition kind="isTrue" param="winding"/>
+        </Transition>
+        <Transition id="111" from="Windup" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="winding"/>
+        </Transition>
+        <Transition id="112" from="*" to="Slam" priority="10" wait_finished="false">
+            <Condition kind="trigger" param="slam"/>
+        </Transition>
+        <Transition id="113" from="*" to="Charge" priority="6" wait_finished="false">
+            <Condition kind="isTrue" param="charging"/>
+        </Transition>
+        <Transition id="114" from="Charge" to="Idle" priority="0" wait_finished="false">
+            <Condition kind="isFalse" param="charging"/>
+        </Transition>
+        <Transition id="115" from="*" to="Roar" priority="8" wait_finished="false">
+            <Condition kind="trigger" param="roar"/>
+        </Transition>
+        <Transition id="116" from="Roar" to="Idle" priority="1" wait_finished="false">
+            <Condition kind="finished"/>
+        </Transition>
+        <Transition id="117" from="*" to="Dead" priority="30" wait_finished="false">
+            <Condition kind="trigger" param="die"/>
+        </Transition>
+    </StateMachine>
+</AnimGraph>

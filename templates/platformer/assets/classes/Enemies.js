@@ -79,5 +79,6 @@ class Slime extends Humanoid {
         this.anim.offset = vec3(0, -0.4, 0);
         Level.spawn("Sparkle", this.position);
         this.lifetime = 0.5;                          // destroyed in 0.5 s
+        Sfx.play("enemy_die", this.position);
     }
 }

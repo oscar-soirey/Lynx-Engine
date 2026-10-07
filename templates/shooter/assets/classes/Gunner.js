@@ -27,6 +27,8 @@ class Gunner extends Actor {
     BeginPlay() {
         this.hp = this.max_hp;
         this.aim = { x: 0, y: 1 };
+        Sfx.listener = this;
+        Sfx.music("music_arena", 0.35);
         this.cooldown = 0;
         this.dashLeft = 0;
         this.dashCooldown = 0;
@@ -64,6 +66,7 @@ class Gunner extends Actor {
             this.dashDir = { x: mx / ml, y: my / ml };
             this.dashLeft = 0.15;
             this.dashCooldown = 0.8;
+            Sfx.play("dash", null, { volume: 0.6 });
         }
 
         if (this.dashLeft > 0)
@@ -85,6 +88,7 @@ class Gunner extends Actor {
         const muzzle = vec3(this.position.x + dir.x * 2, this.position.y + 0.6 + dir.y * 2, 1);
         const bullet = Level.spawn("Bullet", muzzle);
         bullet.Fire(dir, this.bullet_speed, this.bullet_damage, this);
+        Sfx.play("shoot", null, { volume: 0.35, gap: 60 });
     }
 
     Update(dt) {
@@ -105,10 +109,13 @@ class Gunner extends Actor {
         this.hp -= amount;
         this.flash = 0.25;
         if (this.hp <= 0) {
+        Sfx.play("hurt", null, { volume: 0.6 });
             this.hp = 0;
             this.dead = true;
             this.anim.visible = false;
             Level.spawn("Explosion", this.position);
+            Sfx.play("death");
+            Sfx.play("explosion");
             for (const d of Level.findImplementing("ArenaEvents"))
                 d.send("ArenaEvents", "OnPlayerDied", this);
         }
@@ -117,6 +124,7 @@ class Gunner extends Actor {
 
     Heal(amount) {
         this.hp = Math.min(this.max_hp, this.hp + amount);
+        Sfx.play("heal");
         this.RefreshHud();
     }
 

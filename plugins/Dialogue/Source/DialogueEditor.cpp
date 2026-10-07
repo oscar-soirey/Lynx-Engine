@@ -102,8 +102,16 @@ namespace
 		bool dirty = false;
 		bool place_nodes = true;              // positions -> imnodes (load, undo)
 		std::string selected;                 // node id
-		std::string pending_new;              // node placed at the mouse next frame
-		ImVec2 pending_pos{ 0.f, 0.f };
+		ImVec2 add_grid_pos{ 0.f, 0.f };      // where the "add a node" menu puts the node
+		float side_width = 340.f;             // properties panel (splitter)
+		ImVec2 add_grid_pos_center{ 0.f, 0.f };  // center of the view (toolbar buttons)
+
+		// Undo / redo : snapshots of the asset (JSON), committed once an edit
+		// is finished (mouse released, no text field active).
+		std::vector<std::string> undo;
+		std::vector<std::string> redo;
+		std::string committed;
+		bool committed_valid = false;
 
 		int Handle(const std::string& id)
 		{
@@ -162,6 +170,63 @@ namespace
 		return true;
 	}
 
+	constexpr size_t kMaxUndo = 200;
+
+	// After the frame : an edit finished -> the previous state goes to undo.
+	void CommitUndo(Document& doc)
+	{
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsAnyItemActive())
+			return;
+		std::string now = dialogue::Serialize(doc.asset);
+		if (!doc.committed_valid)
+		{
+			doc.committed = std::move(now);
+			doc.committed_valid = true;
+			return;
+		}
+		if (now == doc.committed)
+			return;
+		doc.undo.push_back(std::move(doc.committed));
+		if (doc.undo.size() > kMaxUndo)
+			doc.undo.erase(doc.undo.begin());
+		doc.redo.clear();
+		doc.committed = std::move(now);
+	}
+
+	void RestoreSnapshot(Document& doc, const std::string& snapshot)
+	{
+		std::string error;
+		dialogue::Asset asset;
+		if (!dialogue::Parse(snapshot, asset, error))
+			return;
+		doc.asset = std::move(asset);
+		doc.committed = snapshot;
+		if (!doc.selected.empty() && !doc.asset.Find(doc.selected))
+			doc.selected.clear();
+		doc.place_nodes = true;
+		doc.dirty = true;
+	}
+
+	void Undo(Document& doc)
+	{
+		if (doc.undo.empty())
+			return;
+		std::string snapshot = std::move(doc.undo.back());
+		doc.undo.pop_back();
+		doc.redo.push_back(doc.committed);
+		RestoreSnapshot(doc, snapshot);
+	}
+
+	void Redo(Document& doc)
+	{
+		if (doc.redo.empty())
+			return;
+		std::string snapshot = std::move(doc.redo.back());
+		doc.redo.pop_back();
+		doc.undo.push_back(doc.committed);
+		RestoreSnapshot(doc, snapshot);
+	}
+
 	void DeleteNode(Document& doc, const std::string& id)
 	{
 		auto& nodes = doc.asset.nodes;
@@ -180,9 +245,11 @@ namespace
 		doc.dirty = true;
 	}
 
-	dialogue::Node& AddNode(Document& doc, const std::string& type)
+	dialogue::Node& AddNode(Document& doc, const std::string& type, ImVec2 grid_pos)
 	{
 		dialogue::Node n;
+		n.x = grid_pos.x;
+		n.y = grid_pos.y;
 		n.id = doc.asset.NewId();
 		n.type = type;
 		if (type == "line") n.text = "...";
@@ -193,6 +260,8 @@ namespace
 		doc.asset.nodes.push_back(n);
 		if (doc.asset.start.empty())
 			doc.asset.start = n.id;
+		doc.selected = n.id;
+		doc.place_nodes = true;      // its position -> imnodes next frame
 		doc.dirty = true;
 		return doc.asset.nodes.back();
 	}
@@ -204,8 +273,10 @@ namespace
 		{
 			ImGui::TextDisabled("Select a node.");
 			ImGui::Spacing();
-			ImGui::TextWrapped("Right click in the graph : add a node. Drag from a pin to another node to link "
-			                   "them. Del : delete the selection. {name} in a text : a Story variable. "
+			ImGui::TextWrapped("Add a node : the buttons above the graph, or right click / double click "
+			                   "in the graph. Drag from a pin to another node to link them. "
+			                   "Del : delete the selection. Ctrl+Z / Ctrl+Y : undo / redo. "
+			                   "{name} in a text : a Story variable. "
 			                   "Conditions are JavaScript (Story.get('coins') > 2).");
 			return;
 		}
@@ -224,7 +295,7 @@ namespace
 
 		if (n->type == "line" || n->type == "choice")
 		{
-			ImGui::TextUnformatted("Speaker (empty : the NPC)");
+			ImGui::TextWrapped("%s", "Speaker (empty : the NPC)");
 			changed |= InputString("##speaker", n->speaker);
 			ImGui::TextUnformatted("Text");
 			changed |= InputString("##text", n->text, true, 110.f);
@@ -233,7 +304,7 @@ namespace
 		if (n->type == "choice")
 		{
 			ImGui::Separator();
-			ImGui::TextUnformatted("Choices (condition : JS, empty = always)");
+			ImGui::TextWrapped("%s", "Choices (condition : JS, empty = always)");
 			for (size_t i = 0; i < n->choices.size(); ++i)
 			{
 				ImGui::PushID(static_cast<int>(i));
@@ -261,7 +332,7 @@ namespace
 
 		if (n->type == "branch")
 		{
-			ImGui::TextUnformatted("Condition (JS) : top pin = true, bottom = false");
+			ImGui::TextWrapped("%s", "Condition (JS) : top pin = true, bottom = false");
 			changed |= InputString("##cond", n->condition, true, 60.f);
 		}
 
@@ -278,16 +349,16 @@ namespace
 			}
 			if (n->op != "toggle")
 			{
-				ImGui::TextUnformatted("Value (JSON : 3, true, \"text\")");
+				ImGui::TextWrapped("%s", "Value (JSON : 3, true, \"text\")");
 				changed |= InputString("##value", n->value_json);
 			}
 		}
 
 		if (n->type == "event")
 		{
-			ImGui::TextUnformatted("Event (DialogueEvents.OnDialogueEvent)");
+			ImGui::TextWrapped("%s", "Event (DialogueEvents.OnDialogueEvent)");
 			changed |= InputString("##event", n->event);
-			ImGui::TextUnformatted("JavaScript (optional)");
+			ImGui::TextWrapped("%s", "JavaScript (optional)");
 			changed |= InputString("##script", n->script, true, 90.f);
 		}
 
@@ -324,9 +395,36 @@ namespace
 			doc.dirty = true;
 	}
 
+	constexpr float kNodeWidth = 230.f;   // node content : wrapped at this width
+
+	// Screen position -> grid position of the node editor.
+	ImVec2 ScreenToGrid(const ImVec2& canvas_origin, const ImVec2& screen)
+	{
+		const ImVec2 panning = ImNodes::EditorContextGetPanning();
+		return ImVec2(screen.x - canvas_origin.x - panning.x, screen.y - canvas_origin.y - panning.y);
+	}
+
+	void DrawAddNodeMenu(Document& doc)
+	{
+		ImGui::TextDisabled("Add a node");
+		ImGui::Separator();
+		for (const std::string& type : dialogue::NodeTypes())
+		{
+			const ImU32 color = TypeColor(type);
+			const ImVec2 p = ImGui::GetCursorScreenPos();
+			const float h = ImGui::GetTextLineHeight();
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + 2.f), ImVec2(p.x + 6.f, p.y + h - 2.f), color, 2.f);
+			ImGui::SetCursorScreenPos(ImVec2(p.x + 12.f, p.y));
+			if (ImGui::MenuItem(type.c_str()))
+				AddNode(doc, type, doc.add_grid_pos);
+		}
+	}
+
 	void DrawGraph(Document& doc)
 	{
 		ImNodes::EditorContextSet(doc.nodes);
+		const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
+		const ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 		ImNodes::BeginNodeEditor();
 
 		for (dialogue::Node& n : doc.asset.nodes)
@@ -339,25 +437,32 @@ namespace
 			ImNodes::PushColorStyle(ImNodesCol_TitleBarSelected, TypeColor(n.type));
 			ImNodes::BeginNode(h);
 
+			// Every text of the node is wrapped at kNodeWidth : nothing goes
+			// out of the node (long lines, long variable names...).
+			const float wrap = ImGui::GetCursorPosX() + kNodeWidth;
+			ImGui::PushTextWrapPos(wrap);
+
 			ImNodes::BeginNodeTitleBar();
-			ImGui::Text("%s%s  %s", start ? "> " : "", n.type.c_str(), n.id.c_str());
+			ImGui::TextUnformatted((std::string(start ? "> " : "") + n.type + "  " + Shorten(n.id, 24)).c_str());
+			ImGui::Dummy(ImVec2(kNodeWidth, 0.f));   // same width for every node
 			ImNodes::EndNodeTitleBar();
 
 			ImNodes::BeginInputAttribute(InputPin(h));
 			if (n.type == "line" || n.type == "choice")
 			{
 				if (!n.speaker.empty())
-					ImGui::TextColored(ImVec4(1.f, 0.82f, 0.35f, 1.f), "%s", n.speaker.c_str());
-				ImGui::TextUnformatted(Shorten(n.text, 36).c_str());
+					ImGui::TextColored(ImVec4(1.f, 0.82f, 0.35f, 1.f), "%s", Shorten(n.speaker, 40).c_str());
+				ImGui::TextWrapped("%s", Shorten(n.text, 140).c_str());
 			}
 			else if (n.type == "branch")
-				ImGui::Text("if %s", Shorten(n.condition, 30).c_str());
+				ImGui::TextWrapped("if %s", Shorten(n.condition, 100).c_str());
 			else if (n.type == "set")
-				ImGui::Text("%s %s %s", n.variable.c_str(), n.op.c_str(), n.op == "toggle" ? "" : Shorten(n.value_json, 16).c_str());
+				ImGui::TextWrapped("%s %s %s", Shorten(n.variable, 40).c_str(), n.op.c_str(),
+				                   n.op == "toggle" ? "" : Shorten(n.value_json, 40).c_str());
 			else if (n.type == "event")
-				ImGui::Text("%s", n.event.c_str());
+				ImGui::TextWrapped("%s", Shorten(n.event, 60).c_str());
 			else if (n.type == "quest")
-				ImGui::Text("%s %s", n.action.c_str(), n.quest.c_str());
+				ImGui::TextWrapped("%s %s", n.action.c_str(), Shorten(n.quest, 50).c_str());
 			else
 				ImGui::TextUnformatted("end");
 			ImNodes::EndInputAttribute();
@@ -367,13 +472,14 @@ namespace
 			{
 				ImNodes::BeginOutputAttribute(OutputPin(h, slot));
 				if (n.type == "choice")
-					ImGui::Text("%d. %s", slot + 1, Shorten(n.choices[slot].text, 24).c_str());
+					ImGui::TextWrapped("%d. %s", slot + 1, Shorten(n.choices[slot].text, 60).c_str());
 				else if (n.type == "branch")
 					ImGui::TextUnformatted(slot == 0 ? "true" : "false");
 				else
 					ImGui::TextUnformatted("next");
 				ImNodes::EndOutputAttribute();
 			}
+			ImGui::PopTextWrapPos();
 
 			ImNodes::EndNode();
 			ImNodes::PopColorStyle();
@@ -382,12 +488,8 @@ namespace
 
 			if (doc.place_nodes)
 				ImNodes::SetNodeGridSpacePos(h, ImVec2(n.x, n.y));
-			if (doc.pending_new == n.id)
-			{
-				ImNodes::SetNodeScreenSpacePos(h, doc.pending_pos);
-				doc.pending_new.clear();
-			}
 		}
+		const bool placed_this_frame = doc.place_nodes;
 		doc.place_nodes = false;
 
 		// Links
@@ -405,9 +507,12 @@ namespace
 		ImNodes::MiniMap(0.15f, ImNodesMiniMapLocation_BottomRight);
 		ImNodes::EndNodeEditor();
 
-		// Positions back into the asset.
+		// Positions back into the asset (not the frame they were set : imnodes
+		// applies them while drawing).
 		for (dialogue::Node& n : doc.asset.nodes)
 		{
+			if (placed_this_frame)
+				break;
 			const ImVec2 p = ImNodes::GetNodeGridSpacePos(doc.Handle(n.id));
 			if (p.x != n.x || p.y != n.y)
 			{
@@ -482,24 +587,34 @@ namespace
 			}
 		}
 
-		// Right click : add a node
-		if (ImNodes::IsEditorHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+		// Right click (no drag) / double click on the empty graph : add a node
+		// at the mouse. The rectangle of the canvas is tested directly
+		// (imnodes' hover state misses the clicks of some frames).
+		const ImVec2 mouse = ImGui::GetMousePos();
+		const bool in_canvas = mouse.x >= canvas_origin.x && mouse.y >= canvas_origin.y &&
+		                       mouse.x < canvas_origin.x + canvas_size.x && mouse.y < canvas_origin.y + canvas_size.y &&
+		                       ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+		int hovered_node = 0, hovered_link = 0, hovered_pin = 0;
+		const bool on_item = ImNodes::IsNodeHovered(&hovered_node) || ImNodes::IsLinkHovered(&hovered_link) ||
+		                     ImNodes::IsPinHovered(&hovered_pin);
+		const bool right_click = ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+		                         ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 36.f;
+		const bool double_click = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !on_item;
+		if (in_canvas && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) && (right_click || double_click))
 		{
-			doc.pending_pos = ImGui::GetMousePos();
+			doc.add_grid_pos = ScreenToGrid(canvas_origin, mouse);
 			ImGui::OpenPopup("##addnode");
 		}
 		if (ImGui::BeginPopup("##addnode"))
 		{
-			ImGui::TextDisabled("Add a node");
-			for (const std::string& type : dialogue::NodeTypes())
-				if (ImGui::MenuItem(type.c_str()))
-				{
-					dialogue::Node& n = AddNode(doc, type);
-					doc.pending_new = n.id;
-					doc.selected = n.id;
-				}
+			DrawAddNodeMenu(doc);
 			ImGui::EndPopup();
 		}
+
+		// Center of the view : where the toolbar buttons add the nodes.
+		const ImVec2 center = ScreenToGrid(canvas_origin,
+			ImVec2(canvas_origin.x + canvas_size.x * 0.5f - kNodeWidth * 0.5f, canvas_origin.y + canvas_size.y * 0.4f));
+		doc.add_grid_pos_center = center;
 	}
 
 	void DrawDocument(bool* open, void* user)
@@ -521,9 +636,12 @@ namespace
 			return;
 		}
 
-		if (ImGui::Button("Save") ||
-		    (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::GetIO().KeyCtrl &&
-		     ImGui::IsKeyPressed(ImGuiKey_S)))
+		const ImGuiIO& io = ImGui::GetIO();
+		const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+		// Shortcuts (a text field being edited keeps its own Ctrl+Z).
+		const bool shortcuts = focused && !io.WantTextInput;
+
+		if (ImGui::Button("Save") || (focused && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)))
 			Save(doc);
 		ImGui::SameLine();
 		if (ImGui::Button("Reload"))
@@ -532,19 +650,79 @@ namespace
 			dialogue::Parse(ReadFile(doc.path), doc.asset, error);
 			doc.place_nodes = true;
 			doc.dirty = false;
+			doc.undo.clear();
+			doc.redo.clear();
+			doc.committed_valid = false;
 		}
 		ImGui::SameLine();
-		ImGui::TextDisabled("%s", Utf8(doc.path.filename()).c_str());
+		ImGui::BeginDisabled(doc.undo.empty());
+		if (ImGui::Button("Undo"))
+			Undo(doc);
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Ctrl+Z  (%d)", static_cast<int>(doc.undo.size()));
+		ImGui::SameLine();
+		ImGui::BeginDisabled(doc.redo.empty());
+		if (ImGui::Button("Redo"))
+			Redo(doc);
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Ctrl+Y / Ctrl+Shift+Z");
 
-		const float side = 340.f;
-		ImGui::BeginChild("##graph", ImVec2(ImGui::GetContentRegionAvail().x - side, 0.f), true);
+		if (shortcuts && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, true))
+		{
+			if (io.KeyShift)
+				Redo(doc);
+			else
+				Undo(doc);
+		}
+		else if (shortcuts && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, true))
+			Redo(doc);
+
+		// Add a node : one button per type (center of the view).
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+		ImGui::TextDisabled("Add");
+		for (const std::string& type : dialogue::NodeTypes())
+		{
+			ImGui::SameLine();
+			const ImU32 color = TypeColor(type);
+			ImGui::PushStyleColor(ImGuiCol_Button, color);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (color & 0x00FFFFFFu) | 0xC0000000u);
+			ImGui::PushID(type.c_str());
+			if (ImGui::SmallButton(type.c_str()))
+				AddNode(doc, type, doc.add_grid_pos_center);
+			ImGui::PopID();
+			ImGui::PopStyleColor(2);
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("  %s", Utf8(doc.path.filename()).c_str());
+
+		// Graph | splitter | properties.
+		const float avail = ImGui::GetContentRegionAvail().x;
+		const float splitter = 6.f;
+		doc.side_width = std::clamp(doc.side_width, 220.f, std::max(220.f, avail - 240.f));
+		ImGui::BeginChild("##graph", ImVec2(avail - doc.side_width - splitter, 0.f), true);
 		DrawGraph(doc);
 		ImGui::EndChild();
 
-		ImGui::SameLine();
+		ImGui::SameLine(0.f, 0.f);
+		ImGui::InvisibleButton("##splitter", ImVec2(splitter, ImGui::GetContentRegionAvail().y));
+		if (ImGui::IsItemActive())
+			doc.side_width -= io.MouseDelta.x;
+		{
+			const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+			ImGui::GetWindowDrawList()->AddLine(ImVec2((a.x + b.x) * 0.5f, a.y + 4.f), ImVec2((a.x + b.x) * 0.5f, b.y - 4.f),
+				ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_SeparatorActive : ImGuiCol_Separator), 2.f);
+		}
+
+		ImGui::SameLine(0.f, 0.f);
 		ImGui::BeginChild("##props", ImVec2(0.f, 0.f), true);
 		DrawProperties(doc);
 		ImGui::EndChild();
+
+		CommitUndo(doc);
 
 		ImGui::End();
 	}

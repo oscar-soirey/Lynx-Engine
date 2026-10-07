@@ -2,6 +2,8 @@
 
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
+#include <cmath>
+#include <fstream>
 
 #include <algorithm>
 #include <cstdio>
@@ -105,21 +107,89 @@ namespace lynx::editor::property_widgets
 	}
 
 
+	namespace
+	{
+		// Width of the name column (0..1 of the table), shared by every
+		// Details-like table and remembered (editor_details.txt).
+		float g_name_ratio = 0.34f;
+		bool g_name_ratio_loaded = false;
+		const char* const kDetailsFile = "editor_details.txt";
+
+		void LoadNameRatio()
+		{
+			g_name_ratio_loaded = true;
+			std::ifstream in(kDetailsFile);
+			float ratio = 0.f;
+			if (in >> ratio && ratio >= 0.1f && ratio <= 0.9f)
+				g_name_ratio = ratio;
+		}
+
+		void SaveNameRatio()
+		{
+			std::ofstream out(kDetailsFile, std::ios::trunc);
+			if (out)
+				out << g_name_ratio << "\n";
+		}
+	}
+
 	bool BeginTable(const char* id)
 	{
+		if (!g_name_ratio_loaded)
+			LoadNameRatio();
+
+		// Resizable : drag the line between the names and the values.
 		const ImGuiTableFlags flags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings |
-		                              ImGuiTableFlags_PadOuterX;
-		if (!ImGui::BeginTable(id, 2, flags))
+		                              ImGuiTableFlags_PadOuterX | ImGuiTableFlags_Resizable |
+		                              ImGuiTableFlags_BordersInnerV;
+		ImVec4 border = ImGui::GetStyleColorVec4(ImGuiCol_Separator);
+		border.w *= 0.45f;
+		ImGui::PushStyleColor(ImGuiCol_TableBorderLight, border);
+		const bool open = ImGui::BeginTable(id, 2, flags);
+		ImGui::PopStyleColor();
+		if (!open)
 			return false;
-		// Names : about a third of the width, like Unreal's Details panel.
-		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.34f);
-		ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.66f);
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, g_name_ratio);
+		ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.f - g_name_ratio);
+
+		// Every table follows the shared ratio, except the one being resized.
+		if (ImGuiTable* table = ImGui::GetCurrentTable())
+		{
+			if (table->ResizedColumn == -1 && table->LastResizedColumn == -1)
+			{
+				table->Columns[0].StretchWeight = g_name_ratio;
+				table->Columns[1].StretchWeight = 1.f - g_name_ratio;
+			}
+		}
 		return true;
 	}
 
 
 	void EndTable()
 	{
+		if (ImGuiTable* table = ImGui::GetCurrentTable())
+		{
+			if (table->ResizedColumn != -1 || table->LastResizedColumn != -1)
+			{
+				const float a = table->Columns[0].StretchWeight;
+				const float b = table->Columns[1].StretchWeight;
+				if (a > 0.f && b > 0.f)
+				{
+					const float ratio = std::clamp(a / (a + b), 0.1f, 0.9f);
+					if (std::fabs(ratio - g_name_ratio) > 1e-4f)
+					{
+						g_name_ratio = ratio;
+						if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+							SaveNameRatio();
+					}
+				}
+			}
+			// Drag finished : saved once.
+			static bool was_resizing = false;
+			const bool resizing = table->ResizedColumn != -1;
+			if (was_resizing && !resizing)
+				SaveNameRatio();
+			was_resizing = resizing;
+		}
 		ImGui::EndTable();
 	}
 
@@ -158,8 +228,6 @@ namespace lynx::editor::property_widgets
 			const ImVec2 tag_min = ImGui::GetCursorScreenPos();
 			ImGui::InvisibleButton("##tag", ImVec2(tag_width, height));
 			const bool tag_active = ImGui::IsItemActive();
-			if (ImGui::IsItemHovered() || tag_active)
-				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
 			if (tag_active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.f))
 			{
 				const float delta = ImGui::GetIO().MouseDelta.x;

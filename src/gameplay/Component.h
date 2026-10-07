@@ -65,6 +65,13 @@ namespace lynx
 		virtual void BeginPlay() {}
 		virtual void Update(float dt) {}
 		virtual void Tick(float dt) {}
+		/**
+		 * Chaque frame, apres tout le gameplay (input, Tick des acteurs et des
+		 * composants, physique voxel). C'est ici qu'on recopie les positions
+		 * finales vers le rendu (sprites, lumieres, camera) : sinon le rendu
+		 * a une frame de retard sur le jeu.
+		 */
+		virtual void LateUpdate(float dt) {}
 		virtual void EndPlay() {}
 
 	private:

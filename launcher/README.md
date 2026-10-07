@@ -30,6 +30,22 @@ Petit programme (ImGui + GLFW) qui prépare une machine Windows pour Lynx.
   demande que toutes les dépendances soient présentes.
 
   `curl.exe` et `tar.exe` sont fournis avec Windows 10 (1803+) et 11.
+- **Plugins** : plugins du moteur installés dans une version choisie
+  (`%LOCALAPPDATA%\Lynx\versions\<tag>\plugins\<Nom>\`, le dossier `<éditeur>/plugins` de l'éditeur).
+  - *En ligne* : catalogue `registry/plugins.json` du dépôt (voir `registry/README.md`), un dépôt GitHub
+    par plugin, releases taguées `v<plugin>-<Lynx>` (`v1.2.4-26.0.6`). Pour la version choisie, la carte
+    propose la plus haute version du plugin faite pour cette version de Lynx ou une plus ancienne :
+    *Installer*, *Mettre à jour* (version plus récente compatible), *Dossier*, *Retirer*, *Dépôt*.
+  - *Depuis l'ordinateur* : *Importer un dossier...* (dossier contenant `plugin.json`), ou glisser un
+    dossier / un `.zip` sur la fenêtre.
+  - Recherche (nom, auteur, description), filtre par catégorie, « Versions bêta » (pré-releases).
+  - Les plugins livrés avec le moteur (Dialogue, CineCamera...) sont marqués *Intégré* : ni remplacés
+    ni retirés.
+  - Le launcher écrit `.lynx-install.json` dans le dossier du plugin (source, dépôt, tag, version de Lynx
+    visée). L'éditeur le lit : un plugin fait pour une version plus ancienne demande une confirmation à
+    l'activation (Options > Plugins). Sans ce fichier, `"engine_min"` du `plugin.json` est utilisé.
+  - L'API GitHub sans compte est limitée à 60 requêtes / heure (une par plugin du catalogue à chaque
+    *Actualiser*).
 
 Un journal en bas de la fenêtre affiche la sortie des commandes.
 
@@ -53,6 +69,7 @@ Launcher.*        interface et tâches en arrière-plan (un thread à la fois)
 Dependencies.*    liste des dépendances, détection, installation winget
 Models.*          catalogue de modèles, ollama list / pull / rm / serve
 Engine.*          releases GitHub, téléchargement, extraction, lancement
+PluginStore.*     catalogue des plugins, tags, installation / import / retrait
 Process.*         lancement de commandes avec lecture de la sortie, PATH
 ```
 

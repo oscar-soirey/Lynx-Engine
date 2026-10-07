@@ -3,7 +3,7 @@
 // =============================================================================
 // Editor icons
 // -----------------------------------------------------------------------------
-// 33 pixel-art icons (16x16) in one atlas embedded in the editor
+// 39 pixel-art icons (16x16) in one atlas embedded in the editor
 // (resources/editor_icons.png -> editor_icons_png.inl). An editor_icons.png
 // next to the editor executable is used instead when present (same layout :
 // 8 icons per row, in the order of Icon).
@@ -52,6 +52,12 @@ namespace lynx::editor::icons
 		Clear,
 		Copy,
 		Profiler,
+		Redo,
+		Shake,
+		World,
+		Plugin,
+		Dialogue,
+		Eye,
 		Count
 	};
 

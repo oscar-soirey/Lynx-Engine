@@ -43,6 +43,8 @@ class Miner extends Humanoid {
         this.tool = 0;
         this.material = 0;
         this.inventory = { Dirt: 20, Wood: 20, Brick: 10 };
+        Sfx.listener = this;
+        Sfx.music("ambience_cave", 0.5);
         this.cooldown = 0;
         this.aim = { x: 1, y: 0 };
         this.state = "";
@@ -66,7 +68,7 @@ class Miner extends Humanoid {
 
     ProcessInput(player) {
         this.Move(Input.axis("move_x"));
-        if (Input.pressed("jump")) this.Jump();
+        if (Input.pressed("jump")) { if (this.IsGrounded()) Sfx.play("jump", null, { volume: 0.5 }); this.Jump(); }
         if (Input.released("jump")) this.StopJumping();
 
         const ax = Input.axis("aim_x"), ay = Input.axis("aim_y");
@@ -93,6 +95,7 @@ class Miner extends Humanoid {
     SetTool(i) {
         this.tool = i;
         this.RefreshHud();
+        Sfx.play("click", null, { volume: 0.4 });
     }
 
     Eye() {
@@ -115,6 +118,7 @@ class Miner extends Humanoid {
             const r = Voxels.destroyCircle(center, this.dig_radius, { ignoreTypes: ["Lava", "Acid"] });
             this.Collect(r);
             break;
+            Sfx.play(r.count > 0 ? "dig" : "clink", null, { volume: 0.5, gap: 90 });
         }
         case 1: { // builder : the selected material, if there is some left
             this.cooldown = 0.08;
@@ -127,6 +131,7 @@ class Miner extends Humanoid {
                 return;                                   // not inside the miner
             const r = Voxels.fillCircle(at, 1.3, name);
             this.inventory[name] = Math.max(0, (this.inventory[name] || 0) - r.count);
+            if (r.count > 0) Sfx.play("place_block", null, { volume: 0.5, gap: 90 });
             this.RefreshHud();
             break;
         }
@@ -135,6 +140,7 @@ class Miner extends Humanoid {
             const bomb = Level.spawn("Bomb", vec3(eye.x + this.aim.x * 1.5, eye.y + this.aim.y * 1.5, 0));
             const v = this.GetVelocity();
             bomb.Throw(this.aim.x * 26 + v.x * 0.5, this.aim.y * 26 + 8, this);
+            Sfx.play("throw");
             break;
         }
         case 3: { // laser : a ray that cuts a thin line through everything but bedrock
@@ -144,6 +150,7 @@ class Miner extends Humanoid {
                 return;
             const r = Voxels.destroyLine(eye, hit.point, 1.4, { ignoreTypes: ["Water", "Oil"] });
             this.Collect(r, 0.5);
+            Sfx.play("laser", null, { volume: 0.35, gap: 140 });
             if (hit.actor && hit.actor.implements("Damageable"))
                 hit.actor.send("Damageable", "TakeDamage", 4, this);
             Level.spawn("Spark", vec3(hit.point.x, hit.point.y, 0));
@@ -170,6 +177,7 @@ class Miner extends Humanoid {
         if (!this.won && (this.inventory.Gold || 0) >= this.gold_goal) {
             this.won = true;
             this.ShowMessage("Riche ! " + this.inventory.Gold + " pépites d'or", 4);
+            Sfx.play("win");
         }
     }
 
@@ -207,7 +215,9 @@ class Miner extends Humanoid {
     TakeDamage(amount, instigator) {
         this.hp -= amount;
         if (this.hp <= 0) {
+        Sfx.play("hurt", null, { volume: 0.6, gap: 400 });
             this.ShowMessage("Perdu ! Retour au départ", 2.5);
+            Sfx.play("death");
             this.Respawn();
         }
         this.RefreshHud();

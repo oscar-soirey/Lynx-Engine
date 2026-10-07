@@ -1,0 +1,9 @@
+{
+  "name": "PixelSprite",
+  "version": "1.0",
+  "description": "Pixel art sprites made in the editor (.lsprite : palette + frames, never an image file). Usable everywhere a texture is (sprites, animations, widgets, voxel types). PixelSpriteActor, JS PixelSprite.",
+  "author": "Lynx",
+  "category": "Graphics",
+  "runtime": "bin/PixelSprite.dll",
+  "editor": "bin/PixelSprite.Editor.dll"
+}

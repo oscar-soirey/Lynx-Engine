@@ -73,6 +73,7 @@ class SupplyCrate extends Actor {
             return;
         this.opened = true;
         this.sprite.texture = "sprites/chest_open.png";
+        Sfx.play("chest");
         other.inventory.Stone = (other.inventory.Stone || 0) + 30;
         other.inventory.Sand = (other.inventory.Sand || 0) + 30;
         other.inventory.Water = (other.inventory.Water || 0) + 30;

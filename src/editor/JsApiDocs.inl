@@ -84,6 +84,7 @@ static const ApiEntry kApiEntries[] = {
 	{ "Engine", "setTimeDilation", "setTimeDilation(value, duration?)", "Changes the speed of the game time (for `duration` seconds).", "", true },
 	{ "Engine", "isPlaying", "isPlaying()", "The game is running (not only the editor).", "", true },
 	{ "Engine", "isSimulating", "isSimulating()", "Simulate mode of the editor : the game runs, nobody is possessed, the editor camera stays.", "", true },
+	{ "Engine", "cameraShake", "cameraShake()", "Shakes the cameras whose useCameraShake is on, with the settings of Windows > Camera Shake (assets/camera_shake.json).", "", true },
 	{ "Engine", "createPlayer", "createPlayer()", "Adds a player (split screen). Destroyed at the end of the game if created during it.", "PlayerController", true },
 	{ "Engine", "destroyPlayer", "destroyPlayer(player)", "Removes a player.", "", true },
 	{ "Engine", "getPlayer", "getPlayer(index)", "The player with this index.", "PlayerController", true },

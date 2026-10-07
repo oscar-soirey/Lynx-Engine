@@ -7,11 +7,15 @@
 
 #include "../core/Engine.h"
 #include "../core/RessourceManager.h"
+#include "../core/Filesystem.h"
 #include "../gameplay/PlayerController.h"
 #include "../scripting/Private/ScriptSystem.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <unordered_map>
 
 namespace lynx
@@ -33,6 +37,58 @@ namespace lynx
 		int g_render_h = 0;
 
 		HRL_id g_white_texture = HRL_INVALID_ID;
+		HRL_id g_default_font = HRL_INVALID_ID;
+		bool g_default_font_searched = false;
+
+		HRL_id LoadFontFile(const std::filesystem::path& path)
+		{
+			std::error_code ec;
+			if (!std::filesystem::is_regular_file(path, ec))
+				return HRL_INVALID_ID;
+
+			std::ifstream in(path, std::ios::binary);
+			std::vector<char> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			if (data.empty())
+				return HRL_INVALID_ID;
+			return HRL_CreateFont(data.data(), data.size());
+		}
+
+		// Font of the texts without a font : the editor font (the Widget Editor
+		// preview draws with it), so the game looks like the preview.
+		// fonts/ next to the executable (editor, or shipped game : ShipGame
+		// copies it there), then a Windows font.
+		HRL_id DefaultFont()
+		{
+			if (g_default_font != HRL_INVALID_ID && HRL_IsValidFont(g_default_font))
+				return g_default_font;
+			if (g_default_font_searched && g_default_font == HRL_INVALID_ID)
+				return HRL_INVALID_ID;
+
+			g_default_font_searched = true;
+			g_default_font = HRL_INVALID_ID;
+
+			const std::filesystem::path exe(fs::GetExecutableFolder());
+			std::vector<std::filesystem::path> candidates = {
+				exe / "fonts" / "VCR-OSD-MONO.ttf",
+				exe / "fonts" / "normal-font.ttf",
+				std::filesystem::path("fonts") / "VCR-OSD-MONO.ttf",
+			};
+#ifdef _WIN32
+			const std::filesystem::path system_fonts("C:/Windows/Fonts");
+			candidates.push_back(system_fonts / "consola.ttf");
+			candidates.push_back(system_fonts / "segoeui.ttf");
+			candidates.push_back(system_fonts / "arial.ttf");
+#endif
+			for (const std::filesystem::path& path : candidates)
+			{
+				const HRL_id font = LoadFontFile(path);
+				if (font != HRL_INVALID_ID)
+					return g_default_font = font;
+			}
+
+			std::cerr << "[Widgets] no default font (fonts/VCR-OSD-MONO.ttf) : texts without a font are not drawn\n";
+			return HRL_INVALID_ID;
+		}
 
 		// 1 x 1 white PNG : texture of the plain colors (Image / Border / Button).
 		const unsigned char kWhitePng[] = {
@@ -136,7 +192,14 @@ namespace lynx
 
 		HRL_id Font(const std::string& path)
 		{
-			return path.empty() ? HRL_INVALID_ID : RessourceFont(path.c_str());
+			if (!path.empty())
+			{
+				const uint32_t font = RessourceFont(path.c_str());
+				if (font != HRL_INVALID_ID)
+					return font;
+			}
+			// No font (or not found) : the default one, never "no text at all".
+			return DefaultFont();
 		}
 
 		void PushEvent(uint64_t serial, int event, float value)
@@ -434,6 +497,8 @@ namespace lynx
 
 		g_events.clear();
 		g_white_texture = HRL_INVALID_ID;     // freed by HRL_Shutdown
+		g_default_font = HRL_INVALID_ID;      // idem
+		g_default_font_searched = false;
 	}
 
 	std::vector<std::unique_ptr<UserWidget>>& WidgetSystem::Owned()

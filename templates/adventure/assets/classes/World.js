@@ -46,6 +46,8 @@ class Chest extends Actor {
     Interact(instigator) {
         this.opened = true;
         this.sprite.texture = "sprites/chest_open.png";
+        Sfx.play("chest");
+        Sfx.play("pickup", null, { volume: 0.6 });
         Story.set("has_key", true);
         if (Quest.state("lost_key") === "active")
             Quest.objective("lost_key", "find_key");
@@ -100,6 +102,7 @@ class Gate extends Actor {
         this.time = 0;
         this.row = 0;
         Cine.cutTo("cam_ruins", 1.2);
+        Sfx.play("door");
     }
 
     Update(dt) {
@@ -113,6 +116,7 @@ class Gate extends Actor {
             const r = Voxels.destroyRect(vec3(x, this.position.y, 0), { x: 1, y: this.height }, { types: ["Gate"] });
             for (const cell of r.cells)
                 Level.spawn("Dust", vec3(cell.world.x, cell.world.y, 1));
+            Sfx.play("rock_fall", null, { volume: 0.5 });
             this.row++;
         }
         if (this.time > 1.3 + columns * 0.15 + 1.2) {
@@ -166,6 +170,7 @@ class RuinsRelic extends Actor {
         this.done = true;
         Quest.objective("relic", "touch_relic");
         Quest.complete("relic");
+        Sfx.play("powerup");
         // Crystals grow in the four corners of the ruins (they light the room).
         for (const [dx, dy] of [[-12, -9], [12, -9], [-12, 9], [12, 9]])
             Voxels.fillCircle(vec3(this.position.x + dx, this.position.y + dy, 0), 1.8, "Crystal", { replace: true, types: ["Tiles"] });

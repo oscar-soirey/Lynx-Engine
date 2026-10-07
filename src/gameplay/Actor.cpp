@@ -30,6 +30,7 @@ namespace lynx
 		static void BeginPlay(Component& c) { c.BeginPlay(); }
 		static void Update(Component& c, float dt) { c.Update(dt); }
 		static void Tick(Component& c, float dt) { c.Tick(dt); }
+		static void LateUpdate(Component& c, float dt) { c.LateUpdate(dt); }
 		static void EndPlay(Component& c) { c.EndPlay(); }
 	};
 
@@ -344,6 +345,16 @@ namespace lynx
 			{
 				if (!ComponentAccess::PendingDestroy(*c))
 					ComponentAccess::Update(*c, dt);
+			}
+		}
+
+		void LateUpdate(float dt)
+		{
+			IterationGuard guard;
+			for (Component* c : CollectAllComponents())
+			{
+				if (!ComponentAccess::PendingDestroy(*c))
+					ComponentAccess::LateUpdate(*c, dt);
 			}
 		}
 

@@ -7,6 +7,8 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 	#include <windows.h>
@@ -110,6 +112,12 @@ int main(int, char**)
 
 	{
 		Launcher launcher;
+		// Glisser un dossier de plugin (ou un .zip) sur la fenêtre : import dans l'onglet Plugins
+		glfwSetWindowUserPointer(window, &launcher);
+		glfwSetDropCallback(window, [](GLFWwindow* w, int count, const char** paths) {
+			std::vector<std::string> list(paths, paths + count);
+			static_cast<Launcher*>(glfwGetWindowUserPointer(w))->OnDrop(list);
+		});
 		while (!glfwWindowShouldClose(window))
 		{
 			// Pas besoin de 60 i/s quand rien ne bouge, mais le journal et les
@@ -129,6 +137,7 @@ int main(int, char**)
 		}
 	}
 
+	glfwSetDropCallback(window, nullptr);
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();

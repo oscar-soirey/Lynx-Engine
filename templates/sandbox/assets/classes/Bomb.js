@@ -53,6 +53,7 @@ class Bomb extends Actor {
     Explode() {
         const center = vec3(this.position.x, this.position.y, 0);
 
+        Sfx.play("explosion", center, { volume: 1.0 });
         // The world : everything destructible in the radius.
         const r = Voxels.destroyCircle(center, this.radius);
         for (let i = 0; i < r.cells.length; i += 25)

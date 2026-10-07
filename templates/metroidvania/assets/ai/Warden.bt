@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Warden : asleep until the player enters the arena. Each round ChooseAttack picks an attack (0 Slam, 1 Charge, 2 RockFall, 3 Burrow - phase 2 only, 4 Stalk) ; at half health it enrages (phase 2 : faster, digs). -->
+<BehaviorTree version="1">
+    <Blackboard>
+        <Key name="target" type="actor"/>
+        <Key name="distance" type="float" default="999"/>
+        <Key name="attack" type="int" default="0"/>
+        <Key name="phase" type="int" default="1"/>
+    </Blackboard>
+    <Node id="1" parent="0" type="Root" x="0" y="0"/>
+    <Node id="2" parent="1" type="Selector" x="0" y="140">
+        <Service id="101" type="FindNearest" tag="player" radius="160" result="target" interval="0.3"/>
+        <Service id="102" type="DistanceTo" target="target" result="distance" interval="0.15"/>
+    </Node>
+    <Node id="3" parent="2" type="Sequence" x="-700" y="300">
+        <Decorator id="103" type="CallFunction" function="IsAsleep"/>
+    </Node>
+    <Node id="4" parent="3" type="Wait" x="-700" y="460" time="0.3"/>
+    <Node id="5" parent="2" type="Sequence" x="-380" y="300">
+        <Decorator id="104" type="CallFunction" function="ShouldEnrage" abort="lowerPriority"/>
+    </Node>
+    <Node id="6" parent="5" type="CallFunction" x="-380" y="460" function="Enrage"/>
+    <Node id="7" parent="2" type="Sequence" x="0" y="300">
+        <Decorator id="105" type="Blackboard" key="target" op="isSet"/>
+    </Node>
+    <Node id="8" parent="7" type="CallFunction" x="-220" y="460" function="ChooseAttack"/>
+    <Node id="9" parent="7" type="Selector" x="0" y="600"/>
+    <Node id="10" parent="9" type="Sequence" x="-520" y="760">
+        <Decorator id="106" type="Blackboard" key="attack" op="==" value="0"/>
+    </Node>
+    <Node id="11" parent="10" type="CallFunction" x="-520" y="900" function="Slam"/>
+    <Node id="12" parent="9" type="Sequence" x="-260" y="760">
+        <Decorator id="107" type="Blackboard" key="attack" op="==" value="1"/>
+    </Node>
+    <Node id="13" parent="12" type="CallFunction" x="-260" y="900" function="Charge"/>
+    <Node id="14" parent="9" type="Sequence" x="0" y="760">
+        <Decorator id="108" type="Blackboard" key="attack" op="==" value="2"/>
+    </Node>
+    <Node id="15" parent="14" type="CallFunction" x="0" y="900" function="RockFall"/>
+    <Node id="16" parent="9" type="Sequence" x="260" y="760">
+        <Decorator id="109" type="Blackboard" key="attack" op="==" value="3"/>
+    </Node>
+    <Node id="17" parent="16" type="CallFunction" x="260" y="900" function="Burrow"/>
+    <Node id="18" parent="9" type="Sequence" x="520" y="760">
+        <Decorator id="110" type="Blackboard" key="attack" op="==" value="4"/>
+    </Node>
+    <Node id="19" parent="18" type="CallFunction" x="520" y="900" function="Stalk"/>
+    <Node id="20" parent="7" type="CallFunction" x="260" y="460" function="Recover"/>
+    <Node id="21" parent="2" type="Wait" x="380" y="300" time="0.5"/>
+</BehaviorTree>

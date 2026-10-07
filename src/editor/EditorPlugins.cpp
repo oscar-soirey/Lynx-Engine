@@ -1,7 +1,10 @@
 #include "EditorPlugins.h"
 
+#include <imgui/imgui_internal.h>
+
 #include "EditorPluginAPI.h"
 #include "../core/Plugins.h"
+#include "../core/Engine.h"   // GetEngineVersion
 #include "../host/GameProject.h"
 
 #include <imgui.h>
@@ -85,6 +88,16 @@ namespace lynx::editor::plugins
 
 		// Plugins window
 		bool g_restart_needed = false;
+		// Plugin made for an older engine : asked before enabling it (popup).
+		std::string g_confirm_enable;
+		bool g_open_confirm = false;
+
+		// true : made for an older version than this editor.
+		bool MadeForOlderEngine(const lynx::plugins::PluginInfo& p)
+		{
+			return !p.engine_min.empty() &&
+			       lynx::plugins::CompareVersions(p.engine_min, lynx::GetEngineVersion()) < 0;
+		}
 		char g_new_name[64] = "MyPlugin";
 		std::string g_new_message;
 
@@ -432,14 +445,39 @@ namespace lynx::editor::plugins
 			g_ticks[i].tick(dt, g_ticks[i].user);
 	}
 
+	namespace
+	{
+		bool g_plugin_window_focused = false;
+	}
+
 	void DrawWindows()
 	{
+		bool focused = false;
+		ImGuiWindow* nav = ImGui::GetCurrentContext() ? ImGui::GetCurrentContext()->NavWindow : nullptr;
+		ImGuiWindow* nav_root = nav ? nav->RootWindow : nullptr;
+
 		for (size_t i = 0; i < g_windows.size(); ++i)
 		{
 			Window& w = g_windows[i];
-			if (w.open)
-				w.draw(&w.open, w.user);
+			if (!w.open)
+				continue;
+			w.draw(&w.open, w.user);
+
+			// Focused plugin window : the editor keeps its shortcuts
+			// (Ctrl+Z, Del...) away from it.
+			if (nav_root && !focused)
+			{
+				ImGuiWindow* window = ImGui::FindWindowByName(w.title.c_str());
+				if (window && (window == nav_root || window->RootWindow == nav_root || window == nav))
+					focused = true;
+			}
 		}
+		g_plugin_window_focused = focused;
+	}
+
+	bool HasFocus()
+	{
+		return g_plugin_window_focused;
 	}
 
 	void DrawWindowsMenuItems()
@@ -563,9 +601,17 @@ namespace lynx::editor::plugins
 				bool enabled = p.enabled;
 				if (ImGui::Checkbox("##on", &enabled))
 				{
-					lynx::plugins::SetEnabled(p.name, enabled);
-					lynx::plugins::SaveSettings();
-					g_restart_needed = true;
+					if (enabled && MadeForOlderEngine(p))
+					{
+						g_confirm_enable = p.name;   // asked below, outside the table
+						g_open_confirm = true;
+					}
+					else
+					{
+						lynx::plugins::SetEnabled(p.name, enabled);
+						lynx::plugins::SaveSettings();
+						g_restart_needed = true;
+					}
 				}
 
 				ImGui::TableNextColumn();
@@ -582,6 +628,9 @@ namespace lynx::editor::plugins
 				ImGui::TextWrapped("%s", p.description.c_str());
 				if (!p.author.empty())
 					ImGui::TextDisabled("by %s", p.author.c_str());
+				if (MadeForOlderEngine(p))
+					ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f), "Made for Lynx %s (this editor : %s)",
+					                   p.engine_min.c_str(), lynx::GetEngineVersion().c_str());
 
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(p.engine_plugin ? "Engine" : "Project");
@@ -610,6 +659,41 @@ namespace lynx::editor::plugins
 				ImGui::PopID();
 			}
 			ImGui::EndTable();
+		}
+
+		// Enabling a plugin made for an older engine : confirm first.
+		if (g_open_confirm)
+		{
+			ImGui::OpenPopup("Older plugin##confirm_enable");
+			g_open_confirm = false;
+		}
+		if (ImGui::BeginPopupModal("Older plugin##confirm_enable", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			const lynx::plugins::PluginInfo* p = lynx::plugins::FindPlugin(g_confirm_enable);
+			if (p)
+			{
+				ImGui::Text("%s was made for Lynx %s.", p->name.c_str(), p->engine_min.c_str());
+				ImGui::Text("This editor is Lynx %s.", lynx::GetEngineVersion().c_str());
+				ImGui::Spacing();
+				ImGui::TextUnformatted("It should still work, but it was not tested with this version.\n"
+				                       "If something breaks, look for an update in the launcher (Plugins).");
+				ImGui::Spacing();
+			}
+			if (ImGui::Button("Enable anyway") && p)
+			{
+				lynx::plugins::SetEnabled(p->name, true);
+				lynx::plugins::SaveSettings();
+				g_restart_needed = true;
+				g_confirm_enable.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || !p)
+			{
+				g_confirm_enable.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
 		ImGui::Separator();

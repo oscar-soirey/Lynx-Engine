@@ -4,6 +4,7 @@
 #include <openal/al.h>
 
 #include <algorithm>
+#include <iostream>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -38,7 +39,10 @@ namespace lynx
 
 		const std::vector<uint8_t> sound_data = fs::ReadBinary(sound_asset);
 		if (sound_data.empty())
+		{
+			std::cout << "[Audio] Son introuvable : assets/" << sound_asset << std::endl;
 			return;
+		}
 
 		std::vector<int16_t> pcm;
 		int channels = 0;
@@ -47,7 +51,10 @@ namespace lynx
 		// force_mono = true : OpenAL ne spatialise pas (ni attenuation, ni panning)
 		// les buffers stereo. Un son stereo est donc mixe en mono ici.
 		if (!audio_detail::LoadSoundFile(sound_asset, sound_data, true, pcm, channels, sample_rate))
+		{
+			std::cout << "[Audio] Son illisible (wav / mp3 attendu) : " << sound_asset << std::endl;
 			return;
+		}
 
 		alGenBuffers(1, &buffer_);
 		alBufferData(

@@ -181,6 +181,17 @@ namespace lynx
 
 		if (current_level_)
 		{
+			// Apres TOUT le gameplay : les sprites, lumieres et la camera
+			// recopient les positions finales de la frame vers HRL. (Avant,
+			// la synchro se faisait dans Update, avant le mouvement : le rendu
+			// avait une frame de retard sur la camera -> saccades.)
+			LYNX_PROFILE_SCOPE("Components LateUpdate");
+			Level::IterationScope scope(*current_level_);
+			ecs::LateUpdate(game_dt);
+		}
+
+		if (current_level_)
+		{
 			LYNX_PROFILE_SCOPE("Level::Update");
 			current_level_->Update();
 		}

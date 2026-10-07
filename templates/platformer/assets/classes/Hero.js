@@ -38,6 +38,8 @@ class Hero extends Humanoid {
         this.hp = this.max_hp;
         this.coins = 0;
         this.start = this.position.clone();
+        Sfx.listener = this;
+        Sfx.music("music_chip", 0.35);
         this.checkpoint = this.position.clone();
         this.invulnerable = 0;
         this.dashLeft = 0;
@@ -66,8 +68,10 @@ class Hero extends Humanoid {
         }
         if (this.dashLeft <= 0 && !this.pounding)
             this.Move(Input.axis("move_x"));
-        if (Input.pressed("jump"))
+        if (Input.pressed("jump")) {
+            Sfx.play(this.IsGrounded() ? "jump" : "double_jump");
             this.Jump();
+        }
         if (Input.released("jump"))
             this.StopJumping();
         if (Input.pressed("dash") && this.dashCooldown <= 0)
@@ -82,6 +86,7 @@ class Hero extends Humanoid {
         this.dashDir = this.IsFacingRight() ? 1 : -1;
         this.dashLeft = this.dash_time;
         this.dashCooldown = 0.6;
+        Sfx.play("dash");
         Level.spawn("Sparkle", this.position);
     }
 
@@ -89,6 +94,7 @@ class Hero extends Humanoid {
         this.pounding = true;
         this.dashLeft = 0;
         this.SetVelocity(0, -this.pound_speed);
+        Sfx.play("dash", null, { volume: 0.5 });
     }
 
     // ---- Every frame --------------------------------------------------------
@@ -153,6 +159,7 @@ class Hero extends Humanoid {
     // Humanoid event : touched the ground.
     OnLanded() {
         if (!this.pounding)
+        Sfx.play(this.pounding ? "stomp" : "land", null, { volume: this.pounding ? 0.9 : 0.4 });
             return;
         this.pounding = false;
         const feet = vec3(this.position.x, this.position.y - this.collider_size.y * 0.5, 0);
@@ -161,6 +168,7 @@ class Hero extends Humanoid {
         const broken = Voxels.destroyRect(vec3(feet.x, feet.y - 1.5, 0), { x: 5, y: 3 }, { flags: "BREAKABLE" });
         for (let i = 0; i < broken.cells.length; i += 3)
             Level.spawn("Debris", vec3(broken.cells[i].world.x, broken.cells[i].world.y, 0));
+            Sfx.play("break_rock");
         if (broken.count > 0)
             this.SetVelocity(0, -this.pound_speed * 0.5);   // keeps falling through
 
@@ -181,6 +189,7 @@ class Hero extends Humanoid {
         this.hp -= Math.max(1, Math.round(amount));
         this.invulnerable = 1.2;
         this.pounding = false;
+        Sfx.play("hurt");
         this.dashLeft = 0;
         if (instigator) {
             const dir = this.position.x >= instigator.position.x ? 1 : -1;
@@ -194,6 +203,7 @@ class Hero extends Humanoid {
     }
 
     OnCollected(kind, amount) {
+        Sfx.play(kind === "coin" ? "coin" : "heal", null, { volume: 0.6 });
         if (kind === "coin")
             this.coins += amount;
         else if (kind === "heart")
@@ -204,6 +214,7 @@ class Hero extends Humanoid {
     SetCheckpoint(position) {
         this.checkpoint = vec3(position.x, position.y + 1, 0);
         this.ShowMessage("Checkpoint !", 1.5);
+        Sfx.play("checkpoint");
     }
 
     OnFinish(goal) {
@@ -213,6 +224,8 @@ class Hero extends Humanoid {
         this.StopMovement();
         this.ShowMessage("Bravo ! " + this.coins + " / " + this.totalCoins + " pièces", 1000);
         Engine.setTimeDilation(0.3, 1.5);   // slow motion for a moment
+        Sfx.stopMusic();
+        Sfx.play("win");
     }
 
     // ---- Life ---------------------------------------------------------------
@@ -221,6 +234,7 @@ class Hero extends Humanoid {
         this.dead = true;
         this.movement_enabled = false;
         this.ShowMessage("Aïe !", 1.2);
+        Sfx.play("death");
         this.respawnTimer = 1.2;
     }
 

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root" visibility="0" is_enabled="true" render_opacity="1">
+        <ProgressBar object_id_="Health" visibility="0" is_enabled="true" render_opacity="1" percent="1" background_color="0.15 0.1 0.1 0.85" fill_color="0.9 0.25 0.3 1">
+            <Slot object_id_="" anchor_min="0 0" anchor_max="0 0" offsets="40 36 420 28" alignment="0 0" auto_size="false" z_order="0"/>
+        </ProgressBar>
+        <TextBlock object_id_="Tool" visibility="0" is_enabled="true" render_opacity="1" text="[1] Pioche" font_size="40" font="" color="1 0.9 0.6 1">
+            <Slot object_id_="" anchor_min="0 0" anchor_max="0 0" offsets="40 80 350 50" alignment="0 0" auto_size="false" z_order="0"/>
+        </TextBlock>
+        <TextBlock object_id_="Inventory" visibility="0" is_enabled="true" render_opacity="1" text="" font_size="30" font="" color="1 1 1 0.9">
+            <Slot object_id_="" anchor_min="0 0" anchor_max="0 0" offsets="40 136 1800 40" alignment="0 0" auto_size="true" z_order="0"/>
+        </TextBlock>
+        <TextBlock object_id_="Message" visibility="2" is_enabled="true" render_opacity="1" text="" font_size="60" font="" color="1 1 1 1">
+            <Slot object_id_="" anchor_min="0.5 0.3" anchor_max="0.5 0.3" offsets="0 0 1400 90" alignment="0.5 0.5" auto_size="true" z_order="0"/>
+        </TextBlock>
+        <TextBlock object_id_="Help" visibility="0" is_enabled="true" render_opacity="1" text="A/D bouger  Espace sauter  Flèches viser  J / Ctrl / clic utiliser  1-4 outils  F matériau  R départ" font_size="24" font="" color="1 1 1 0.7">
+            <Slot object_id_="" anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -40 1700 36" alignment="0.5 1" auto_size="true" z_order="0"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

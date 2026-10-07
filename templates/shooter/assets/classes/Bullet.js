@@ -42,6 +42,7 @@ class Bullet extends Actor {
                 hit.actor.send("Damageable", "TakeDamage", this.damage, this.owner);
         } else if (hit.voxel) {
             Voxels.destroyCircle(hit.point, this.blast, { flags: "COVER" });
+            Sfx.play("clink", hit.point, { volume: 0.3, gap: 60 });
         }
         Level.spawn("Spark", vec3(hit.point.x, hit.point.y, 1));
         this.destroy();

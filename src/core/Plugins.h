@@ -57,6 +57,11 @@ namespace lynx::plugins
 		bool enabled = false;                // plugins.json of the project
 		bool loaded = false;                 // runtime module loaded
 		std::string error;                   // why it is not loaded
+
+		// Engine version the plugin was made for ("" : unknown). Written by the launcher in
+		// <plugin>/.lynx-install.json (release tag v<plugin>-<engine>), else "engine_min" of
+		// plugin.json. Older than this engine : the editor warns before enabling it.
+		std::string engine_min;
 	};
 
 	/**
@@ -105,4 +110,7 @@ namespace lynx::plugins
 	 * module that returns another one in LynxPlugin_Info is not loaded.
 	 */
 	constexpr int kApiVersion = 1;
+
+	/** Compares two versions "26.0.6" (numbers separated by dots) : <0, 0, >0. */
+	LYNX_API int CompareVersions(const std::string& a, const std::string& b);
 }

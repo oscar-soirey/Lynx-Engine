@@ -59,6 +59,7 @@ namespace lynx
 	protected:
 		void BeginPlay() override;
 		void Update(float dt) override;
+		void LateUpdate(float dt) override;
 		void EndPlay() override;
 
 	private:

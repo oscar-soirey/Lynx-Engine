@@ -24,6 +24,9 @@ class Adventurer extends Actor {
 
     BeginPlay() {
         this.busy = true;              // until the intro sequence ends
+        Sfx.listener = this;
+        Sfx.music("ambience_forest", 0.5);
+        this.stepTime = 0;
         this.target = null;
         this.addComponent("Camera", { offset: vec3(0, 0, 70), fov: 32, followSpeed: 5 });
         this.addComponent("Light", { type: "point", color: vec3(1, 0.8, 0.55), intensity: 0.9, offset: vec3(0, 0, 6) });
@@ -53,10 +56,17 @@ class Adventurer extends Actor {
         }
 
         if (!this.busy && !talking && Input.pressed("interact") && this.target)
-            this.target.send("Interactable", "Interact", this);
+            { Sfx.play("blip", null, { volume: 0.4 }); this.target.send("Interactable", "Interact", this); }
     }
 
     Update(dt) {
+        // Footsteps.
+        const moving = Math.hypot(this.velocity.x, this.velocity.y) > 1;
+        if (moving && (this.stepTime -= dt) <= 0) {
+            this.stepTime = Math.hypot(this.velocity.x, this.velocity.y) > this.speed + 1 ? 0.24 : 0.34;
+            Sfx.play("step", null, { volume: 0.25, pitchVariation: 0.15 });
+        }
+
         // Closest thing to interact with (NPCs, chest, signs...).
         this.target = null;
         if (!this.busy && !Dialogue.isActive()) {
@@ -100,9 +110,9 @@ class Adventurer extends Actor {
     OnQuestChanged(quest, state) {
         this.RefreshQuest();
         if (state === "active")
-            this.Notify("Nouvelle quête : " + (Quest.get(quest) || {}).title);
+            { Sfx.play("powerup", null, { volume: 0.6 }); this.Notify("Nouvelle quête : " + (Quest.get(quest) || {}).title); }
         else if (state === "completed")
-            this.Notify("Quête terminée !");
+            { Sfx.play("win"); this.Notify("Quête terminée !"); }
     }
 
     // ---- HUD : the active quest and its next objective ----------------------

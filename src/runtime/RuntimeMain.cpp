@@ -41,6 +41,7 @@
 #include "../audio/AudioCommon.h"
 #include "../core/Private/SystemModule.h"
 #include "../gameplay/Private/InputManager.h"
+#include "../gameplay/CameraShake.h"
 #include "../host/GamepadInput.h"
 #include "../host/GameProject.h"
 
@@ -601,6 +602,9 @@ int main(int argc, char** argv)
     // Post process of every player (HRL default shader). Its settings come
     // from assets/postprocess.json (editor : Windows > Post Process).
     lynx::postprocess::Install();
+
+    // Camera shake settings (editor : Windows > Camera Shake).
+    lynx::LoadCameraShakeSettings();
 
 
     HRL_BeginVoxelEdit(scene);

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AnimGraph version="2">
+    <Output source="3" x="360" y="0"/>
+    <Parameter name="speed" type="float" default="0"/>
+    <Animation name="Idle" texture="" frames="1" frame_time="0.1" loop="true"/>
+    <PoseNode id="3" type="statemachine" source="Locomotion" x="0" y="0"/>
+    <StateMachine id="1" name="Locomotion" entry="Idle">
+        <Entry x="0" y="0"/>
+        <AnyState x="0" y="225"/>
+        <State id="2" name="Idle" motion="Idle" interruptible="true" restart_on_enter="true" x="255" y="0" pose_x="0" pose_y="0" output_x="320" output_y="0"/>
+    </StateMachine>
+</AnimGraph>

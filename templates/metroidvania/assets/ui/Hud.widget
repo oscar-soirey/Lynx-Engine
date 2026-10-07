@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <Border object_id_="SoulFrame" brush_color="0.05 0.05 0.1 0.85">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="40 36 120 120" alignment="0 0"/>
+        </Border>
+        <ProgressBar object_id_="Soul" percent="0" background_color="0.08 0.08 0.14 1" fill_color="0.75 0.95 1 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="48 44 104 104" alignment="0 0"/>
+        </ProgressBar>
+        <Image object_id_="Mask1" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="180 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask2" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="234 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask3" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="288 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask4" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="342 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask5" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="396 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask6" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="450 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask7" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="504 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask8" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="558 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="Mask9" texture="ui/img/mask_full.png" tint="1 1 1 1" image_size="48 48" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="612 44 48 48" alignment="0 0"/>
+        </Image>
+        <Image object_id_="GeoIcon" texture="ui/img/geo_icon.png" tint="1 1 1 1" image_size="32 32">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="184 108 32 32" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Geo" text="0" font_size="30" color="0.92 0.94 0.96 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="226 106 300 36" alignment="0 0"/>
+        </TextBlock>
+        <Image object_id_="DirtIcon" texture="ui/img/dirt_icon.png" tint="1 1 1 1" image_size="32 32">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="184 150 32 32" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Dirt" text="0" font_size="30" color="0.92 0.94 0.96 1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="226 148 300 36" alignment="0 0"/>
+        </TextBlock>
+        <Image object_id_="BombsIcon" texture="ui/img/bomb_icon.png" tint="1 1 1 1" image_size="32 32" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="184 192 32 32" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Bombs" text="0" font_size="30" color="0.92 0.94 0.96 1" visibility="1">
+            <Slot anchor_min="0 0" anchor_max="0 0" offsets="226 190 300 36" alignment="0 0"/>
+        </TextBlock>
+        <Image object_id_="Ability_dash" texture="ui/img/ability_dash.png" tint="1 1 1 0.15" image_size="44 44">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="40 -40 44 44" alignment="0 1"/>
+        </Image>
+        <Image object_id_="Ability_claw" texture="ui/img/ability_claw.png" tint="1 1 1 0.15" image_size="44 44">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="92 -40 44 44" alignment="0 1"/>
+        </Image>
+        <Image object_id_="Ability_wings" texture="ui/img/ability_wings.png" tint="1 1 1 0.15" image_size="44 44">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="144 -40 44 44" alignment="0 1"/>
+        </Image>
+        <Image object_id_="Ability_hook" texture="ui/img/ability_hook.png" tint="1 1 1 0.15" image_size="44 44">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="196 -40 44 44" alignment="0 1"/>
+        </Image>
+        <Image object_id_="Ability_bombs" texture="ui/img/ability_bombs.png" tint="1 1 1 0.15" image_size="44 44">
+            <Slot anchor_min="0 1" anchor_max="0 1" offsets="248 -40 44 44" alignment="0 1"/>
+        </Image>
+        <TextBlock object_id_="Area" text="" font_size="64" color="0.9 0.92 1 1" visibility="2">
+            <Slot anchor_min="0.5 0.22" anchor_max="0.5 0.22" offsets="0 0 1400 80" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Message" text="" font_size="38" color="1 0.92 0.7 1" visibility="2">
+            <Slot anchor_min="0.5 0.32" anchor_max="0.5 0.32" offsets="0 0 1600 50" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <Border object_id_="HintBack" brush_color="0.02 0.02 0.05 0.75" visibility="2">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -60 1500 64" alignment="0.5 1"/>
+        </Border>
+        <TextBlock object_id_="Hint" text="" font_size="28" color="0.85 0.9 1 1" visibility="2">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -76 1450 34" alignment="0.5 1" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="BossName" text="THE HOLLOW WARDEN" font_size="34" color="1 0.85 0.85 1" visibility="2">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -132 900 40" alignment="0.5 1" auto_size="true"/>
+        </TextBlock>
+        <ProgressBar object_id_="BossBar" percent="1" background_color="0.12 0.04 0.06 0.9" fill_color="0.85 0.2 0.25 1" visibility="2">
+            <Slot anchor_min="0.5 1" anchor_max="0.5 1" offsets="0 -110 900 22" alignment="0.5 1"/>
+        </ProgressBar>
+        <Image object_id_="Fade" texture="ui/img/white.png" tint="0 0 0 0" visibility="3">
+            <Slot anchor_min="0 0" anchor_max="1 1" offsets="0 0 0 0" alignment="0 0"/>
+        </Image>
+    </CanvasPanel>
+</Widget>

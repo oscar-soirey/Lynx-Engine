@@ -45,4 +45,8 @@ namespace lynx::fs
 	// (a game made by the editor's "Ship Game"). Archive mode then reads the
 	// executable itself, otherwise assets.pak next to it.
 	LYNX_API bool HasEmbeddedArchive();
+
+	// Folder of the running executable (editor, runtime or shipped game).
+	// Not an asset path : a real folder on disk.
+	LYNX_API std::wstring GetExecutableFolder();
 }

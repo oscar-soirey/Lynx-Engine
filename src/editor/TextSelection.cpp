@@ -291,8 +291,6 @@ namespace lynx::editor::text_selection
 			else
 				g.selecting = false;
 		}
-		if (hovered && !ImGui::IsAnyItemHovered())
-			ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
 
 		// Highlight
 		if (HasSelection())

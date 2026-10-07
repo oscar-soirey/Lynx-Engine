@@ -15,6 +15,11 @@ d'éditeur, sans toucher au moteur. Il est fait de deux DLL :
 
 Activation par projet : fenêtre **Plugins** (barre d'outils), sauvegardée dans `<projet>/plugins.json`
 (`{ "Dialogue": true }`). Un changement demande de redémarrer l'éditeur.
+
+Le **launcher** (onglet Plugins) installe des plugins en ligne ou depuis l'ordinateur dans `<éditeur>/plugins/`
+(voir `registry/README.md`). Il y écrit `.lynx-install.json`, avec `engine_min` (version de Lynx visée).
+`engine_min` peut aussi être mis dans `plugin.json`. Un plugin fait pour une version plus ancienne que
+l'éditeur demande une confirmation quand on l'active.
 **Ship Game** copie le module runtime des plugins activés dans `<jeu>/plugins/` (jamais le module éditeur).
 
 ## plugin.json

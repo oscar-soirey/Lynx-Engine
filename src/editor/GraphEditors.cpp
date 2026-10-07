@@ -3845,8 +3845,6 @@ namespace lynx::editor::graph_editors
 			const float thickness = 5.f;
 			ImGui::PushID(id);
 			ImGui::InvisibleButton("##split", ImVec2(thickness, -1.f));
-			if (ImGui::IsItemHovered() || ImGui::IsItemActive())
-				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
 			if (ImGui::IsItemActive())
 				size = std::clamp(size + ImGui::GetIO().MouseDelta.x, min_size, max_size);
 			ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),

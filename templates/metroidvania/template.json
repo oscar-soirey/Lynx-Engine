@@ -1,0 +1,6 @@
+{
+    "name": "Metroidvania",
+    "description": "A complete Hollow Knight-like game, all JavaScript, in a destructible cave. Tight controls (coyote time, dash, wall jump, double jump, pogo, parry, focus heal), dig dirt with your nail, bombs, blocks and a grappling hook. 5 enemy types, a two-phase boss, benches, abilities to unlock. Anim Graphs, Behavior Trees, widgets.",
+    "order": 2,
+    "no_cpp": true
+}

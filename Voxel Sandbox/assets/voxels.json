@@ -1,0 +1,198 @@
+{
+    "voxels": [
+        {
+            "name": "Dirt",
+            "color": "9a6634",
+            "collision": "SOLID",
+            "texture": "textures/dirt.png",
+            "texture_tile": 16.0
+        },
+        {
+            "name": "Stone",
+            "color": "7c7a74",
+            "collision": "SOLID",
+            "flags": [
+                "HARD"
+            ],
+            "texture": "textures/stone.png",
+            "texture_tile": 16.0
+        },
+        {
+            "name": "Bedrock",
+            "color": "3a3846",
+            "collision": "SOLID",
+            "texture": "textures/stone.png",
+            "texture_tile": 16.0,
+            "indestructible": true
+        },
+        {
+            "name": "Sand",
+            "color": "e8c878",
+            "collision": "SOLID",
+            "texture": "textures/sand.png",
+            "texture_tile": 16.0,
+            "physics": {
+                "preset": "Sand",
+                "behavior": "powder",
+                "density": 1.600000023841858,
+                "dispersion": 1,
+                "friction": 0.800000011920929,
+                "bounciness": 0.0,
+                "drag": 0.0,
+                "buoyancy": 0.0,
+                "damage": 0.0,
+                "contact_events": false
+            }
+        },
+        {
+            "name": "Gravel",
+            "color": "8c8478",
+            "collision": "SOLID",
+            "texture": "textures/stone.png",
+            "texture_tile": 8.0,
+            "physics": {
+                "preset": "Sand",
+                "behavior": "powder",
+                "density": 1.600000023841858,
+                "dispersion": 1,
+                "friction": 0.800000011920929,
+                "bounciness": 0.0,
+                "drag": 0.0,
+                "buoyancy": 0.0,
+                "damage": 0.0,
+                "contact_events": false
+            }
+        },
+        {
+            "name": "Water",
+            "color": "3f7fd0",
+            "collision": "NONE",
+            "texture": "textures/liquid.png",
+            "texture_tile": 16.0,
+            "physics": {
+                "preset": "Water",
+                "behavior": "liquid",
+                "density": 1.0,
+                "dispersion": 5,
+                "friction": 1.0,
+                "bounciness": 0.0,
+                "drag": 0.5,
+                "buoyancy": 1.100000023841858,
+                "damage": 0.0,
+                "contact_events": true
+            }
+        },
+        {
+            "name": "Oil",
+            "color": "3a2a20",
+            "collision": "NONE",
+            "texture": "textures/liquid.png",
+            "texture_tile": 16.0,
+            "physics": {
+                "preset": "Oil",
+                "behavior": "liquid",
+                "density": 0.800000011920929,
+                "dispersion": 3,
+                "friction": 0.30000001192092896,
+                "bounciness": 0.0,
+                "drag": 0.699999988079071,
+                "buoyancy": 0.8999999761581421,
+                "damage": 0.0,
+                "contact_events": true
+            }
+        },
+        {
+            "name": "Lava",
+            "color": "ff5a18",
+            "collision": "NONE",
+            "emissive": "ff6a20",
+            "texture": "textures/liquid.png",
+            "texture_tile": 16.0,
+            "physics": {
+                "preset": "Lava",
+                "behavior": "liquid",
+                "density": 3.0,
+                "dispersion": 1,
+                "friction": 1.0,
+                "bounciness": 0.0,
+                "drag": 0.8999999761581421,
+                "buoyancy": 0.6000000238418579,
+                "damage": 40.0,
+                "contact_events": true
+            }
+        },
+        {
+            "name": "Acid",
+            "color": "8aff3a",
+            "collision": "NONE",
+            "emissive": "306a10",
+            "texture": "textures/liquid.png",
+            "texture_tile": 16.0,
+            "physics": {
+                "preset": "Acid",
+                "behavior": "liquid",
+                "density": 1.100000023841858,
+                "dispersion": 4,
+                "friction": 1.0,
+                "bounciness": 0.0,
+                "drag": 0.5,
+                "buoyancy": 1.0,
+                "damage": 15.0,
+                "contact_events": true
+            }
+        },
+        {
+            "name": "Gold",
+            "color": "ffd25a",
+            "collision": "SOLID",
+            "flags": [
+                "HARD",
+                "ORE"
+            ],
+            "texture": "textures/gold_ore.png",
+            "texture_tile": 16.0
+        },
+        {
+            "name": "Crystal",
+            "color": "8ae0ff",
+            "collision": "SOLID",
+            "flags": [
+                "ORE"
+            ],
+            "emissive": "4ab8ff",
+            "texture": "textures/crystal.png",
+            "texture_tile": 16.0
+        },
+        {
+            "name": "Wood",
+            "color": "b88048",
+            "collision": "SOLID",
+            "texture": "textures/wood.png",
+            "texture_tile": 16.0
+        },
+        {
+            "name": "Smoke",
+            "color": "8a8a90",
+            "collision": "NONE",
+            "physics": {
+                "preset": "Smoke",
+                "behavior": "gas",
+                "density": 0.10000000149011612,
+                "dispersion": 3,
+                "friction": 1.0,
+                "bounciness": 0.0,
+                "drag": 0.10000000149011612,
+                "buoyancy": 0.0,
+                "damage": 0.0,
+                "contact_events": false
+            }
+        },
+        {
+            "name": "Brick",
+            "color": "b85a3a",
+            "collision": "SOLID",
+            "texture": "textures/brick.png",
+            "texture_tile": 16.0
+        }
+    ]
+}

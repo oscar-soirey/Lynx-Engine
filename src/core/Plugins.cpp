@@ -8,6 +8,7 @@
 #include <json/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -82,6 +83,13 @@ namespace lynx::plugins
 				info.folder = sfs::absolute(entry.path(), e).lexically_normal();
 				info.engine_plugin = engine;
 
+				// Installed by the launcher : version of the engine the release was made for.
+				const nlohmann::json install = ReadJson(entry.path() / ".lynx-install.json");
+				if (install.is_object())
+					info.engine_min = Str(install, "engine_min");
+				if (info.engine_min.empty())
+					info.engine_min = Str(j, "engine_min");
+
 				const std::string runtime = Str(j, "runtime");
 				const std::string editor = Str(j, "editor");
 				if (!runtime.empty())
@@ -129,6 +137,24 @@ namespace lynx::plugins
 		          [](const PluginInfo& a, const PluginInfo& b) { return a.name < b.name; });
 
 		std::cout << "[PLUGINS] " << g_plugins.size() << " plugin(s) found\n";
+	}
+
+	int CompareVersions(const std::string& a, const std::string& b)
+	{
+		size_t i = 0, j = 0;
+		while (i < a.size() || j < b.size())
+		{
+			long x = 0, y = 0;
+			while (i < a.size() && std::isdigit(static_cast<unsigned char>(a[i])))
+				x = x * 10 + (a[i++] - '0');
+			while (j < b.size() && std::isdigit(static_cast<unsigned char>(b[j])))
+				y = y * 10 + (b[j++] - '0');
+			if (x != y)
+				return x < y ? -1 : 1;
+			if (i < a.size()) ++i;
+			if (j < b.size()) ++j;
+		}
+		return 0;
 	}
 
 	std::vector<PluginInfo>& GetPlugins()

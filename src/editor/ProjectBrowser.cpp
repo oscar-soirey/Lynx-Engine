@@ -30,6 +30,7 @@
 #include <shobjidl.h>
 #endif
 
+// The OpenGL 1.1 header of Windows does not have it (OpenGL 1.2).
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif

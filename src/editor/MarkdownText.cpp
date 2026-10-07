@@ -432,7 +432,6 @@ namespace lynx::editor::markdown
 				const ImVec2 min(pos.x, pos.y), max(pos.x + width, pos.y + line_height);
 				if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseHoveringRect(min, max))
 				{
-					ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 					ImGui::SetTooltip("%s", piece.span->url.c_str());
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 						OpenUrl(piece.span->url);

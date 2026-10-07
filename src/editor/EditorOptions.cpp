@@ -162,6 +162,11 @@ namespace lynx::editor::options
 				s.TabRounding = 4.f;
 				s.ScrollbarRounding = 6.f;
 			}
+			// Buttons, fields and tabs a bit taller than the ImGui default
+			// (4, 3) : easier to click, less cramped.
+			s.FramePadding = ImVec2(6.f, 4.5f);
+			s.ItemSpacing = ImVec2(8.f, 5.f);
+			s.CellPadding = ImVec2(5.f, 3.f);
 			s.ScaleAllSizes(g_options.ui_scale);
 			s.FontScaleMain = g_options.ui_scale;
 			ImGui::GetStyle() = s;
@@ -369,7 +374,7 @@ namespace lynx::editor::options
 		const Page pages[] = {
 			{ "Interface", icons::Icon::Settings },
 			{ "Project",   icons::Icon::Project },
-			{ "Plugins",   icons::Icon::Commands },
+			{ "Plugins",   icons::Icon::Plugin },
 		};
 		for (int i = 0; i < static_cast<int>(std::size(pages)); ++i)
 		{

@@ -1,0 +1,8 @@
+{
+  "name": "Mesh3D",
+  "version": "1.0",
+  "description": "3D objects : MeshComponent / MeshActor, FBX models (with their materials) or primitive shapes (cube, sphere, cylinder, cone, plane), color, texture (.png or .lsprite). JS Mesh3D.",
+  "author": "Lynx",
+  "category": "Graphics",
+  "runtime": "bin/Mesh3D.dll"
+}

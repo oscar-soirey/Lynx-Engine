@@ -1,22 +1,18 @@
 obligé:
 
+mettre une vraie toolbar
+
+publier un plugin sur le site
+
 les liquident buguent pas mal
+
+pouvoir masquer le curseur de la souris avec une fonction globale simple C++/javascript
 
 parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
 plugins téléchargeables en ligne dans le launcher
 
 revoir le logo et les banieres tout ca
-
-revoir les templates pour utiliser les nouvelles fonctionnalités et faire des trucs un peu plus poussés
-
-pouvoir choisir la taille du monde voxel
-
-revoir l'editeur camera shake (on voudrait une preview de ce que pourrait donner le camera shake)
-
-améliorer l'UX (pouvoir resize certains trucs, aggrandir tres légerement la hauteur des boutons et des onglets), ajouter quelques icones
-
-le curseur de text-hover ne s'affiche pas dans l'editeur de text, json, js. on garde le curseur normal de windows
 
 quand on se fait ensevlir sous du sable par exemple, on peut plus du tout bouger, il faudrait faire un truc pour eviter ca
 
@@ -25,8 +21,6 @@ le plugin dialogue gere mal l'editeur de nodes, on ne peux pas placer de nouveau
 afficher les sprites au dessus des voxels dans hrl
 
 revoir le template rpg il est completement bugué avec la camera (elle fait une rotation sur un axe noramlement pas utilisé en 2D, ducoup on voit le level sur le coté, fin c'est bizarre, et pareil dans l'autre top down
-
-le template C++ ne peut pas etre compilé dans l'editeur, je sais pas pourquoi, il n'y a pas le bouton compile
 
 
 
@@ -52,9 +46,7 @@ editeur de post process
 
 plugins:
 
-editeur de sprites pixel art integré a l'editeur (qui exporte pas en png ou autre, il exporte directement en .lsprite), comme ca on peut l'editer a tout moment, a aucun moment c'est convertit en image par contre ca n'utilise pas les voxels du monde
-
-component d'objets 3D
+convertir image haute définition en pixel art
 
 
 
@@ -64,10 +56,4 @@ component d'objets 3D
 
 HRL:
 
-ca cache les sprites quand on met plusieurs lights dans une scene
-
-textures de voxels au lieu de juste couleur (optionel a chaque voxel type)
-
 trouver pourquoi le color picking marche a moitié
-
-revoir completement le systeme d'eclairage des voxels emissifs pour en autoriser autant qu'on veut (HRL)

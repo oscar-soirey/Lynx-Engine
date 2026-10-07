@@ -10,6 +10,7 @@
 #include "../core/VoxelPhysics.h"
 #include "../core/data/Typename.h"
 #include "../gameplay/Actor.h"
+#include "../gameplay/CameraShake.h"
 #include "../gameplay/Components.h"
 #include "../gameplay/Input.h"
 #include "../gameplay/Private/ECS.h"
@@ -1043,6 +1044,14 @@ namespace lynx
 			return JS_NewBool(ctx, ecs::IsPlaying());
 		}
 
+		// Engine.cameraShake() : the camera shake of the project (Windows >
+		// Camera Shake), on the cameras whose useCameraShake is on.
+		JSValue EngineCameraShake(JSContext*, JSValueConst, int, JSValueConst*)
+		{
+			GetCameraShake().Trigger();
+			return JS_UNDEFINED;
+		}
+
 		JSValue EngineIsSimulating(JSContext* ctx, JSValueConst, int, JSValueConst*)
 		{
 			Engine* engine = Engine::Get();
@@ -1374,6 +1383,7 @@ namespace lynx
 			DefFunc(ctx, engine, "setTimeDilation", EngineSetTimeDilation, 2);
 			DefFunc(ctx, engine, "isPlaying", EngineIsPlaying, 0);
 			DefFunc(ctx, engine, "isSimulating", EngineIsSimulating, 0);
+			DefFunc(ctx, engine, "cameraShake", EngineCameraShake, 0);
 			JS_SetPropertyStr(ctx, global, "Engine", engine);
 
 			JS_FreeValue(ctx, global);

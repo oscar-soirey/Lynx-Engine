@@ -77,6 +77,12 @@ namespace lynx
 		SyncTransform(false);
 	}
 
+	void SpriteComponent::LateUpdate(float)
+	{
+		// Position finale de la frame (apres le mouvement du gameplay).
+		SyncTransform(false);
+	}
+
 	void SpriteComponent::Refresh()
 	{
 		// Les classes filles appliquent texture / animation dans Update.

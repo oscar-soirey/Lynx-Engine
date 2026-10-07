@@ -59,6 +59,7 @@ class WaveDirector extends Actor {
             this.toSpawn = this.first_wave + (this.wave - 1) * this.per_wave;
             this.timer = this.pause;
             this.Refresh("Vague " + this.wave + " !");
+            Sfx.play("wave_start");
         }
         if (this.bannerTime > 0 && (this.bannerTime -= dt) <= 0)
             this.hud.find("Banner").visibility = "Hidden";
@@ -75,6 +76,7 @@ class WaveDirector extends Actor {
     OnPlayerDied(player) {
         this.over = true;
         this.Refresh("Game over ! Score " + this.score + "  (R pour rejouer)", 1000);
+        Sfx.stopMusic();
     }
 
     Refresh(banner, seconds = 2) {

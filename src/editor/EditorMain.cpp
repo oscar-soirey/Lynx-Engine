@@ -62,6 +62,7 @@
 #include "../core/Private/SystemModule.h"
 #include "../host/GamepadInput.h"
 #include "../gameplay/Private/InputManager.h"
+#include "../gameplay/CameraShake.h"
 
 #include "../host/GameProject.h"
 #include "InputSettingsEditor.h"
@@ -133,6 +134,7 @@ struct EditorWindowVisibility
     bool profiler = true;        // records only while its tab is visible
     bool nodeGraphTest = false;  // (removed window : kept for the format of editor_windows.txt)
     bool postProcess = false;
+    bool voxelWorld = false;     // Voxel World (size of the level's world)
 };
 
 static EditorWindowVisibility editorWindows;
@@ -188,6 +190,10 @@ static void LoadEditorWindowVisibility()
     int postProcess = 0;
     if (file >> postProcess)
         editorWindows.postProcess = postProcess != 0;
+
+    int voxelWorld = 0;
+    if (file >> voxelWorld)
+        editorWindows.voxelWorld = voxelWorld != 0;
 }
 
 static void SaveEditorWindowVisibility()
@@ -209,12 +215,21 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.console ? 1 : 0) << ' '
          << (editorWindows.profiler ? 1 : 0) << ' '
          << (editorWindows.nodeGraphTest ? 1 : 0) << ' '
-         << (editorWindows.postProcess ? 1 : 0) << '\n';
+         << (editorWindows.postProcess ? 1 : 0) << ' '
+         << (editorWindows.voxelWorld ? 1 : 0) << '\n';
 }
 
 // Post Process window : the settings of the current post process
 // (lynx::postprocess, HRL default shader), saved in assets/postprocess.json.
 static void DrawPostProcessWindow();
+
+// Camera Shake window : live settings, curves, Test (shakes the editor
+// camera), saved in assets/camera_shake.json.
+static void DrawCameraShakeWindow(bool* open);
+static void ApplyCameraShakePreview(HRL_id camera, float dt);
+
+// Voxel World window : size of the voxel world of the level (kept voxels).
+static void DrawVoxelWorldWindow(bool* open);
 
 static bool EditorWindowCheckbox(const char* label, bool* value,
                                  lynx::editor::icons::Icon icon = lynx::editor::icons::Icon::Windows)
@@ -601,6 +616,7 @@ void EndImGuiFrame()
     LYNX_PROFILE_SCOPE("ImGui render");
 
     ImGui::PopItemFlag();   // NoTabStop (BeginImGuiFrame)
+
     ImGui::Render();
 
     ImGui_ImplOpenGL3_RenderDrawData(
@@ -2752,6 +2768,27 @@ static lynx::editor::sprite_voxels::Host SpriteVoxelHost()
 }
 
 static char content_browser_search[128] = {};
+
+// Size of the Content Browser tiles (slider of the header, Ctrl + wheel in
+// the grid). Remembered in editor_browser.txt.
+static float content_browser_thumb_scale = 1.f;
+static bool content_browser_thumb_loaded = false;
+
+static void LoadContentBrowserThumbScale()
+{
+    content_browser_thumb_loaded = true;
+    std::ifstream in("editor_browser.txt");
+    float scale = 1.f;
+    if (in >> scale && scale >= 0.5f && scale <= 2.5f)
+        content_browser_thumb_scale = scale;
+}
+
+static void SaveContentBrowserThumbScale()
+{
+    std::ofstream out("editor_browser.txt", std::ios::trunc);
+    if (out)
+        out << content_browser_thumb_scale << "\n";
+}
 static int content_browser_item_count = 0;
 
 // Navigation history (like a web browser) : the back / forward buttons of the
@@ -2914,7 +2951,8 @@ static void DrawContentBrowserHeader(const std::filesystem::path& relative_curre
     ImGui::SameLine();
     const float new_w = ImGui::CalcTextSize("+ New").x + style.FramePadding.x * 2.f;
     const float clear_w = content_browser_search[0] ? row_h + style.ItemSpacing.x : 0.f;
-    const float search_w = std::max(60.f, ImGui::GetContentRegionAvail().x - new_w - clear_w - style.ItemSpacing.x);
+    const float size_w = ImGui::GetFontSize() * 5.f + style.ItemSpacing.x;
+    const float search_w = std::max(60.f, ImGui::GetContentRegionAvail().x - new_w - clear_w - size_w - style.ItemSpacing.x);
     ImGui::AlignTextToFramePadding();
     icons::Draw(icons::Icon::Search);
     ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
@@ -2929,6 +2967,19 @@ static void DrawContentBrowserHeader(const std::filesystem::path& relative_curre
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Clear the search");
     }
+    // Tile size.
+    if (!content_browser_thumb_loaded)
+        LoadContentBrowserThumbScale();
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5.f);
+    int thumb_percent = static_cast<int>(std::lround(content_browser_thumb_scale * 100.f));
+    if (ImGui::SliderInt("##BrowserThumbSize", &thumb_percent, 50, 250, "%d %%"))
+        content_browser_thumb_scale = std::clamp(thumb_percent / 100.f, 0.5f, 2.5f);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+        SaveContentBrowserThumbScale();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Size of the thumbnails (Ctrl + mouse wheel in the grid)");
+
     ImGui::SameLine();
     if (ImGui::Button("+ New"))
         ImGui::OpenPopup("##BrowserNew");
@@ -3188,7 +3239,9 @@ static void DrawContentBrowser(lynx::Level* level)
     content_browser_item_count = static_cast<int>(shown.size());
 
     // The grid scrolls under the header.
-    ImGui::BeginChild("##ContentGrid", ImVec2(0.f, 0.f), ImGuiChildFlags_None);
+    // Ctrl held : the wheel resizes the tiles instead of scrolling.
+    ImGui::BeginChild("##ContentGrid", ImVec2(0.f, 0.f), ImGuiChildFlags_None,
+                      ImGui::GetIO().KeyCtrl ? ImGuiWindowFlags_NoScrollWithMouse : 0);
     ImGui::SetWindowFontScale(0.62f);
     content_browser_focused = content_browser_focused ||
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -3197,9 +3250,17 @@ static void DrawContentBrowser(lynx::Level* level)
     // Asset grid
     // --------------------------------------------------------
 
-    constexpr float item_width = 128.f;
-    constexpr float item_height = 126.f;
-    constexpr float image_size = 92.f;
+    // Ctrl + wheel over the grid : tile size.
+    if (ImGui::IsWindowHovered() && ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.f)
+    {
+        content_browser_thumb_scale = std::clamp(
+            content_browser_thumb_scale * (ImGui::GetIO().MouseWheel > 0.f ? 1.1f : 1.f / 1.1f), 0.5f, 2.5f);
+        SaveContentBrowserThumbScale();
+    }
+    const float thumb = content_browser_thumb_scale;
+    const float item_width = std::floor(128.f * thumb);
+    const float image_size = std::floor(92.f * thumb);
+    const float item_height = image_size + 34.f;
     constexpr float item_spacing = 10.f;
 
     const float content_width =
@@ -4853,11 +4914,27 @@ static bool ToolbarArrowButton(const char* id)
     return clicked;
 }
 
+// The toolbar is made of groups (Project, Edit, Gizmo, Play, Game, right
+// side) : each one is drawn on a rounded "pill" behind its buttons, which
+// reads better than "|" separators.
+static std::vector<std::pair<ImVec2, ImVec2>> g_toolbar_groups;
+
+static void ToolbarGroupBegin()
+{
+    ImGui::BeginGroup();
+}
+
+static void ToolbarGroupEnd()
+{
+    ImGui::EndGroup();
+    g_toolbar_groups.emplace_back(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+}
+
 static void ToolbarSeparator()
 {
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
+    ToolbarGroupEnd();
+    ImGui::SameLine(0.f, ImGui::GetStyle().ItemSpacing.x * 2.5f);
+    ToolbarGroupBegin();
 }
 
 // Popup under the last item, left-aligned with `left_x`.
@@ -4874,9 +4951,10 @@ static void DrawToolbar()
 
     ImGuiViewport* main_viewport = ImGui::GetMainViewport();
 
+    // A little taller than a button row : room for the group pills.
     const float height =
         ImGui::GetFrameHeight() +
-        ImGui::GetStyle().WindowPadding.y * 2.f;
+        ImGui::GetStyle().WindowPadding.y * 2.f + 4.f;
 
     if (ImGui::BeginViewportSideBar(
             "##Toolbar",
@@ -4935,6 +5013,13 @@ static void DrawToolbar()
                         ImGui::GetColorU32(disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text), text);
             return clicked;
         };
+
+        // Pills of the groups : drawn under the buttons (channel 0) at the end.
+        g_toolbar_groups.clear();
+        ImDrawList* toolbar_dl = ImGui::GetWindowDrawList();
+        toolbar_dl->ChannelsSplit(2);
+        toolbar_dl->ChannelsSetCurrent(1);
+        ToolbarGroupBegin();
 
         // =================================================================
         // Project v : infos, other project, code editors, Explorer, Ship Game
@@ -5085,7 +5170,7 @@ static void DrawToolbar()
         if (!isPlaying)
         {
             ImGui::SameLine();
-            if (icons::ButtonWithLabel("Simulate##Simulate", icons::Icon::Camera, ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
+            if (icons::ButtonWithLabel("Simulate##Simulate", icons::Icon::Eye, ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
                 TogglePlayMode(true);
             tooltip("Simulate : run the game without possessing any actor,\n"
                     "keep the editor camera and its movements (Alt+S)");
@@ -5213,6 +5298,8 @@ static void DrawToolbar()
         // Right side : [speed / volume]  Windows  Options  Lynxie
         // Right-aligned with the width measured on the previous frame.
         // =================================================================
+        ToolbarGroupEnd();
+
         static float right_width = 0.f;
         {
             ImGui::SameLine();
@@ -5221,6 +5308,7 @@ static void DrawToolbar()
             if (start > ImGui::GetCursorScreenPos().x)
                 ImGui::SetCursorScreenPos(ImVec2(start, ImGui::GetCursorScreenPos().y));
             const float right_begin = ImGui::GetCursorScreenPos().x;
+            ToolbarGroupBegin();
 
             // Camera speed + master volume : one button, a popup with both.
             char view_label[96];
@@ -5266,8 +5354,9 @@ static void DrawToolbar()
                 EditorWindowCheckbox("Details", &editorWindows.details, icons::Icon::Details);
                 EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, icons::Icon::ColorPick);
                 EditorWindowCheckbox("Paint", &editorWindows.config, icons::Icon::Paint);
-                EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, icons::Icon::Camera);
+                EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, icons::Icon::Shake);
                 EditorWindowCheckbox("Post Process", &editorWindows.postProcess, icons::Icon::Settings);
+                EditorWindowCheckbox("Voxel World", &editorWindows.voxelWorld, icons::Icon::World);
                 EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, icons::Icon::Input);
                 EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, icons::Icon::Commands);
                 EditorWindowCheckbox("Git", &editorWindows.git, icons::Icon::Git);
@@ -5296,8 +5385,26 @@ static void DrawToolbar()
             }
             tooltip("Lynxie : ask a question about the engine, or what to change in the level");
 
+            ToolbarGroupEnd();
             right_width = ImGui::GetItemRectMax().x - right_begin;
         }
+
+        // Pills behind the groups.
+        toolbar_dl->ChannelsSetCurrent(0);
+        const float pad_x = style.ItemSpacing.x * 0.6f;
+        const float pad_y = std::max(1.f, (ImGui::GetWindowHeight() - frame_h) * 0.5f - 2.f);
+        ImVec4 pill = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+        pill.w *= 0.55f;
+        ImVec4 edge = ImGui::GetStyleColorVec4(ImGuiCol_Border);
+        edge.w *= 0.6f;
+        for (const auto& [min, max] : g_toolbar_groups)
+        {
+            const ImVec2 a(min.x - pad_x, min.y - pad_y);
+            const ImVec2 b(max.x + pad_x, max.y + pad_y);
+            toolbar_dl->AddRectFilled(a, b, ImGui::ColorConvertFloat4ToU32(pill), frame_h * 0.35f);
+            toolbar_dl->AddRect(a, b, ImGui::ColorConvertFloat4ToU32(edge), frame_h * 0.35f);
+        }
+        toolbar_dl->ChannelsMerge();
     }
 
     ImGui::End();
@@ -6279,7 +6386,8 @@ namespace editor
         const bool javascript_editor_handles_shortcuts =
             lynx::editor::script_editors::HasKeyboardFocus() ||
             lynx::editor::widget_editor::HasFocus() ||
-            lynx::editor::graph_editors::HasFocus();
+            lynx::editor::graph_editors::HasFocus() ||
+            lynx::editor::plugins::HasFocus();
 
 
         if (ctrl_s &&
@@ -6379,6 +6487,10 @@ namespace editor
                 camZ
             );
         }
+
+
+        // Camera Shake window : Test shakes the editor camera.
+        ApplyCameraShakePreview(camera, dt);
 
 
         // --------------------------------------------------------
@@ -7192,6 +7304,7 @@ namespace editor
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             !lynx::editor::widget_editor::HasFocus() &&
             !lynx::editor::graph_editors::HasFocus() &&
+            !lynx::editor::plugins::HasFocus() &&
             io.KeyCtrl &&
             ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
             !io.WantTextInput &&
@@ -7211,6 +7324,7 @@ namespace editor
             !content_browser_focused &&
             !lynx::editor::widget_editor::HasFocus() &&
             !lynx::editor::graph_editors::HasFocus() &&
+            !lynx::editor::plugins::HasFocus() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
@@ -8534,6 +8648,9 @@ namespace editor
         if (editorWindows.postProcess)
             DrawPostProcessWindow();
 
+        if (editorWindows.voxelWorld)
+            DrawVoxelWorldWindow(&editorWindows.voxelWorld);
+
         // Plugins : manager and the windows of the editor modules.
         // Plugins : a page of the Options window (old entry points open it).
         if (showPluginManager)
@@ -8549,88 +8666,7 @@ namespace editor
         // --------------------------------------------------------
 
         if (editorWindows.cameraShake)
-        {
-
-        ImGui::Begin(
-            "Camera Shake"
-        );
-
-
-        ImGui::Separator();
-
-
-        ImGui::Text(
-            "Camera Shake"
-        );
-
-
-        ImGui::Checkbox(
-            "Enable Camera Shake",
-            &lynx::GetCameraShake().enabled
-        );
-
-
-        if (lynx::GetCameraShake().enabled)
-        {
-            ImGui::SliderFloat(
-                "Shake Duration",
-                &lynx::GetCameraShake().duration,
-                0.01f,
-                2.0f,
-                "%.2f s"
-            );
-
-
-            ImGui::SliderFloat(
-                "Position Amplitude",
-                &lynx::GetCameraShake().positionAmplitude,
-                0.f,
-                20.f,
-                "%.2f"
-            );
-
-
-            ImGui::SliderFloat(
-                "Rotation Amplitude",
-                &lynx::GetCameraShake().rotationAmplitude,
-                0.f,
-                20.f,
-                "%.2f deg"
-            );
-
-
-            ImGui::SliderFloat(
-                "Shake Frequency",
-                &lynx::GetCameraShake().frequency,
-                1.f,
-                60.f,
-                "%.1f Hz"
-            );
-
-
-            ImGui::SliderFloat(
-                "Shake Falloff",
-                &lynx::GetCameraShake().falloff,
-                0.1f,
-                4.0f,
-                "%.2f"
-            );
-
-
-            if (ImGui::Button(
-                    "Test Camera Shake"
-                ))
-            {
-                lynx::GetCameraShake().Trigger();
-            }
-        }
-
-
-        ImGui::End();
-
-
-        // --------------------------------------------------------
-        }
+            DrawCameraShakeWindow(&editorWindows.cameraShake);
 
         // --------------------------------------------------------
         // Input Settings (project input.json)
@@ -9811,6 +9847,9 @@ int main(int argc, char** argv)
     // from assets/postprocess.json (editor : Windows > Post Process).
     lynx::postprocess::Install();
 
+    // Camera shake settings (editor : Windows > Camera Shake).
+    lynx::LoadCameraShakeSettings();
+
 
     // ------------------------------------------------------------
     // FPS
@@ -10307,6 +10346,382 @@ int main(int argc, char** argv)
     return 0;
 }
 
+
+// =============================================================================
+// Voxel World window
+// -----------------------------------------------------------------------------
+// Size of the voxel world of the current level (its .hrlv). Resizing keeps the
+// voxels ; the ones outside the new size are removed (confirmation). Undo :
+// Ctrl+Z. Saved with the level (Ctrl+S).
+// =============================================================================
+
+// Same settings as after a load : types, render mode, units, rebuild.
+static void RefreshVoxelWorldAfterChange()
+{
+    lynx::voxels::ApplyToScene(scene);
+    HRL_SetVoxelRenderMode(scene, appSettings.voxelRenderMode);
+    HRL_SetVoxelPhysicalSize(scene, 1.f);
+    HRL_BeginVoxelEdit(scene);
+    HRL_EndVoxelEdit(scene);
+}
+
+static void ResizeVoxelWorldWithUndo(int width, int height)
+{
+    // Undo : a snapshot of the whole world (compressed .hrlv in memory).
+    auto snapshot = std::make_shared<std::vector<uint8_t>>();
+    const size_t size = HRL_GetVoxelWorldSaveAllSize(scene);
+    if (size > 0)
+    {
+        snapshot->resize(size);
+        snapshot->resize(HRL_SaveVoxelWorldAll(scene, snapshot->data(), snapshot->size()));
+    }
+
+    ClearBrushPreview();
+    if (!HRL_ResizeVoxelWorld(scene, width, height))
+    {
+        ShowEditorWarning("The voxel world could not be resized (size too large for the .hrlv format ?)");
+        return;
+    }
+    RefreshVoxelWorldAfterChange();
+    editor_dirty = true;
+
+    if (!snapshot->empty())
+    {
+        PushEditorUndo([snapshot]()
+        {
+            ClearBrushPreview();
+            HRL_LoadVoxelWorldBuffer(scene, snapshot->data(), snapshot->size());
+            RefreshVoxelWorldAfterChange();
+            editor_dirty = true;
+        });
+    }
+    std::cout << "[WORLD] Voxel world resized to " << width << " x " << height << "\n";
+}
+
+static void DrawVoxelWorldWindow(bool* open)
+{
+    static int wanted_w = 0, wanted_h = 0;
+    static int synced_w = -1, synced_h = -1;
+    static uint64_t pending_removed = 0;
+
+    int width = 0, height = 0;
+    HRL_GetVoxelSize(scene, &width, &height);
+
+    // New level / undo : the fields follow the world.
+    if (width != synced_w || height != synced_h)
+    {
+        wanted_w = synced_w = width;
+        wanted_h = synced_h = height;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 24.f, 0.f), ImGuiCond_FirstUseEver);
+    const bool was_open = *open;
+    if (!ImGui::Begin("Voxel World", open))
+    {
+        ImGui::End();
+        if (was_open != *open) SaveEditorWindowVisibility();
+        return;
+    }
+    if (was_open != *open)
+        SaveEditorWindowVisibility();
+
+    ImGui::TextDisabled("Level");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(current_level_file.empty() ? "(none)" : current_level_file.c_str());
+    ImGui::TextDisabled("File");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(world_file_path_string.c_str());
+    ImGui::Text("Current size : %d x %d voxels  (chunks of %d)", width, height, HRL_GetVoxelChunkSize(scene));
+
+    ImGui::SeparatorText("New size");
+    ImGui::BeginDisabled(isPlaying);
+    ImGui::PushItemWidth(ImGui::GetFontSize() * 8.f);
+    ImGui::InputInt("Width", &wanted_w, 256, 4096);
+    ImGui::SameLine();
+    ImGui::InputInt("Height", &wanted_h, 256, 4096);
+    ImGui::PopItemWidth();
+    wanted_w = std::clamp(wanted_w, 16, 1 << 30);
+    wanted_h = std::clamp(wanted_h, 16, 1 << 30);
+
+    ImGui::TextDisabled("Presets");
+    for (int preset : { 1024, 4096, 16384, 65536, 131072, 262144 })
+    {
+        ImGui::SameLine();
+        char label[32];
+        std::snprintf(label, sizeof(label), "%dk", preset / 1024);
+        if (ImGui::SmallButton(label))
+            wanted_w = wanted_h = preset;
+    }
+
+    const bool encodable = HRL_IsVoxelSizeEncodable(scene, wanted_w, wanted_h) != 0;
+    const bool same = wanted_w == width && wanted_h == height;
+    if (!encodable)
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f), "Too large for the .hrlv format (too many chunks).");
+    ImGui::TextDisabled("The origin (0, 0) stays : the world grows / shrinks to the right and the top.");
+
+    ImGui::BeginDisabled(!encodable || same);
+    if (ImGui::Button("Apply", ImVec2(ImGui::GetFontSize() * 8.f, 0.f)))
+    {
+        pending_removed = HRL_CountVoxelsOutside(scene, wanted_w, wanted_h);
+        if (pending_removed > 0)
+            ImGui::OpenPopup("Shrink the voxel world ?");
+        else
+            ResizeVoxelWorldWithUndo(wanted_w, wanted_h);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Reset"))
+    {
+        wanted_w = width;
+        wanted_h = height;
+    }
+    ImGui::EndDisabled();
+    if (isPlaying)
+        ImGui::TextDisabled("Stop the game to resize the world.");
+
+    if (ImGui::BeginPopupModal("Shrink the voxel world ?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("%llu voxel(s) are outside %d x %d and will be removed.",
+                    static_cast<unsigned long long>(pending_removed), wanted_w, wanted_h);
+        ImGui::TextDisabled("Ctrl+Z restores them (until the editor is closed).");
+        if (ImGui::Button("Resize", ImVec2(ImGui::GetFontSize() * 7.f, 0.f)))
+        {
+            ResizeVoxelWorldWithUndo(wanted_w, wanted_h);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(ImGui::GetFontSize() * 7.f, 0.f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    ImGui::End();
+}
+
+// =============================================================================
+// Camera Shake window
+// -----------------------------------------------------------------------------
+// The settings change live ; "Test" shakes the editor camera (the same code as
+// the game : CameraShake::Update), "Loop" re-triggers it after a pause. The
+// curves show X / Y / roll over the duration (phases of the last trigger).
+// Saved in assets/camera_shake.json (loaded at start, editor and game).
+// =============================================================================
+
+static bool g_camera_shake_dirty = false;
+static bool g_camera_shake_loop = false;
+static float g_camera_shake_loop_wait = 0.f;
+
+static void DrawCameraShakeWindow(bool* open)
+{
+    lynx::CameraShake& shake = lynx::GetCameraShake();
+
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 26.f, ImGui::GetFontSize() * 30.f), ImGuiCond_FirstUseEver);
+    const bool was_open = *open;
+    if (!ImGui::Begin("Camera Shake", open))
+    {
+        ImGui::End();
+        if (was_open != *open) SaveEditorWindowVisibility();
+        return;
+    }
+    if (was_open != *open)
+        SaveEditorWindowVisibility();
+
+    // --- Test -------------------------------------------------------------
+    const float button_h = ImGui::GetFrameHeight() * 1.6f;
+    ImGui::BeginDisabled(isPlaying || !shake.enabled);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.45f, 0.75f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.53f, 0.85f, 1.f));
+    if (ImGui::Button(shake.active ? "Shaking...##Test" : "Test##Test",
+                      ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, button_h)))
+        shake.Trigger();
+    ImGui::PopStyleColor(2);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(isPlaying ? "Stop the game to test in the editor\n(in game : Engine.cameraShake() / GetCameraShake().Trigger())"
+                                    : "Shakes the editor camera with these settings");
+    ImGui::SameLine();
+    ImGui::BeginGroup();
+    ImGui::Checkbox("Loop", &g_camera_shake_loop);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Triggers it again and again (0.4 s pause) : tweak the sliders while it plays");
+    if (ImGui::SmallButton("Stop"))
+    {
+        g_camera_shake_loop = false;
+        shake.Stop();
+    }
+    ImGui::EndGroup();
+
+    // Loop : a short pause between two shakes.
+    if (g_camera_shake_loop && !isPlaying && shake.enabled && !shake.active)
+    {
+        g_camera_shake_loop_wait += ImGui::GetIO().DeltaTime;
+        if (g_camera_shake_loop_wait >= 0.4f)
+        {
+            g_camera_shake_loop_wait = 0.f;
+            shake.Trigger();
+        }
+    }
+
+    // --- Settings -----------------------------------------------------------
+    ImGui::SeparatorText("Settings");
+    bool changed = false;
+    changed |= ImGui::Checkbox("Enabled", &shake.enabled);
+    ImGui::BeginDisabled(!shake.enabled);
+    ImGui::PushItemWidth(-ImGui::GetFontSize() * 9.f);
+    changed |= ImGui::SliderFloat("Duration", &shake.duration, 0.01f, 3.f, "%.2f s");
+    changed |= ImGui::SliderFloat("Position amplitude", &shake.positionAmplitude, 0.f, 20.f, "%.2f voxels");
+    changed |= ImGui::SliderFloat("Rotation amplitude", &shake.rotationAmplitude, 0.f, 20.f, "%.2f deg");
+    changed |= ImGui::SliderFloat("Frequency", &shake.frequency, 1.f, 80.f, "%.1f Hz");
+    changed |= ImGui::SliderFloat("Falloff", &shake.falloff, 0.1f, 6.f, "%.2f");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("How fast it calms down : 1 = linear, higher = a strong hit that stops quickly");
+    ImGui::PopItemWidth();
+    changed |= ImGui::Checkbox("Horizontal (X)", &shake.shake_x);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Vertical (Y)", &shake.shake_y);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Roll", &shake.shake_roll);
+
+    // Presets.
+    ImGui::TextDisabled("Presets");
+    ImGui::SameLine();
+    auto preset = [&](const char* name, float duration, float pos, float rot, float freq, float falloff)
+    {
+        if (ImGui::SmallButton(name))
+        {
+            shake.duration = duration;
+            shake.positionAmplitude = pos;
+            shake.rotationAmplitude = rot;
+            shake.frequency = freq;
+            shake.falloff = falloff;
+            changed = true;
+            if (!isPlaying)
+                shake.Trigger();
+        }
+        ImGui::SameLine();
+    };
+    preset("Hit", 0.15f, 2.3f, 0.6f, 20.f, 1.25f);
+    preset("Explosion", 0.6f, 6.f, 3.f, 25.f, 2.f);
+    preset("Earthquake", 2.f, 3.f, 1.f, 8.f, 0.5f);
+    preset("Rumble", 1.f, 0.8f, 0.2f, 40.f, 0.3f);
+    ImGui::NewLine();
+    ImGui::EndDisabled();
+
+    // --- Curves -------------------------------------------------------------
+    ImGui::SeparatorText("Preview");
+    {
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float height = std::max(ImGui::GetFontSize() * 7.f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 2.2f);
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const ImVec2 b(a.x + width, a.y + height);
+        ImGui::InvisibleButton("##ShakeCurves", ImVec2(width, height));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(a, b, IM_COL32(24, 24, 28, 255), 4.f);
+        dl->AddRect(a, b, IM_COL32(70, 70, 80, 255), 4.f);
+        const float mid = (a.y + b.y) * 0.5f;
+        dl->AddLine(ImVec2(a.x, mid), ImVec2(b.x, mid), IM_COL32(70, 70, 80, 255));
+
+        // Scale : the largest amplitude fills the box.
+        const float range = std::max(0.001f, std::max(shake.positionAmplitude, shake.rotationAmplitude));
+        const float half = height * 0.45f;
+        const int samples = std::max(32, static_cast<int>(width));
+        struct Curve { int axis; ImU32 color; bool on; };
+        const Curve curves[] = {
+            { 0, IM_COL32(235, 90, 90, 255), shake.shake_x },
+            { 1, IM_COL32(110, 210, 110, 255), shake.shake_y },
+            { 2, IM_COL32(100, 160, 255, 255), shake.shake_roll },
+        };
+        for (const Curve& c : curves)
+        {
+            if (!c.on)
+                continue;
+            ImVec2 previous;
+            for (int i = 0; i <= samples; ++i)
+            {
+                const float t = shake.duration * static_cast<float>(i) / static_cast<float>(samples);
+                float v[3];
+                shake.Sample(std::min(t, shake.duration * 0.9999f), v[0], v[1], v[2]);
+                const ImVec2 p(a.x + width * static_cast<float>(i) / static_cast<float>(samples),
+                               mid - v[c.axis] / range * half);
+                if (i > 0)
+                    dl->AddLine(previous, p, c.color, 1.5f);
+                previous = p;
+            }
+        }
+
+        // Play head.
+        if (shake.active && shake.duration > 0.f)
+        {
+            const float x = a.x + width * std::clamp(shake.elapsed / shake.duration, 0.f, 1.f);
+            dl->AddLine(ImVec2(x, a.y), ImVec2(x, b.y), IM_COL32(255, 220, 120, 255), 2.f);
+        }
+
+        char legend[96];
+        std::snprintf(legend, sizeof(legend), "X  Y  Roll      %.2f s", shake.duration);
+        dl->AddText(ImVec2(a.x + 6.f, a.y + 4.f), IM_COL32(235, 90, 90, 255), "X");
+        dl->AddText(ImVec2(a.x + 6.f + ImGui::CalcTextSize("X  ").x, a.y + 4.f), IM_COL32(110, 210, 110, 255), "Y");
+        dl->AddText(ImVec2(a.x + 6.f + ImGui::CalcTextSize("X  Y  ").x, a.y + 4.f), IM_COL32(100, 160, 255, 255), "Roll");
+        char right[32];
+        std::snprintf(right, sizeof(right), "%.2f s", shake.duration);
+        dl->AddText(ImVec2(b.x - ImGui::CalcTextSize(right).x - 6.f, b.y - ImGui::GetTextLineHeight() - 4.f),
+                    IM_COL32(150, 150, 160, 255), right);
+        (void)legend;
+    }
+
+    // --- Save ---------------------------------------------------------------
+    if (changed)
+        g_camera_shake_dirty = true;
+    ImGui::BeginDisabled(!g_camera_shake_dirty);
+    if (ImGui::Button("Save"))
+        g_camera_shake_dirty = !lynx::SaveCameraShakeSettings();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Revert"))
+    {
+        lynx::CameraShake defaults;
+        shake.duration = defaults.duration;
+        shake.positionAmplitude = defaults.positionAmplitude;
+        shake.rotationAmplitude = defaults.rotationAmplitude;
+        shake.frequency = defaults.frequency;
+        shake.falloff = defaults.falloff;
+        shake.shake_x = shake.shake_y = shake.shake_roll = true;
+        lynx::LoadCameraShakeSettings();
+        g_camera_shake_dirty = false;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(g_camera_shake_dirty ? "assets/camera_shake.json (not saved)" : "assets/camera_shake.json");
+
+    ImGui::End();
+}
+
+// Editor camera : the shake started by "Test" (not during Play : the game
+// cameras apply it).
+static void ApplyCameraShakePreview(HRL_id camera, float dt)
+{
+    static bool shaking = false;
+    lynx::CameraShake& shake = lynx::GetCameraShake();
+
+    if (!isPlaying && shake.active && camera != HRL_INVALID_ID)
+    {
+        float x = 0.f, y = 0.f, roll = 0.f;
+        shake.Update(dt, x, y, roll);
+        HRL_SetCameraLocation(camera, camX + x, camY + y, camZ);
+        if (cameraMode == EditorCameraMode::Mode3D)
+            HRL_SetCameraRotation(camera, camPitch, camYaw, roll);
+        else
+            HRL_SetCameraRotation(camera, 0.f, -90.f, roll);
+        shaking = true;
+    }
+    else if (shaking)
+    {
+        shaking = false;
+        if (!isPlaying && camera != HRL_INVALID_ID)
+        {
+            ApplyEditorCameraRotation();
+            HRL_SetCameraLocation(camera, camX, camY, camZ);
+        }
+    }
+}
 
 // =============================================================================
 // Post Process window

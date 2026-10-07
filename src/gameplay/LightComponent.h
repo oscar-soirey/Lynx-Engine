@@ -110,6 +110,7 @@ namespace lynx
 	protected:
 		void OnAttach() override;
 		void Update(float dt) override;
+		void LateUpdate(float dt) override;
 
 	private:
 		void Sync(bool force);

@@ -65,6 +65,8 @@ namespace lynx
 	void TextBlock::SyncNativeStyle()
 	{
 		const HRL_id id = GetNative()->id;
+		// Like the Widget Editor : real size, from the top-left corner, clipped.
+		HRL_SetLabelTextLayout(id, HRL_TEXT_LAYOUT_TOP_LEFT);
 		HRL_SetLabelText(id, text.c_str());
 		HRL_SetLabelTextSize(id, font_size * GetDPIScale());
 		HRL_SetLabelTintColor(id, color.x, color.y, color.z, color.w);
@@ -155,6 +157,8 @@ namespace lynx
 		const WidgetNative* native = GetNative();
 		const HRL_id id = native->id;
 
+		// Like the Widget Editor : real size, centered, clipped.
+		HRL_SetButtonTextLayout(id, HRL_TEXT_LAYOUT_CENTER);
 		HRL_SetButtonText(id, text.c_str());
 		HRL_SetButtonTextSize(id, font_size * GetDPIScale());
 		const HRL_id f = ui::native::Font(font);

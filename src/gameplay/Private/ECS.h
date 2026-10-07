@@ -55,6 +55,9 @@ namespace lynx::ecs
 	/** Chaque tick de jeu : BeginPlay des nouveaux composants, puis Tick. */
 	void Tick(float dt);
 
+	/** Chaque frame, apres le gameplay : synchronisation finale vers le rendu. */
+	void LateUpdate(float dt);
+
 	/** Juste avant la destruction d'un acteur par le niveau (EndPlay). */
 	void OnActorDestroyed(Actor* actor);
 

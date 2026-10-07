@@ -788,6 +788,18 @@ namespace lynx::editor::ship_game
 			if (fs::is_regular_file(root / "input.json", ec) && !CopyInto(root / "input.json", output, error))
 				return fail(error);
 
+			// Default font of the widgets (texts without a font) : the editor
+			// font, like the Widget Editor preview.
+			{
+				const fs::path font = engine_dir / "fonts" / "VCR-OSD-MONO.ttf";
+				if (fs::is_regular_file(font, ec))
+				{
+					fs::create_directories(output / "fonts", ec);
+					if (!CopyInto(font, output / "fonts", error))
+						return fail(error);
+				}
+			}
+
 			// 4. Plugins : the runtime module (+ plugin.json, assets/) of every
 			//    enabled plugin -> <game>/plugins/<Name>/, and a plugins.json
 			//    that enables them. The editor modules stay behind.

@@ -125,6 +125,11 @@ namespace lynx
 			source_3d_->SyncWithActor();
 	}
 
+	void SoundSourceComponent::LateUpdate(float dt)
+	{
+		Update(dt);
+	}
+
 	void SoundSourceComponent::EndPlay()
 	{
 		Stop();

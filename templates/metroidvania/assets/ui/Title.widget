@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Widget version="1" class="" design_width="1920" design_height="1080">
+    <CanvasPanel object_id_="Root">
+        <Image object_id_="Back" texture="ui/img/white.png" tint="0.01 0.01 0.03 1">
+            <Slot anchor_min="0 0" anchor_max="1 1" offsets="0 0 0 0" alignment="0 0"/>
+        </Image>
+        <TextBlock object_id_="Title" text="LYNX HOLLOW" font_size="110" color="0.92 0.95 1 1">
+            <Slot anchor_min="0.5 0.38" anchor_max="0.5 0.38" offsets="0 0 1400 130" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Subtitle" text="a tale of the deep caves" font_size="34" color="0.55 0.8 0.85 1">
+            <Slot anchor_min="0.5 0.48" anchor_max="0.5 0.48" offsets="0 0 1000 44" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+        <TextBlock object_id_="Press" text="press JUMP" font_size="36" color="1 0.92 0.7 1">
+            <Slot anchor_min="0.5 0.7" anchor_max="0.5 0.7" offsets="0 0 800 44" alignment="0.5 0.5" auto_size="true"/>
+        </TextBlock>
+    </CanvasPanel>
+</Widget>

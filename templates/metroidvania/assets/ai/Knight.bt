@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shield Knight : patrols ; sees the player -> approaches with the shield up ; close enough -> winds up and thrusts (parry it !). -->
+<BehaviorTree version="1">
+    <Blackboard>
+        <Key name="target" type="actor"/>
+        <Key name="distance" type="float" default="999"/>
+    </Blackboard>
+    <Node id="1" parent="0" type="Root" x="0" y="0"/>
+    <Node id="2" parent="1" type="Selector" x="0" y="140">
+        <Service id="101" type="FindNearest" tag="player" radius="34" result="target" interval="0.3"/>
+        <Service id="102" type="DistanceTo" target="target" result="distance" interval="0.15"/>
+    </Node>
+    <Node id="3" parent="2" type="Sequence" x="-420" y="300">
+        <Decorator id="103" type="CallFunction" function="CanThrust" abort="lowerPriority"/>
+    </Node>
+    <Node id="4" parent="3" type="CallFunction" x="-520" y="460" function="Windup"/>
+    <Node id="5" parent="3" type="CallFunction" x="-360" y="460" function="Thrust"/>
+    <Node id="6" parent="3" type="Wait" x="-200" y="460" time="0.7" random="0.2"/>
+    <Node id="7" parent="2" type="Sequence" x="0" y="300">
+        <Decorator id="104" type="Blackboard" key="target" op="isSet" abort="both"/>
+    </Node>
+    <Node id="8" parent="7" type="CallFunction" x="0" y="460" function="Approach"/>
+    <Node id="9" parent="2" type="CallFunction" x="380" y="300" function="Patrol"/>
+</BehaviorTree>

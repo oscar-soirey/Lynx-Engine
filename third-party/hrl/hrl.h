@@ -424,6 +424,17 @@ typedef enum HRL_EVFXSpawnShape {
 } HRL_EVFXSpawnShape;
 
 
+/* Placement of the text of a label / button in its widget box.
+ * FIT      : the text is scaled to fill the box (aspect kept), centered (default).
+ * TOP_LEFT : the text keeps its size (text size = pixel height of a line), from the
+ *            top-left corner of the box ; a longer text overflows the box.
+ * CENTER   : the text keeps its size, centered in the box (may overflow it). */
+typedef enum HRL_ETextLayout{
+	HRL_TEXT_LAYOUT_FIT = 0,
+	HRL_TEXT_LAYOUT_TOP_LEFT,
+	HRL_TEXT_LAYOUT_CENTER
+}HRL_ETextLayout;
+
 typedef enum HRL_ESliderOrientation{
 	HRL_SLIDER_HORIZONTAL = 0,
 	HRL_SLIDER_VERTICAL
@@ -1163,6 +1174,19 @@ extern "C" {
 	 * @param _height    World height in voxels.
 	 */
 	HRL_API void HRL_SetVoxelSize(HRL_id _sceneid, int _width, int _height);
+	/** Size of the voxel world (voxels). HRL_FALSE (0, 0) without a world. */
+	HRL_API int HRL_GetVoxelSize(HRL_id _sceneid, int* _width, int* _height);
+	HRL_API int HRL_GetVoxelChunkSize(HRL_id _sceneid);
+	/** The size fits the .hrlv encoding (chunk count <= 2^32 with the current chunk size). */
+	HRL_API int HRL_IsVoxelSizeEncodable(HRL_id _sceneid, int _width, int _height);
+	/** Non-empty voxels that a resize to (_width, _height) would remove. */
+	HRL_API uint64_t HRL_CountVoxelsOutside(HRL_id _sceneid, int _width, int _height);
+	/**
+	 * Changes the size of the voxel world, KEEPING its voxels (unlike
+	 * HRL_SetVoxelSize, which empties it). Voxels outside the new size are
+	 * removed. The origin (0, 0) does not move. Save the world afterwards.
+	 */
+	HRL_API int HRL_ResizeVoxelWorld(HRL_id _sceneid, int _width, int _height);
 
 	/**
 	 * @brief Creates an empty voxel world with the given dimensions.
@@ -2279,6 +2303,7 @@ extern "C" {
 	HRL_API void HRL_SetButtonTextSize(HRL_id widget, float size);
 	HRL_API void HRL_SetButtonTextTintColor(HRL_id widget, HRL_EWidgetState state, float r, float g, float b, float a);
 	HRL_API void HRL_SetButtonTextFont(HRL_id widget, HRL_id font);
+	HRL_API void HRL_SetButtonTextLayout(HRL_id widget, HRL_ETextLayout layout);
 	HRL_API void HRL_SetButtonBackgroundTexture(HRL_id widget, HRL_EWidgetState state, HRL_id texture);
 	HRL_API void HRL_SetButtonBackgroundTintColor(HRL_id widget, HRL_EWidgetState state, float r, float g, float b, float a);
 	typedef void(*HRL_CButtonPressed)(HRL_id button, int clicked, int released, void* user_data);
@@ -2289,6 +2314,7 @@ extern "C" {
 	HRL_API void HRL_SetLabelTextSize(HRL_id widget, float size);
 	HRL_API void HRL_SetLabelFont(HRL_id widget, HRL_id font);
 	HRL_API void HRL_SetLabelTintColor(HRL_id widget, float r, float g, float b, float a);
+	HRL_API void HRL_SetLabelTextLayout(HRL_id widget, HRL_ETextLayout layout);
 
 	/* IMAGE */
 	HRL_API void HRL_SetImageTexture(HRL_id widget, HRL_id texture);

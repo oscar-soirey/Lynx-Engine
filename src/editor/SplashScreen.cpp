@@ -485,7 +485,7 @@ namespace lynx::editor::splash
 		ImGuiIO& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 		io.LogFilename = nullptr;
-		io.ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange |
+		io.ConfigFlags |= ImGuiConfigFlags_NoMouse |
 		                  ImGuiConfigFlags_NoKeyboard;
 
 		// Same font as the editor (the editor loads its own afterwards).

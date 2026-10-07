@@ -43,6 +43,8 @@ namespace lynx::editor::plugins
 	/** Every frame : plugin ticks and their open windows. */
 	void Tick(float dt);
 	void DrawWindows();
+	/** A window of a plugin has the keyboard focus (the editor shortcuts stay off). */
+	bool HasFocus();
 
 	/** Windows menu : one checkbox per plugin window. */
 	void DrawWindowsMenuItems();

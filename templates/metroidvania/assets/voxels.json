@@ -1,0 +1,22 @@
+{
+    // Voxel types of {{PROJECT_TITLE}} (id = position in the list + 1, 0 = empty).
+    // Flags used by the game (classes/*.js) :
+    //   SOFT    : the nail digs it (and the dirt goes to your pouch)
+    //   HARD    : only bombs (and the Warden) break it
+    //   CRYSTAL : gives geo when broken
+    // Spikes / Acid : contact events (VoxelEvents) -> damage + back to safe ground.
+    "voxels": [
+        { "name": "Dirt",    "color": "7a5a3c", "collision": "SOLID", "texture": "textures/dirt.png", "texture_tile": 16, "flags": ["SOFT"] },
+        { "name": "Rock",    "color": "5c5a66", "collision": "SOLID", "texture": "textures/rock.png", "texture_tile": 16, "flags": ["HARD"] },
+        { "name": "Bedrock", "color": "26242f", "collision": "SOLID", "texture": "textures/bedrock.png", "texture_tile": 16, "indestructible": true },
+        { "name": "Moss",    "color": "4a7a38", "collision": "SOLID", "texture": "textures/moss.png", "texture_tile": 16, "flags": ["SOFT"] },
+        { "name": "Crystal", "color": "6ad8ff", "collision": "SOLID", "texture": "textures/crystal.png", "texture_tile": 8, "emissive": "2a8ab8", "flags": ["SOFT", "CRYSTAL"] },
+        { "name": "Spikes",  "color": "d8d8e4", "collision": "SOLID", "texture": "textures/spikes.png", "texture_tile": 2, "indestructible": true, "physics": { "behavior": "static", "contact_events": true } },
+        { "name": "Acid",    "color": "7ae83a", "collision": "NONE", "texture": "textures/acid.png", "texture_tile": 16, "emissive": "306a10", "indestructible": true, "physics": { "preset": "Water", "behavior": "liquid", "contact_events": true, "damage": 0 } },
+        { "name": "Wood",    "color": "8a5a34", "collision": "SOLID", "texture": "textures/wood.png", "texture_tile": 8, "flags": ["SOFT"] },
+        { "name": "Brick",   "color": "8a4a3a", "collision": "SOLID", "texture": "textures/brick.png", "texture_tile": 8, "flags": ["HARD"] },
+        { "name": "Packed",  "color": "a07850", "collision": "SOLID", "texture": "textures/packed.png", "texture_tile": 4, "flags": ["SOFT"] },
+        { "name": "Sand",    "color": "c8a868", "collision": "SOLID", "texture": "textures/sand.png", "texture_tile": 16, "flags": ["SOFT"], "physics": { "preset": "Sand" } },
+        { "name": "Seal",    "color": "e05aff", "collision": "SOLID", "texture": "textures/seal.png", "texture_tile": 8, "emissive": "8a2ab8", "indestructible": true }
+    ]
+}

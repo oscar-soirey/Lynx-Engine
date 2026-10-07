@@ -790,6 +790,9 @@ void TextEditor::HandleMouseInputs()
 		               mouse.x >= ImGui::GetCursorScreenPos().x + mTextStart - 2.0f;
 	}
 
+	if (mTextHovered)
+		ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
+
 	if (ImGui::IsWindowHovered())
 	{
 		if (!shift && !alt)

@@ -206,8 +206,14 @@ namespace lynx
 			SnapToTarget();
 	}
 
-	void CameraComponent::Tick(float dt)
+	void CameraComponent::LateUpdate(float dt)
 	{
+		// Le suivi se fait apres tout le gameplay (comme un LateUpdate Unity) :
+		// dans Tick, selon l'ordre des composants, la camera pouvait suivre la
+		// position de la frame precedente -> une frame de retard, saccades.
+		if (!HasBegunPlay() || !tick_enabled)
+			return;
+
 		Actor* owner = GetOwner();
 
 		if (!owner || !EnsureCamera())

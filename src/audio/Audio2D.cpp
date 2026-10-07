@@ -4,6 +4,7 @@
 #include <openal/al.h>
 
 #include <algorithm>
+#include <iostream>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -37,7 +38,10 @@ namespace lynx
 
 		const std::vector<uint8_t> sound_data = fs::ReadBinary(sound_asset);
 		if (sound_data.empty())
+		{
+			std::cout << "[Audio] Son introuvable : assets/" << sound_asset << std::endl;
 			return;
+		}
 
 		std::vector<int16_t> pcm;
 		int channels = 0;
@@ -45,7 +49,10 @@ namespace lynx
 
 		// 2D : on garde le stereo tel quel (pas de downmix).
 		if (!audio_detail::LoadSoundFile(sound_asset, sound_data, false, pcm, channels, sample_rate))
+		{
+			std::cout << "[Audio] Son illisible (wav / mp3 attendu) : " << sound_asset << std::endl;
 			return;
+		}
 
 		const ALenum format = channels == 1 ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Spitter : drifts ; sees the player -> keeps its distance above him and spits. -->
+<BehaviorTree version="1">
+    <Blackboard>
+        <Key name="target" type="actor"/>
+        <Key name="distance" type="float" default="999"/>
+    </Blackboard>
+    <Node id="1" parent="0" type="Root" x="0" y="0"/>
+    <Node id="2" parent="1" type="Selector" x="0" y="140">
+        <Service id="101" type="FindNearest" tag="player" radius="36" result="target" interval="0.3"/>
+        <Service id="102" type="DistanceTo" target="target" result="distance" interval="0.15"/>
+    </Node>
+    <Node id="3" parent="2" type="Sequence" x="-320" y="300">
+        <Decorator id="103" type="CallFunction" function="CanSpit"/>
+        <Decorator id="104" type="Cooldown" time="1.6"/>
+    </Node>
+    <Node id="4" parent="3" type="CallFunction" x="-420" y="460" function="Spit"/>
+    <Node id="5" parent="2" type="Sequence" x="0" y="300">
+        <Decorator id="105" type="Blackboard" key="target" op="isSet"/>
+    </Node>
+    <Node id="6" parent="5" type="CallFunction" x="0" y="460" function="Hover"/>
+    <Node id="7" parent="2" type="CallFunction" x="320" y="300" function="Drift"/>
+</BehaviorTree>

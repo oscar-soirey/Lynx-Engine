@@ -43,6 +43,7 @@ class Robot extends Actor {
         const dir = { x: dx / d, y: dy / d };
         const bullet = Level.spawn("EnemyBullet", vec3(this.position.x + dir.x * 2, this.position.y + dir.y * 2, 1));
         bullet.Fire(dir, 35, 8, this);
+        Sfx.play("laser", this.position, { volume: 0.4, gap: 60 });
         this.anim.flipX = dx < 0;
         return true;
     }
@@ -53,10 +54,12 @@ class Robot extends Actor {
         if (this.hp <= 0)
             return;
         this.hp -= amount;
+        Sfx.play("hit", this.position, { volume: 0.5, gap: 50 });
         if (this.hp > 0)
             return;
         Level.spawn("Explosion", this.position);
         Voxels.destroyCircle(this.position, 3, { flags: "COVER" });
+        Sfx.play("explosion", this.position);
         if (Math.random() < 0.25)
             Level.spawn("HealthPack", vec3(this.position.x, this.position.y, 0));
         for (const d of Level.findImplementing("ArenaEvents"))

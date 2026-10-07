@@ -1,4 +1,5 @@
 #include "Voxels.h"
+#include "RessourceManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -327,7 +328,8 @@ namespace lynx::voxels
 			return it->second;
 
 		HRL_id id = HRL_INVALID_ID;
-		const std::vector<std::uint8_t> data = fs::ReadBinary(path.c_str());
+		// Decoded by a plugin if needed (.lsprite...).
+		const std::vector<std::uint8_t> data = ReadTextureFile(path.c_str());
 		if (!data.empty())
 			id = HRL_CreateTexture(reinterpret_cast<const char*>(data.data()), data.size());
 		if (id == HRL_INVALID_ID)

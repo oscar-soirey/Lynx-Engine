@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Level voxels="world.hrlv">
+    <Wanderer object_id_="player" transform="transform:940,1551.5,0;0,0,0;1,1,1"/>
+    <Bench object_id_="bench_start" transform="transform:930,1550.6,0;0,0,0;1,1,1" title="Start Cave"/>
+    <Bench object_id_="bench_west" transform="transform:940,1460.6,0;0,0,0;1,1,1" title="Western Hollow"/>
+    <Bench object_id_="bench_boss" transform="transform:1112,1460.6,0;0,0,0;1,1,1" title="Warden's Door"/>
+    <AbilityShrine object_id_="shrine_dash" transform="transform:1185,1543.4,0;0,0,0;1,1,1" ability="dash"/>
+    <AbilityShrine object_id_="shrine_claw" transform="transform:1295,1462.4,0;0,0,0;1,1,1" ability="claw"/>
+    <AbilityShrine object_id_="shrine_wings" transform="transform:1292,1588.4,0;0,0,0;1,1,1" ability="wings"/>
+    <AbilityShrine object_id_="shrine_hook" transform="transform:972,1462.4,0;0,0,0;1,1,1" ability="hook"/>
+    <AbilityShrine object_id_="shrine_bombs" transform="transform:1050,1502.4,0;0,0,0;1,1,1" ability="bombs"/>
+    <HintStone object_id_="hint_move" transform="transform:950,1551,0;0,0,0;1,1,1" text="A / D : move   SPACE : jump (hold : higher)"/>
+    <HintStone object_id_="hint_attack" transform="transform:982,1551,0;0,0,0;1,1,1" text="J : attack   (W / S + J : up / down, down in the air : pogo)"/>
+    <HintStone object_id_="hint_dig" transform="transform:1006,1551,0;0,0,0;1,1,1" text="Your nail digs DIRT. Rock needs bombs."/>
+    <HintStone object_id_="hint_focus" transform="transform:1080,1541,0;0,0,0;1,1,1" text="F (hold) : focus your SOUL to heal   L : parry"/>
+    <HintStone object_id_="hint_block" transform="transform:1140,1541,0;0,0,0;1,1,1" text="E : place a dirt block (you collect dirt by digging)"/>
+    <HintStone object_id_="hint_bench" transform="transform:1114,1461,0;0,0,0;1,1,1" text="Rest on a bench (W) : heal and save. The Warden sleeps below the rock."/>
+    <MaskShard object_id_="shard_1" transform="transform:916,1574,0;0,0,0;1,1,1"/>
+    <MaskShard object_id_="shard_2" transform="transform:962,1506,0;0,0,0;1,1,1"/>
+    <MaskShard object_id_="shard_3" transform="transform:1290,1552,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_1" transform="transform:975,1551.4,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_2" transform="transform:1070,1558.4,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_3" transform="transform:1132,1556.4,0;0,0,0;1,1,1"/>
+    <Hopper object_id_="hopper_4" transform="transform:1090,1541.4,0;0,0,0;1,1,1"/>
+    <Spitter object_id_="spitter_5" transform="transform:1115,1575,0;0,0,0;1,1,1"/>
+    <Spitter object_id_="spitter_6" transform="transform:1260,1510,0;0,0,0;1,1,1"/>
+    <Spitter object_id_="spitter_7" transform="transform:1285,1520,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_8" transform="transform:1292,1487.4,0;0,0,0;1,1,1"/>
+    <Hopper object_id_="hopper_9" transform="transform:1270,1461.4,0;0,0,0;1,1,1"/>
+    <Spitter object_id_="spitter_10" transform="transform:1272,1565,0;0,0,0;1,1,1"/>
+    <Knight object_id_="knight_11" transform="transform:1030,1461.4,0;0,0,0;1,1,1"/>
+    <Knight object_id_="knight_12" transform="transform:1190,1461.4,0;0,0,0;1,1,1"/>
+    <Burrower object_id_="burrower_13" transform="transform:1070,1461.4,0;0,0,0;1,1,1"/>
+    <Burrower object_id_="burrower_14" transform="transform:1140,1461.4,0;0,0,0;1,1,1"/>
+    <Hopper object_id_="hopper_15" transform="transform:1100,1461.4,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_16" transform="transform:1200,1479.4,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_17" transform="transform:1020,1461.4,0;0,0,0;1,1,1"/>
+    <Hopper object_id_="hopper_18" transform="transform:1215,1461.4,0;0,0,0;1,1,1"/>
+    <Knight object_id_="knight_19" transform="transform:950,1461.4,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_20" transform="transform:930,1487.4,0;0,0,0;1,1,1"/>
+    <Spitter object_id_="spitter_21" transform="transform:960,1500,0;0,0,0;1,1,1"/>
+    <Crawler object_id_="crawler_22" transform="transform:1230,1587.4,0;0,0,0;1,1,1"/>
+    <Hopper object_id_="hopper_23" transform="transform:1120,1589.4,0;0,0,0;1,1,1"/>
+    <BossArena object_id_="arena" transform="transform:1135,1426,0;0,0,0;1,1,1" size="vec2:170,34"/>
+    <Warden object_id_="warden" transform="transform:1170,1417.6,0;0,0,0;1,1,1"/>
+    <Relic object_id_="relic" transform="transform:1250,1412,0;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_1" transform="transform:956,1580,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_2" transform="transform:1020,1558,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_3" transform="transform:1100,1580,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_4" transform="transform:1180,1566,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_5" transform="transform:1270,1530,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_6" transform="transform:1280,1600,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_7" transform="transform:1100,1496,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_8" transform="transform:1200,1496,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_9" transform="transform:950,1504,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_10" transform="transform:1135,1440,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_11" transform="transform:1080,1440,0.5;0,0,0;1,1,1"/>
+    <Lantern object_id_="lantern_12" transform="transform:1190,1440,0.5;0,0,0;1,1,1"/>
+    <!-- Lights : a dark cave, lit by the lanterns, crystals and the player. -->
+    <SkyLightActor object_id_="sky_light" transform="transform:1100,1550,20;0,0,0;1,1,1" color="vec3:0.45,0.55,0.9" intensity="0.16"/>
+    <DirectionalLightActor object_id_="moon" transform="transform:1100,1590,20;-60,-70,0;1,1,1" color="vec3:0.6,0.7,1" intensity="0.25"/>
+</Level>

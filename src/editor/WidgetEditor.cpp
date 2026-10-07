@@ -840,8 +840,8 @@ namespace lynx::editor::widget_editor
 				pos.y = min.y + (max.y - min.y - text_size.y) * 0.5f;
 			}
 
-			const ImVec4 clip(min.x, min.y, max.x, max.y);
-			draw->AddText(font, px, pos, color, text.c_str(), nullptr, 0.f, &clip);
+			// Not clipped by the widget box : a long text overflows it, like in game.
+			draw->AddText(font, px, pos, color, text.c_str());
 		}
 
 		void DrawBrush(ImDrawList* draw, const ImVec2& a, const ImVec2& b, const std::string& texture, ImU32 color)
@@ -2041,15 +2041,6 @@ namespace lynx::editor::widget_editor
 			std::snprintf(label, sizeof(label), "%.0f x %.0f   DPI x%.2f   zoom %.0f%%", res.x, res.y, dpi, doc.zoom * 100.f);
 			draw->AddText(ImVec2(area_min.x + 8.f, area_max.y - ImGui::GetTextLineHeight() - 6.f), IM_COL32(170, 170, 180, 255), label);
 
-			// Cursor : resize handles.
-			if (hovered && doc.drag == DragMode::None)
-			{
-				const int h = handle_at(mouse);
-				if (h == 0 || h == 4) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
-				else if (h == 2 || h == 6) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNESW);
-				else if (h == 1 || h == 5) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-				else if (h == 3 || h == 7) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-			}
 
 			draw->PopClipRect();
 		}
@@ -2211,8 +2202,6 @@ namespace lynx::editor::widget_editor
 				ImGui::InvisibleButton("##split", ImVec2(thickness, -1.f));
 			else
 				ImGui::InvisibleButton("##split", ImVec2(-1.f, thickness));
-			if (ImGui::IsItemHovered() || ImGui::IsItemActive())
-				ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
 			if (ImGui::IsItemActive())
 				size = std::clamp(size + (vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y), min_size, max_size);
 			ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),

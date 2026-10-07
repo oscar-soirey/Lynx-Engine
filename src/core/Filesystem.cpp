@@ -409,4 +409,14 @@ namespace lynx::fs
     {
         return g_initialized;
     }
+
+    std::wstring GetExecutableFolder()
+    {
+        const std::filesystem::path exe = GetExecutablePath();
+        if (!exe.empty())
+            return exe.parent_path().wstring();
+
+        std::error_code ec;
+        return std::filesystem::current_path(ec).wstring();
+    }
 }

@@ -9,11 +9,12 @@ nav {
 }
 </style></head>
 <body>
-<header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="documentation.html">Documentation</a><a href="scripting.html">JavaScript</a><a class="lynxie-link" href="lynxie.html">Lynxie</a></nav></header>
+<header class="topbar"><div class="brand"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></div><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="documentation.html">Documentation</a><a href="scripting.html">JavaScript</a><a class="lynxie-link" href="lynxie.html">Lynxie</a><a href="thirdparty.html">Third-party</a><a href="download.html">Download</a></nav></header>
 <main>
 <section class="hero"><div class="hero-copy"><p class="eyebrow">GAME ENGINE / SCRIPTABLE / PIXEL-FIRST</p><h1>BUILD.<br><span>PLAY. SCRIPT.</span></h1><p class="lead">Lynx is a game engine for everything from small games to massive open worlds with dynamic voxel destruction. It is built around Actors, components, levels, and lightweight JavaScript scripting powered by QuickJS. No C++ required to make a game.</p><div class="actions"><a class="button primary" href="scripting.html">Read JavaScript Guide</a><a class="button" href="#lynxie">Meet Lynxie</a></div></div><div class="pixel-engine" aria-label="Pixel art engine preview"><div class="pixel-screen" id="scene"><div class="stars"></div><div class="pixel-sun"></div><div class="cloud c1"></div><div class="cloud c2"></div>
 <img class="fcube f1" src="assets/cube-purple.png" alt=""><img class="fcube f2" src="assets/cube-yellow.png" alt=""><img class="fcube f3" src="assets/cube-green.png" alt="">
 <img class="mush" src="assets/mushroom.png" alt=""><div class="pixel-ground"></div><div class="hero-sprite"></div></div><div class="pixel-console">LYNX // RUNTIME</div></div></section>
+<section class="section" id="download"><div class="section-head"><p class="eyebrow">DOWNLOAD</p><h2>Get Lynx Engine for Windows</h2><p>Download the latest user release and install Lynx Engine with the official updater.</p></div><article class="card"><div class="icon">WIN</div><h3>Windows x64</h3><p>Download <strong>LynxUpdater-w-x64.exe</strong> for 64-bit Windows.</p><div class="actions"><a class="button primary" href="https://github.com/oscar-soirey/Lynx-Engine/releases/download/user-v1/LynxUpdater-w-x64.exe" target="_blank" rel="noopener">Download for Windows</a><a class="button" href="https://github.com/oscar-soirey/Lynx-Engine/releases/tag/user-v1" target="_blank" rel="noopener">View release</a></div></article></section>
 <section class="section roadmap"><div class="section-head"><p class="eyebrow">THE ROAD AHEAD</p><h2>Big ambitions for Lynx</h2><p>Here are a few directions we want to explore in future updates.</p></div><div class="cards">
 <article class="card"><div class="icon">NODE</div><h3>Animation &amp; AI node editors</h3><p>Visual node editors for building animations and AI behaviors, designed to work alongside JavaScript.</p></article>
 <article class="card"><div class="icon">MUSIC</div><h3>Music for open worlds</h3><p>Tools to manage game music across expansive worlds and changing gameplay states.</p></article>
@@ -56,5 +57,26 @@ nav {
 <div class="vox-divider" aria-hidden="true"></div>
 <section class="section callout"><p class="eyebrow">DOCUMENTATION</p><h2>Start with scripting</h2><p>The JavaScript section explains the instance model, lifecycle, Actor properties, transforms, levels, input, time control, reflection, hot reload, and common gameplay patterns.</p><a class="button primary" href="scripting.html">Open Complete Guide</a></section>
 <div class="vox-divider" aria-hidden="true"></div>
-<section class="section"><div class="section-head"><p class="eyebrow">STANDING ON</p><h2>Built on proven libraries</h2></div><div class="chips"></div><p></footer>
-<script src="site.js" defer></script></body></html>
+<section class="section">
+<div class="section-head">
+<p class="eyebrow">STANDING ON</p>
+<h2>Built on proven libraries</h2>
+<p>Lynx uses focused open-source libraries for rendering, ECS, scripting, audio, networking, profiling and editor tooling.</p>
+</div>
+<div class="chips">
+<a class="chip" href="thirdparty.html#hrl"><img class="chip-logo wide" src="assets/libs/hrl.png" alt="">HRL</a>
+<a class="chip" href="thirdparty.html#entt"><img class="chip-logo" src="assets/cube-green.png" alt="">EnTT</a>
+<a class="chip" href="thirdparty.html#quickjs"><img class="chip-logo" src="assets/cube-yellow.png" alt="">QuickJS</a>
+<a class="chip" href="thirdparty.html#glfw"><img class="chip-logo" src="assets/cube-purple.png" alt="">GLFW</a>
+<a class="chip" href="thirdparty.html#imgui"><img class="chip-logo" src="assets/cube-pink.png" alt="">Dear ImGui</a>
+<a class="chip" href="thirdparty.html#dr-audio"><img class="chip-logo" src="assets/cube-yellow.png" alt="">dr_libs</a>
+<a class="chip" href="thirdparty.html#openal"><img class="chip-logo" src="assets/cube-purple.png" alt="">OpenAL</a>
+<a class="chip" href="thirdparty.html#tracy"><img class="chip-logo" src="assets/cube-green.png" alt="">Tracy</a>
+<a class="chip" href="thirdparty.html#curl"><img class="chip-logo" src="assets/cube-pink.png" alt="">cURL</a>
+</div>
+<p><a class="button" href="thirdparty.html">View third-party libraries →</a></p>
+</section>
+</main>
+<footer><span>LYNX ENGINE</span><span>Game engine documentation</span><span>Developed by Oscar Soirey</span></footer>
+<script src="site.js" defer></script>
+</body></html>

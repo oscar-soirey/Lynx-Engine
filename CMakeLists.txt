@@ -232,13 +232,18 @@ endif()
 # (see src/editor/ProjectTemplates.h). Edit or add templates in templates/.
 # The copy is emptied first : a template removed or renamed in templates/ must
 # not stay next to the editor.
-add_custom_command(TARGET LynxEditor POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:LynxEditor>/templates"
+# A target that runs at EVERY build (not a POST_BUILD of the editor, which
+# only runs when the editor is relinked : a template added or edited without
+# touching the C++ never reached the editor).
+add_custom_target(LynxTemplates ALL
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/templates"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory
 				"${CMAKE_CURRENT_SOURCE_DIR}/templates"
-				"$<TARGET_FILE_DIR:LynxEditor>/templates"
+				"${CMAKE_CURRENT_BINARY_DIR}/templates"
 		COMMENT "Copying the project templates"
+		VERBATIM
 )
+add_dependencies(LynxEditor LynxTemplates)
 
 
 
@@ -262,9 +267,13 @@ set(LYNX_ENGINE_TARGET Lynx)
 set(LYNX_HRL_LIB "${HRL_LIB}")
 include(cmake/LynxPlugin.cmake)
 
-foreach(LYNX_PLUGIN_NAME Dialogue CineCamera)
+foreach(LYNX_PLUGIN_NAME Dialogue CineCamera PixelSprite Mesh3D)
 	add_subdirectory(plugins/${LYNX_PLUGIN_NAME})
-	add_dependencies(LynxEditor ${LYNX_PLUGIN_NAME} ${LYNX_PLUGIN_NAME}.Editor)
+	add_dependencies(LynxEditor ${LYNX_PLUGIN_NAME})
+	# Editor module : only for the plugins that have one (Mesh3D : runtime only).
+	if(TARGET ${LYNX_PLUGIN_NAME}.Editor)
+		add_dependencies(LynxEditor ${LYNX_PLUGIN_NAME}.Editor)
+	endif()
 endforeach()
 
 # Game projects : include("${Lynx_DIR}/LynxPlugin.cmake") (after find_package(Lynx)).
@@ -303,7 +312,10 @@ add_executable(LynxLauncher src/editor_icon.rc
 		launcher/Dependencies.cpp
 		launcher/Models.cpp
 		launcher/Engine.cpp
+		launcher/PluginStore.cpp
 		launcher/Process.cpp
+		src/editor/MarkdownText.cpp    # notes de version / descriptions en Markdown
+		launcher/MarkdownShims.cpp     # polices et sélection de l'éditeur remplacées
 )
 
 target_link_libraries(LynxLauncher PRIVATE
@@ -312,6 +324,8 @@ target_link_libraries(LynxLauncher PRIVATE
 		gdi32
 		shell32     # ShellExecute (links to the websites)
 		advapi32    # registry (PATH refresh after an install)
+		ole32       # folder picker (Plugins > Import a folder)
+		uuid
 )
 
 # Static libstdc++ / libgcc and no console : the launcher runs before MinGW is installed.
