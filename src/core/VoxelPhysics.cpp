@@ -308,8 +308,10 @@ namespace lynx::voxel_physics
 		{
 			const uint32_t scene = Scene();
 			const size_t n = static_cast<size_t>(r.w) * static_cast<size_t>(r.h);
+			LYNX_PROFILE_COUNT("Voxel cells read", n);
 			r.cells.resize(n);
 			bool any = false;
+			LYNX_PROFILE_SCOPE("Read region");
 			for (int y = 0; y < r.h; ++y)
 				for (int x = 0; x < r.w; ++x)
 				{
@@ -320,6 +322,7 @@ namespace lynx::voxel_physics
 			if (!any)
 				return;
 
+			LYNX_PROFILE_SCOPE("Move voxels");
 			r.blocked.assign(n, 0);
 			r.moved.assign(n, 0);
 			r.dirty.assign(n, 0);
@@ -352,6 +355,7 @@ namespace lynx::voxel_physics
 						StepGas(r, x, y);
 				}
 
+			LYNX_PROFILE_SCOPE("Write voxels (remesh)");
 			bool began = false;
 			for (int y = 0; y < r.h; ++y)
 				for (int x = 0; x < r.w; ++x)
@@ -359,6 +363,7 @@ namespace lynx::voxel_physics
 					const size_t i = static_cast<size_t>(y) * r.w + x;
 					if (!r.dirty[i])
 						continue;
+					LYNX_PROFILE_COUNT("Voxels moved", 1);
 					if (!began)
 					{
 						HRL_BeginVoxelEdit(scene);
@@ -493,10 +498,15 @@ namespace lynx::voxel_physics
 						regions.push_back(r);
 				}
 
+				LYNX_PROFILE_COUNT("Voxel regions", regions.size());
 				for (Region& r : regions)
+				{
+					LYNX_PROFILE_SCOPE("Region");
 					Simulate(r, *level);
+				}
 			}
 
+			LYNX_PROFILE_SCOPE("Contacts");
 			Contacts(*level, g_step);
 		}
 	}
@@ -528,6 +538,8 @@ namespace lynx::voxel_physics
 			while (g_accumulator >= g_step)
 			{
 				g_accumulator -= g_step;
+				LYNX_PROFILE_SCOPE("Step");
+				LYNX_PROFILE_COUNT("Voxel steps", 1);
 				Step();
 			}
 		}

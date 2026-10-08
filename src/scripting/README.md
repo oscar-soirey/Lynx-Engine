@@ -58,6 +58,8 @@ class Boss extends Enemy { /* ... */ }        // héritage entre classes JS, aut
   qu'une convention). Avant chaque niveau, chaque `.js` qui déclare une `class Nom extends ...`
   est chargé ; les scripts attachés (sans classe) ne sont pas touchés. Seules les classes qui
   héritent d'`Actor` sont enregistrées. L'ordre des fichiers n'a pas d'importance.
+  Une classe utilitaire sans parent, déclarée en début de ligne (`class Game { static ... }`),
+  est aussi chargée et devient globale : tous les fichiers et scripts peuvent l'utiliser.
 - **Où elles apparaissent** : dans la factory, comme une classe C++. Elles sont donc dans
   *Place Actors* de l'éditeur, dans les niveaux (`<Enemy object_id_="e1" hp="40"/>`),
   et se créent par `Level.spawn("Enemy")` ou `new Enemy()` en JS (ajouté au niveau).
@@ -216,6 +218,22 @@ C++ : `lynx::physics::Raycast(from, to, params)`, `RaycastAll`, `LineOfSight`, `
 `PostProcess.set("exposure", 0.5)`, `PostProcess.set("tintColor", [1, 0.9, 0.8])`,
 `PostProcess.get("bloomStrength")`, `PostProcess.reset()`, `PostProcess.params()`.
 Les valeurs de départ viennent de `assets/postprocess.json` (fenêtre **Post Process** de l'éditeur).
+
+## Profiler
+
+La fenêtre **Profiler** de l'éditeur montre déjà chaque classe et méthode JS (`Lueur.Update`,
+`Arena.OnBeginOverlap`...), chaque script attaché et chaque type de composant. Pour découper une
+méthode lente :
+
+```js
+Profiler.begin("Fire.spread");   // ... code ...
+Profiler.end();
+const n = Profiler.scope("Breaker.circle", () => Breaker.circle(p, 3));   // fn() dans une zone
+Profiler.count("Voxels cassés", cells.length);   // additionné sur chaque frame
+Profiler.counter("Feux actifs", feux.length);       // valeur affichée
+```
+
+Sans la fenêtre ouverte (ni Tracy connecté), ces appels ne coûtent presque rien.
 
 ## Particules
 

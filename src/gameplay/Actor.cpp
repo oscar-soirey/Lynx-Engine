@@ -1,4 +1,5 @@
 #include "Actor.h"
+#include "../core/Profiler.h"
 
 #include "../core/Engine.h"
 #include "../core/Level.h"
@@ -13,6 +14,11 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <typeinfo>
+#if defined(__GNUG__)
+#include <cxxabi.h>
+#include <cstdlib>
+#endif
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -197,6 +203,53 @@ namespace lynx
 			return out;
 		}
 
+		/**
+		 * Profiler zone of a component : its C++ type, without namespace
+		 * ("struct lynx::SpriteComponent" -> "SpriteComponent"). nullptr when
+		 * the fine zones are off. Cached by type (no string work per call).
+		 */
+		const char* ProfileName(const Component& c)
+		{
+			if (!profiler::Detailed())
+				return nullptr;
+
+			static std::unordered_map<const char*, const char*> cache;   // typeid name -> interned
+			const char* raw = typeid(c).name();
+			auto it = cache.find(raw);
+			if (it != cache.end())
+				return it->second;
+
+			std::string name = raw;
+#if defined(__GNUG__)
+			// GCC / MinGW / Clang : "N4lynx15SpriteComponentE" -> "lynx::SpriteComponent".
+			int status = 0;
+			if (char* demangled = abi::__cxa_demangle(raw, nullptr, nullptr, &status))
+			{
+				if (status == 0)
+					name = demangled;
+				std::free(demangled);
+			}
+#endif
+			for (const char* prefix : { "class ", "struct " })
+				if (name.rfind(prefix, 0) == 0)
+					name.erase(0, std::char_traits<char>::length(prefix));
+			// Last "::" outside template arguments.
+			int angle = 0;
+			size_t cut = std::string::npos;
+			for (size_t i = 0; i + 1 < name.size(); ++i)
+			{
+				if (name[i] == '<') ++angle;
+				else if (name[i] == '>') --angle;
+				else if (angle == 0 && name[i] == ':' && name[i + 1] == ':') cut = i + 2;
+			}
+			if (cut != std::string::npos)
+				name.erase(0, cut);
+
+			const char* interned = profiler::Intern(name);
+			cache.emplace(raw, interned);
+			return interned;
+		}
+
 		/** Tous les composants vivants, acteur par acteur. */
 		std::vector<Component*> CollectAllComponents()
 		{
@@ -344,7 +397,10 @@ namespace lynx
 			for (Component* c : CollectAllComponents())
 			{
 				if (!ComponentAccess::PendingDestroy(*c))
+				{
+					LYNX_PROFILE_SCOPE_PTR(ProfileName(*c));
 					ComponentAccess::Update(*c, dt);
+				}
 			}
 		}
 
@@ -354,7 +410,10 @@ namespace lynx
 			for (Component* c : CollectAllComponents())
 			{
 				if (!ComponentAccess::PendingDestroy(*c))
+				{
+					LYNX_PROFILE_SCOPE_PTR(ProfileName(*c));
 					ComponentAccess::LateUpdate(*c, dt);
+				}
 			}
 		}
 
@@ -362,8 +421,12 @@ namespace lynx
 		{
 			g_playing = true;
 			IterationGuard guard;
-			for (Component* c : CollectAllComponents())
+			const std::vector<Component*> components = CollectAllComponents();
+			LYNX_PROFILE_COUNTER("Components", components.size());
+			for (Component* c : components)
 			{
+				LYNX_PROFILE_SCOPE_PTR(ProfileName(*c));
+
 				// composant ajoute pendant le jeu : BeginPlay au premier tick
 				StartComponent(*c);
 

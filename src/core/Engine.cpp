@@ -90,6 +90,7 @@ namespace lynx
 		// RequestRenderRefresh) : a temporary sprite, created and deleted.
 		if (render_refresh_frames_ > 0 && scene_created_ && HRL_IsValidScene(scene_))
 		{
+			LYNX_PROFILE_SCOPE("Render refresh (mesh deleted)");
 			--render_refresh_frames_;
 			const HRL_id temp = HRL_CreateMeshSprite(scene_);
 			if (temp != HRL_INVALID_ID)
@@ -116,7 +117,10 @@ namespace lynx
 		const float game_dt = dt * GetGlobalTimeDilatation();
 
 		// Plugins : every frame (game time ; also in the editor, not playing).
-		plugins::Tick(game_dt, game_tick_enabled_);
+		{
+			LYNX_PROFILE_SCOPE("Plugins");
+			plugins::Tick(game_dt, game_tick_enabled_);
+		}
 
 
 		// ========================================================
@@ -144,7 +148,10 @@ namespace lynx
 		if (game_tick_enabled_)
 		{
 			// Actors spawned (or changed) since the last frame.
-			ProcessAutoPossess();
+			{
+				LYNX_PROFILE_SCOPE("Auto possess");
+				ProcessAutoPossess();
+			}
 
 			// Input first (like Unreal's PlayerTick) : each player gives the
 			// input to the actor it possesses, then the actors tick.
@@ -182,7 +189,10 @@ namespace lynx
 			// Voxel physics (sand, water, gas... around the cameras).
 			voxel_physics::Tick(game_dt);
 
-			InputTick();
+			{
+				LYNX_PROFILE_SCOPE("Input");
+				InputTick();
+			}
 		}
 
 		if (current_level_)
@@ -209,16 +219,25 @@ namespace lynx
 		}
 
 		// One-shot particle effects (Particles.spawn) : the finished ones go.
-		particles::Tick(game_dt);
+		{
+			LYNX_PROFILE_SCOPE("Particles");
+			particles::Tick(game_dt);
+		}
 
 		LYNX_PROFILE_PLOT("Actors", static_cast<int64_t>(current_level_ ? current_level_->GetActors().size() : 0));
 
 		// Le listener suit l'acteur attache (AttachAudioListener) : sans cet appel,
 		// il reste a (0,0,0) et il n'y a aucune attenuation.
-		UpdateAudioListener();
+		{
+			LYNX_PROFILE_SCOPE("Audio listener");
+			UpdateAudioListener();
+		}
 
 		// Debug drawings of the physics queries that last (debug_duration).
-		physics::TickDebug(dt);
+		{
+			LYNX_PROFILE_SCOPE("Physics debug draw");
+			physics::TickDebug(dt);
+		}
 
 		{
 			// Widgets : clicks of the last frame, changes, layout. Real time

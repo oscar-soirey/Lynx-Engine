@@ -1,4 +1,5 @@
 #include "Plugins.h"
+#include "Profiler.h"
 
 #include "Engine.h"
 #include "Private/SystemModule.h"
@@ -309,6 +310,9 @@ namespace lynx::plugins
 	{
 		for (Loaded& l : g_loaded)
 			if (l.tick)
+			{
+				LYNX_PROFILE_SCOPE_PTR(::lynx::profiler::Active() ? ::lynx::profiler::Intern(l.name) : nullptr);
 				l.tick(dt, playing ? 1 : 0);
+			}
 	}
 }

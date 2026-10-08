@@ -282,9 +282,15 @@ namespace lynx
 		// Les acteurs spawnes pendant la frame rejoignent la liste ici, hors de
 		// toute boucle sur actors_. Avant les destructions : un acteur spawne
 		// puis detruit dans la meme frame doit etre retrouve.
+		LYNX_PROFILE_COUNT("Actors spawned", spawn_queue_.size());
+		LYNX_PROFILE_COUNT("Actors destroyed", destroy_queue_.size());
+
 		actors_.insert(actors_.end(), spawn_queue_.begin(), spawn_queue_.end());
 		spawn_queue_.clear();
 
+		// Each destruction searches the whole actor list : many destructions
+		// per frame with many actors cost (see this zone in the Profiler).
+		LYNX_PROFILE_SCOPE("Destroy actors");
 		for (auto& a: destroy_queue_)
 		{
 			// std::erase retourne le nombre d'elements retires : 0 si l'acteur

@@ -1,2 +1,74 @@
 [
+  {
+    "slug": "lynx-26-0-5-beta",
+    "title": "Lynx 26.0.5 Beta: plugins and voxel physics",
+    "date": "2026-10-07",
+    "summary": "C++ plugins, CineCamera, DialogueQuest, liquid and powder voxels, animation state machines, editor themes and more.",
+    "tags": [
+      "release",
+      "plugins",
+      "voxels"
+    ]
+  },
+  {
+    "slug": "a-proper-home-for-lynx",
+    "title": "A proper home for Lynx",
+    "date": "2026-10-07",
+    "summary": "The website got a big update: Microsoft Store download, a plugins page, this devlog and tutorials.",
+    "tags": [
+      "website",
+      "plugins"
+    ]
+  },
+  {
+    "slug": "lynx-26-0-4-beta",
+    "title": "Lynx 26.0.4 Beta: visual editors",
+    "date": "2026-10-06",
+    "summary": "Visual editors for animations and behavior trees, plus a sprite-to-voxels conversion button.",
+    "tags": [
+      "release",
+      "editor",
+      "ai"
+    ]
+  },
+  {
+    "slug": "meet-the-lynx-launcher",
+    "title": "Meet the Lynx launcher",
+    "date": "2026-10-06",
+    "summary": "Launcher 0.1.0, 0.1.1 and the Lynx Updater: what they are and how releases are named.",
+    "tags": [
+      "launcher"
+    ]
+  },
+  {
+    "slug": "lynx-26-0-3-beta",
+    "title": "Lynx 26.0.3 Beta: widgets, icon and splash screen",
+    "date": "2026-10-06",
+    "summary": "A new widget editor, custom game icons, a player controller and a splash screen.",
+    "tags": [
+      "release",
+      "editor",
+      "ui"
+    ]
+  },
+  {
+    "slug": "lynx-26-0-2-beta",
+    "title": "Lynx 26.0.2 Beta: first JavaScript integration",
+    "date": "2026-10-05",
+    "summary": "Gameplay scripts in JavaScript arrive, running on QuickJS-ng.",
+    "tags": [
+      "release",
+      "scripting"
+    ]
+  },
+  {
+    "slug": "lynx-26-0-1-beta",
+    "title": "Lynx 26.0.1 Beta is out",
+    "date": "2026-10-05",
+    "summary": "The first public preview of Lynx is on GitHub. Here is what it is, what's coming, and how to help.",
+    "tags": [
+      "release",
+      "ai"
+    ]
+  }
 ]

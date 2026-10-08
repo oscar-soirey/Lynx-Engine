@@ -204,6 +204,9 @@ namespace lynx
 		void RunPendingJobs()
 		{
 			// Promesses / async : execute les jobs en attente
+			if (!JS_IsJobPending(g->rt))
+				return;
+			LYNX_PROFILE_SCOPE("JS promises");
 			JSContext* job_ctx = nullptr;
 			int guard = 0;
 			while (guard++ < 10000)
@@ -1390,6 +1393,75 @@ namespace lynx
 			JS_SetClassProto(ctx, g_actor_class, actor_proto);
 		}
 
+		// ---- Profiler (JS) -------------------------------------------------
+		// Profiler.begin(name) / end() : a zone of the Profiler window (and
+		// Tracy) around game code. Profiler.scope(name, fn) : fn() in a zone,
+		// returns its result. Profiler.count(name, n?) / counter(name, value).
+		std::vector<int>& JsProfileTokens()
+		{
+			static std::vector<int> tokens;
+			return tokens;
+		}
+
+		JSValue ProfilerBegin(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 1 || !profiler::IsEnabled())
+				return JS_UNDEFINED;
+			const std::string name = ToStdString(ctx, argv[0]);
+			JsProfileTokens().push_back(profiler::BeginZone(profiler::Intern(name)));
+			return JS_UNDEFINED;
+		}
+
+		JSValue ProfilerEnd(JSContext*, JSValueConst, int, JSValueConst*)
+		{
+			auto& tokens = JsProfileTokens();
+			if (tokens.empty())
+				return JS_UNDEFINED;
+			const int token = tokens.back();
+			tokens.pop_back();
+			profiler::EndZone(token);   // ignored if the zone is gone (new frame)
+			return JS_UNDEFINED;
+		}
+
+		JSValue ProfilerScope(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+		{
+			if (argc < 2 || !JS_IsFunction(ctx, argv[1]))
+				return JS_ThrowTypeError(ctx, "Profiler.scope(name, fn)");
+			int token = 0;
+			if (profiler::IsEnabled())
+				token = profiler::BeginZone(profiler::Intern(ToStdString(ctx, argv[0])));
+			JSValue r = JS_Call(ctx, argv[1], this_val, 0, nullptr);
+			profiler::EndZone(token);
+			return r;   // an exception goes on to the caller
+		}
+
+		JSValue ProfilerCount(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 1 || !profiler::IsEnabled())
+				return JS_UNDEFINED;
+			double n = 1.0;
+			if (argc > 1 && JS_ToFloat64(ctx, &n, argv[1]))
+				return JS_EXCEPTION;
+			profiler::AddCount(profiler::Intern(ToStdString(ctx, argv[0])), n);
+			return JS_UNDEFINED;
+		}
+
+		JSValue ProfilerCounter(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			if (argc < 2 || !profiler::IsEnabled())
+				return JS_UNDEFINED;
+			double v = 0.0;
+			if (JS_ToFloat64(ctx, &v, argv[1]))
+				return JS_EXCEPTION;
+			profiler::SetCounter(profiler::Intern(ToStdString(ctx, argv[0])), v);
+			return JS_UNDEFINED;
+		}
+
+		JSValue ProfilerEnabled(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			return JS_NewBool(ctx, profiler::IsEnabled());
+		}
+
 		void RegisterGlobals(JSContext* ctx)
 		{
 			JSValue global = JS_GetGlobalObject(ctx);
@@ -1428,6 +1500,15 @@ namespace lynx
 			DefFunc(ctx, post, "reset", PostProcessReset, 0);
 			DefFunc(ctx, post, "params", PostProcessParams, 0);
 			JS_SetPropertyStr(ctx, global, "PostProcess", post);
+
+			JSValue prof = JS_NewObject(ctx);
+			DefFunc(ctx, prof, "begin", ProfilerBegin, 1);
+			DefFunc(ctx, prof, "end", ProfilerEnd, 0);
+			DefFunc(ctx, prof, "scope", ProfilerScope, 2);
+			DefFunc(ctx, prof, "count", ProfilerCount, 2);
+			DefFunc(ctx, prof, "counter", ProfilerCounter, 2);
+			DefFunc(ctx, prof, "isRecording", ProfilerEnabled, 0);
+			JS_SetPropertyStr(ctx, global, "Profiler", prof);
 
 			JSValue light2d = JS_NewObject(ctx);
 			DefFunc(ctx, light2d, "get", Lighting2DGet, 1);
@@ -1527,7 +1608,9 @@ namespace lynx
 				return false;
 			}
 
-			const std::string where = a->GetTypeName() + "." + name;
+			// "Lueur.Update", "Arena.OnBeginOverlap"... in the Profiler.
+			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? profiler::Intern(a->GetTypeName() + "." + name) : nullptr);
+			LYNX_PROFILE_COUNT("JS calls", 1);
 
 			++g->call_depth;
 			JSValue r = JS_Call(ctx, fn, obj, argc, argv);
@@ -1538,7 +1621,8 @@ namespace lynx
 
 			if (JS_IsException(r))
 			{
-				LogException(ctx, where);
+				// Built only on error (was a string per call).
+				LogException(ctx, a->GetTypeName() + "." + name);
 				r = JS_UNDEFINED;
 			}
 
@@ -1565,7 +1649,9 @@ namespace lynx
 				if (!g)
 					return;
 
-				LYNX_PROFILE_SCOPE("JS class Update");
+				// Fine zones : "<Class>.Update" (CallClassMethod) under the
+				// component zone. Otherwise one zone for all the classes.
+				LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? nullptr : "JS class Update");
 				JSValue arg = JS_NewFloat64(g->ctx, dt);
 				CallClassMethod(GetOwner(), "Update", 1, &arg);
 				RunPendingJobs();
@@ -2419,10 +2505,35 @@ namespace lynx
 
 				while (i < code.size() && std::isspace(static_cast<unsigned char>(code[i]))) ++i;
 
-				if (code.compare(i, 7, "extends") == 0 && IsIdentifier(name.c_str()))
+				if (!IsIdentifier(name.c_str()))
+					continue;
+
+				if (code.compare(i, 7, "extends") == 0)
+				{
 					names.push_back(std::move(name));
+					continue;
+				}
+
+				// Classe utilitaire sans parent ("class Game {", statiques
+				// partagees...) : seulement en debut de ligne, pour ne pas
+				// prendre un "class X {" ecrit dans un commentaire.
+				if (i < code.size() && code[i] == '{')
+				{
+					size_t b = pos - 5;
+					while (b > 0 && (code[b - 1] == ' ' || code[b - 1] == '\t')) --b;
+					if (b == 0 || code[b - 1] == '\n' || code[b - 1] == '\r')
+						names.push_back(std::move(name));
+				}
 			}
 
+			return names;
+		}
+
+		// Classes utilitaires (sans Actor / Interface / Widget / AI) rendues
+		// globales au dernier chargement : effacees au rechargement.
+		std::vector<std::string>& HelperClassNames()
+		{
+			static std::vector<std::string> names;
 			return names;
 		}
 
@@ -2445,6 +2556,14 @@ namespace lynx
 					JS_DeleteProperty(ctx, global, atom, 0);
 					JS_FreeAtom(ctx, atom);
 				}
+
+				for (const std::string& name : HelperClassNames())
+				{
+					JSAtom atom = JS_NewAtom(ctx, name.c_str());
+					JS_DeleteProperty(ctx, global, atom, 0);
+					JS_FreeAtom(ctx, atom);
+				}
+				HelperClassNames().clear();
 
 				JS_FreeValue(ctx, global);
 			}
@@ -2540,6 +2659,15 @@ namespace lynx
 							script_detail::RegisterWidgetClass(ctx, n, cls, file.path);
 						else if (script_detail::IsAIClassConstructor(ctx, cls))
 							script_detail::RegisterAIClass(ctx, n, cls, file.path);
+						else if (JS_IsFunction(ctx, cls))
+						{
+							// Classe utilitaire (Game, Sfx...) : globale, pour
+							// que les autres fichiers et scripts la voient.
+							JSValue global = JS_GetGlobalObject(ctx);
+							JS_SetPropertyStr(ctx, global, n.c_str(), JS_DupValue(ctx, cls));
+							JS_FreeValue(ctx, global);
+							HelperClassNames().push_back(n);
+						}
 
 						JS_FreeValue(ctx, cls);
 					}
@@ -2756,6 +2884,12 @@ namespace lynx
 			JSValue fn = JS_DupValue(g->ctx, found);
 			JSValue self = GetActorObject(g->ctx, entity);
 			const std::string path = inst.path;
+
+			// "player.js.Update" in the Profiler (file name, not the folders).
+			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed()
+				? profiler::Intern(path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1) + "." + name)
+				: nullptr);
+			LYNX_PROFILE_COUNT("JS calls", 1);
 
 			++g->call_depth;
 			JSValue r = JS_Call(g->ctx, fn, self, argc, argv);
@@ -3154,7 +3288,7 @@ namespace lynx
 		if (!g)
 			return;
 
-		LYNX_PROFILE_SCOPE("JS script Update");
+		LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? nullptr : "JS script Update");
 
 		JSValue arg = JS_NewFloat64(g->ctx, dt);
 		impl_->ForEachInstance([&](ScriptInstance& inst)

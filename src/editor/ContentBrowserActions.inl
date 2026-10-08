@@ -913,6 +913,7 @@ namespace content_browser_actions
         case NewFileKind::Widget:           return "User Interface";
         case NewFileKind::AnimGraph:        return "Animation";
         case NewFileKind::BehaviorTree:     return "Artificial Intelligence";
+        case NewFileKind::ParticleSystem:   return "Effects";
         default:                            return "Data";
         }
     }
@@ -929,6 +930,7 @@ namespace content_browser_actions
         case NewFileKind::Widget:           return "A user interface (menu, HUD), Widget Editor.";
         case NewFileKind::AnimGraph:        return "Sprite animation states and transitions.";
         case NewFileKind::BehaviorTree:     return "Decisions of an AI : tasks, decorators.";
+        case NewFileKind::ParticleSystem:   return "Particle effect (fire, smoke, sparks), Particle Editor.";
         default:                            return "";
         }
     }
@@ -946,10 +948,11 @@ namespace content_browser_actions
         entries.push_back({ "Folder", "Folder", "Organize the assets.", Kind::Folder,
                             [folder]() { BeginNew(NameAction::NewFolder, NewFileKind::Text, folder); } });
 
-        // Order of the sections : World, Scripting, User Interface, Animation, AI, Data.
+        // Order of the sections : World, Scripting, User Interface, Animation, AI, Effects, Data.
         const NewFileKind order[] = {
             NewFileKind::Level, NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript, NewFileKind::Widget,
-            NewFileKind::AnimGraph, NewFileKind::BehaviorTree, NewFileKind::Json, NewFileKind::Text,
+            NewFileKind::AnimGraph, NewFileKind::BehaviorTree, NewFileKind::ParticleSystem, NewFileKind::Json,
+            NewFileKind::Text,
         };
         for (NewFileKind kind : order)
         {

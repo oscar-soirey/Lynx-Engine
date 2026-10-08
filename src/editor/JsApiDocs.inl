@@ -72,6 +72,12 @@ static const ApiEntry kApiEntries[] = {
 	{ "PostProcess", "set", "set(name, value)", "Changes a post process setting now (number, bool or color).", "", true },
 	{ "PostProcess", "reset", "reset(name?)", "Back to the default value (all settings without a name).", "", true },
 	{ "PostProcess", "params", "params()", "Names of every post process setting.", "Array", true },
+	{ "Profiler", "begin", "begin(name)", "Opens a zone of the Profiler window (and Tracy) around game code. Close it with end().", "", true },
+	{ "Profiler", "end", "end()", "Closes the last zone opened by begin().", "", true },
+	{ "Profiler", "scope", "scope(name, fn)", "Calls fn() inside a zone, returns its result.", "", true },
+	{ "Profiler", "count", "count(name, n?)", "Adds n (default 1) to a counter summed over each frame (shown in the Profiler).", "", true },
+	{ "Profiler", "counter", "counter(name, value)", "Shows a value in the Profiler (enemies alive, fires...).", "", true },
+	{ "Profiler", "isRecording", "isRecording()", "The Profiler window records (open).", "", true },
 	{ "", "Lighting2D", "Lighting2D", "2D lighting of the project : ambient light, shadows of the voxels (window 2D Lighting).", "", false },
 	{ "Lighting2D", "get", "get(name)", "Value of a 2D lighting setting (enabled, ambientColor, ambientIntensity, intensity, shadows, pixelSnap, bands...).", "", true },
 	{ "Lighting2D", "set", "set(name, value)", "Changes a 2D lighting setting now : Lighting2D.set(\"enabled\", true), set(\"ambientIntensity\", 0.1).", "", true },
@@ -416,7 +422,7 @@ static const char* const kBuiltinGlobals[] = {
 	"print", "console", "vec3", "vec2", "Level", "Input", "Engine", "UI", "BT", "Actor", "UserWidget", "BTTask",
 	"BTDecorator", "BTService", "PointLightActor", "SpotLightActor", "DirectionalLightActor", "SkyLightActor",
 	"Light2DActor", "FogActor", "VolumetricFogActor", "ParticleActor", "Particles", "Lighting2D", "PostProcess",
-	"SpriteActor", "SoundActor", "ColliderActor",
+	"Profiler", "SpriteActor", "SoundActor", "ColliderActor",
 };
 
 // Members of every object (Object.prototype).

@@ -54,6 +54,93 @@
     "level": "Advanced"
   },
   {
+    "slug": "how-the-animation-system-works",
+    "title": "How the animation system works",
+    "date": "2026-10-07",
+    "summary": "Animations, blend spaces and the state machine: the exact rules of every update, with C++ examples and the classic traps.",
+    "tags": [
+      "animation",
+      "internals"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "animation-state-machines-in-javascript",
+    "title": "Animation state machines in JavaScript",
+    "date": "2026-10-07",
+    "summary": "Build a hero with idle, run and an uninterruptible hit reaction using only a script.",
+    "tags": [
+      "animation",
+      "scripting"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "building-an-anim-graph",
+    "title": "Building an Anim Graph in the editor",
+    "date": "2026-10-07",
+    "summary": "Parameters, animations, states, transitions and notifies in a visual .animgraph, plus the XML behind it.",
+    "tags": [
+      "animation",
+      "editor"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "how-behavior-trees-work",
+    "title": "How behavior trees work",
+    "date": "2026-10-07",
+    "summary": "Selectors, sequences, decorators, services and the Blackboard: how a .bt tree is executed on every tick.",
+    "tags": [
+      "ai",
+      "internals"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "a-guard-with-a-behavior-tree",
+    "title": "A guard with a behavior tree",
+    "date": "2026-10-07",
+    "summary": "Patrol, spot the player, chase and attack: a complete AI with a .bt file, a service and a JavaScript task.",
+    "tags": [
+      "ai",
+      "scripting"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "custom-behavior-tree-nodes-in-javascript",
+    "title": "Custom behavior tree nodes in JavaScript",
+    "date": "2026-10-07",
+    "summary": "Write your own tasks, decorators and services with BTTask, BTDecorator and BTService.",
+    "tags": [
+      "ai",
+      "scripting"
+    ],
+    "level": "Advanced"
+  },
+  {
+    "slug": "state-machine-ai-with-aibehavior",
+    "title": "State machine AI with AIBehavior",
+    "date": "2026-10-07",
+    "summary": "Actions, axes, states and transitions in C++, and when to prefer it over a behavior tree.",
+    "tags": [
+      "ai",
+      "c++"
+    ],
+    "level": "Advanced"
+  },
+  {
+    "slug": "writing-a-tutorial",
+    "title": "How to write a tutorial",
+    "date": "2026-10-07",
+    "summary": "A sample tutorial showing the structure and syntax available. Delete it when you publish your first real one.",
+    "tags": [
+      "meta"
+    ],
+    "level": "Beginner"
+  },
+  {
     "slug": "how-to-publish-a-plugin-on-the-official-registry",
     "title": "How to publish a plugin on the official registry",
     "date": "2026-10-09",
