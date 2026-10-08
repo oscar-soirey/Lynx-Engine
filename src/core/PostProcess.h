@@ -58,6 +58,23 @@ namespace lynx::postprocess
 	/** Materiau HRL du post process (0xFFFFFFFF avant Install). */
 	LYNX_API uint32_t GetMaterial();
 
+	/** Materiau avec l'eclairage 2D d'un viewport (un par joueur ; 0xFFFFFFFF : aucun). */
+	LYNX_API uint32_t GetMaterialFor(uint32_t viewport);
+
+	/**
+	 * Le shader du post process contient l'eclairage 2D (Lighting2D.h) : le shader
+	 * par defaut de HRL + ApplyLighting2D sur la couleur de la scene, en une passe.
+	 * false : il n'a pas compile, le post process par defaut de HRL est utilise.
+	 */
+	LYNX_API bool HasLighting2D();
+
+	/**
+	 * Eclairage 2D allume : le post process de chaque viewport passe au shader avec
+	 * l'eclairage 2D ; eteint : le post process par defaut de HRL, exactement comme
+	 * avant. Appele chaque frame par lighting2d::Update.
+	 */
+	LYNX_API void SetLighting2DActive(bool active);
+
 	/** Valeur actuelle (Float / Toggle : out[0]). false : nom inconnu. */
 	LYNX_API bool GetValue(const std::string& name, float out[3]);
 	LYNX_API float GetFloat(const std::string& name);

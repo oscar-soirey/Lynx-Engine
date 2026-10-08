@@ -8,6 +8,7 @@
 #include "../core/Level.h"
 #include "../core/PostProcess.h"
 #include "../core/Lighting2D.h"
+#include "../core/Particles.h"
 #include "../core/VoxelPhysics.h"
 #include "../core/data/Typename.h"
 #include "../gameplay/Actor.h"
@@ -1434,6 +1435,27 @@ namespace lynx
 			DefFunc(ctx, light2d, "reset", Lighting2DReset, 0);
 			DefFunc(ctx, light2d, "params", Lighting2DParams, 0);
 			JS_SetPropertyStr(ctx, global, "Lighting2D", light2d);
+
+			// Particles.spawn("fx/explosion.vfx", position, rotation?, scale?) : one-shot effect.
+			JSValue particles_obj = JS_NewObject(ctx);
+			DefFunc(ctx, particles_obj, "spawn", [](JSContext* c, JSValueConst, int argc, JSValueConst* argv) -> JSValue
+			{
+				vec3 position(0.f), rotation(0.f);
+				if (argc < 2 || !JS_IsString(argv[0]) || !ReadVec3(c, argv[1], position))
+					return JS_ThrowTypeError(c, "Particles.spawn(path, position, rotation?, scale?)");
+				if (argc >= 3 && !JS_IsUndefined(argv[2]))
+					ReadVec3(c, argv[2], rotation);
+				double scale = 1.0;
+				if (argc >= 4 && JS_IsNumber(argv[3]))
+					JS_ToFloat64(c, &scale, argv[3]);
+				return JS_NewBool(c, particles::Spawn(ToStdString(c, argv[0]), position, rotation, static_cast<float>(scale)));
+			}, 4);
+			DefFunc(ctx, particles_obj, "clear", [](JSContext*, JSValueConst, int, JSValueConst*) -> JSValue
+			{
+				particles::ClearSpawned();
+				return JS_UNDEFINED;
+			}, 0);
+			JS_SetPropertyStr(ctx, global, "Particles", particles_obj);
 
 			JSValue vphys = JS_NewObject(ctx);
 			DefFuncMagic(ctx, vphys, "setEnabled", VoxelPhysicsOp, 1, 0);

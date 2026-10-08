@@ -110,6 +110,9 @@ namespace lynx
 				{ "DirectionalLightActor", { EngineActorIcon::DirectionalLight } },
 				{ "SkyLightActor", { EngineActorIcon::SkyLight } },
 				{ "Light2DActor", { EngineActorIcon::PointLight } },
+				{ "FogActor", { EngineActorIcon::SkyLight } },
+				{ "ParticleActor", { EngineActorIcon::Actor } },
+				{ "VolumetricFogActor", { EngineActorIcon::SkyLight } },
 				{ "SpriteActor", { EngineActorIcon::Sprite } },
 				{ "SoundActor", { EngineActorIcon::Sound } },
 				{ "ColliderActor", { EngineActorIcon::Collider } },
@@ -404,6 +407,195 @@ namespace lynx
 	}
 
 
+	// ------------------------------------------------------------------------
+	// FogActor / VolumetricFogActor
+	// ------------------------------------------------------------------------
+
+	FogActor::FogActor()
+	{
+		HPROPERTY(enabled, Exposed);
+		HPROPERTY(mode, Exposed);
+		HPROPERTY(color, Exposed);
+		HPROPERTY(density, Exposed);
+		HPROPERTY(start, Exposed);
+		HPROPERTY(end, Exposed);
+	}
+
+	void FogActor::Init()
+	{
+		Actor::Init();
+		fog_ = &AddComponent<FogComponent>();
+		if (EditorDecorations())
+			AddComponent<EditorIconComponent>(EngineActorIcon::SkyLight);
+	}
+
+	void FogActor::Update(double dt)
+	{
+		Actor::Update(dt);
+		if (!fog_)
+			return;
+		fog_->enabled = enabled;
+		fog_->mode = mode == "linear" ? FogComponent::Mode::Linear
+		           : (mode == "exp2" || mode == "expSquared") ? FogComponent::Mode::ExpSquared
+		           : FogComponent::Mode::Exponential;
+		fog_->color = color;
+		fog_->density = density;
+		fog_->start = start;
+		fog_->end = end;
+	}
+
+
+	VolumetricFogActor::VolumetricFogActor()
+	{
+		HPROPERTY(enabled, Exposed);
+		HPROPERTY(global, Exposed);
+		HPROPERTY(color, Exposed);
+		HPROPERTY(density, Exposed);
+		HPROPERTY(radius, Exposed);
+		HPROPERTY(steps, Exposed);
+	}
+
+	void VolumetricFogActor::Init()
+	{
+		Actor::Init();
+		fog_ = &AddComponent<VolumetricFogComponent>();
+		if (EditorDecorations())
+			AddComponent<EditorIconComponent>(EngineActorIcon::SkyLight);
+	}
+
+	void VolumetricFogActor::StartGame()
+	{
+		Actor::StartGame();
+		playing_ = true;
+	}
+
+	void VolumetricFogActor::EndGame()
+	{
+		Actor::EndGame();
+		playing_ = false;
+	}
+
+	void VolumetricFogActor::Update(double dt)
+	{
+		Actor::Update(dt);
+		if (!fog_)
+			return;
+		fog_->enabled = enabled;
+		fog_->global = global;
+		fog_->color = color;
+		fog_->density = density;
+		fog_->radius = radius;
+		fog_->steps = steps;
+
+		// Editor : the edge of the volume (a circle on the level plane).
+		if (!playing_ && !global && EditorDecorations())
+		{
+			const uint32_t scene = Engine::GetScene();
+			if (!HRL_IsValidScene(scene))
+				return;
+			float c[3];
+			LineColor(color, c);
+			const vec3 center = transform.location;
+			constexpr int kSegments = 40;
+			vec3 previous = center + vec3(radius, 0.f, 0.f);
+			for (int i = 1; i <= kSegments; ++i)
+			{
+				const float a = 6.2831853f * static_cast<float>(i) / kSegments;
+				const vec3 p = center + vec3(std::cos(a) * radius, std::sin(a) * radius, 0.f);
+				HRL_DrawDebugSegment(scene, previous.x, previous.y, previous.z, p.x, p.y, p.z, c[0], c[1], c[2]);
+				previous = p;
+			}
+		}
+	}
+
+
+	// ------------------------------------------------------------------------
+	// ParticleActor
+	// ------------------------------------------------------------------------
+
+	ParticleActor::ParticleActor()
+	{
+		HPROPERTY(system, Exposed);
+		HPROPERTY(auto_play, Exposed);
+		HPROPERTY(time_scale, Exposed);
+		HPROPERTY(visible, Exposed);
+	}
+
+	ParticleActor::~ParticleActor()
+	{
+		delete instance_;
+	}
+
+	void ParticleActor::Init()
+	{
+		Actor::Init();
+		instance_ = new particles::Instance();
+		if (EditorDecorations())
+			AddComponent<EditorIconComponent>(EngineActorIcon::Actor);
+		Rebuild();
+	}
+
+	void ParticleActor::Rebuild()
+	{
+		built_path_ = system;
+		built_version_ = particles::GetAssetVersion();
+		built_visible_ = visible;
+		instance_->Destroy();
+		if (system.empty() || !visible)
+			return;
+		particles::SystemDesc desc;
+		if (!particles::LoadAsset(system, desc))
+			return;
+		if (instance_->Create(desc))
+		{
+			instance_->SetTransform(transform.location, transform.rotation, transform.scale);
+			instance_->SetTimeScale(time_scale);
+			if (!auto_play)
+				instance_->Pause();
+			stopped_ = false;
+		}
+	}
+
+	void ParticleActor::Update(double dt)
+	{
+		Actor::Update(dt);
+		if (!instance_)
+			return;
+		// The asset changed (path, Particle Editor save) or shown / hidden : again.
+		if (built_path_ != system || built_version_ != particles::GetAssetVersion() || built_visible_ != visible)
+			Rebuild();
+		if (instance_->IsValid())
+		{
+			instance_->SetTransform(transform.location, transform.rotation, transform.scale);
+			instance_->SetTimeScale(time_scale);
+		}
+	}
+
+	void ParticleActor::StartGame()
+	{
+		Actor::StartGame();
+		if (instance_ && auto_play)
+			Restart();
+	}
+
+	void ParticleActor::Restart()
+	{
+		if (!instance_)
+			return;
+		if (!instance_->IsValid())
+			Rebuild();
+		instance_->Restart();
+		stopped_ = false;
+	}
+
+	void ParticleActor::StopEmitting()
+	{
+		if (instance_)
+			instance_->Stop();
+		stopped_ = true;
+	}
+
+
 	SkyLightActor::SkyLightActor()
 		: LightActor(LightComponent::Type::Sky, EngineActorIcon::SkyLight)
 	{
@@ -588,6 +780,9 @@ namespace lynx
 		factory.RegisterObject("DirectionalLightActor", []() -> Object* { return new DirectionalLightActor(); });
 		factory.RegisterObject("SkyLightActor", []() -> Object* { return new SkyLightActor(); });
 		factory.RegisterObject("Light2DActor", []() -> Object* { return new Light2DActor(); });
+		factory.RegisterObject("FogActor", []() -> Object* { return new FogActor(); });
+		factory.RegisterObject("ParticleActor", []() -> Object* { return new ParticleActor(); });
+		factory.RegisterObject("VolumetricFogActor", []() -> Object* { return new VolumetricFogActor(); });
 		factory.RegisterObject("SpriteActor", []() -> Object* { return new SpriteActor(); });
 		factory.RegisterObject("SoundActor", []() -> Object* { return new SoundActor(); });
 		factory.RegisterObject("ColliderActor", []() -> Object* { return new ColliderActor(); });

@@ -68,6 +68,11 @@ MyGame/
   shadow_strength. JS : `this.addComponent("Light", { type: "point" | "spot" |
   "directional" | "sky", color: {x,y,z}, intensity, offset, attenuation,
   rotation, innerAngle, outerAngle, castShadows, shadowStrength })`.
+- **Particles** : `.vfx` files made in the Particle Editor (Content Browser >
+  New file > Particle System). One-shot effect in JS :
+  `Particles.spawn("fx/explosion.vfx", this.position)` (plays once, then removed) ;
+  a permanent one : engine actor `ParticleActor` (property `system` = the .vfx
+  path, `auto_play`, `time_scale`, `visible`). C++ : `lynx::particles::Spawn`.
 - **2D lighting** (lights the level seen from the front, shadows cast by the
   voxels) : turn it on in the window **2D Lighting** (Windows menu) or JS
   `Lighting2D.set("enabled", true)` ; settings ambientColor, ambientIntensity
@@ -78,6 +83,15 @@ MyGame/
   castShadows, sourceRadius (soft shadows), coneAngle (360 = all around,
   40-90 = flashlight), direction (degrees), flicker (0.1-0.3 = torch) })`.
   C++ : `AddComponent<lynx::Light2DComponent>()`.
+- **Fog** : `this.addComponent("Fog", { mode: "linear" | "exponential" | "exp2",
+  color, density, start, end })` (distance fog of the whole scene, the last
+  enabled one wins) ; **volumetric fog** : `this.addComponent("VolumetricFog",
+  { radius, density, color, steps, offset, global })` (a ball of mist at the
+  actor, or the whole scene with global: true). C++ : `lynx::FogComponent`,
+  `lynx::VolumetricFogComponent` (gameplay/FogComponent.h). Engine actors (Place
+  Actors, properties in Details) : `FogActor` (enabled, mode, color, density,
+  start, end) and `VolumetricFogActor` (enabled, global, color, density, radius,
+  steps ; the circle in the editor is its radius).
 
 ## C++ game code
 

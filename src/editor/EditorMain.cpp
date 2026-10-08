@@ -85,6 +85,7 @@
 #include "PropertyWidgets.h"
 #include "ProfilerWindow.h"
 #include "CommandPalette.h"
+#include "ParticleEditor.h"
 #include "ScriptEditors.h"
 #include "WidgetEditor.h"
 #include "GraphEditors.h"
@@ -3358,6 +3359,9 @@ static void DrawContentBrowser(lynx::Level* level)
             // .animgraph / .bt : node editors.
             else if (lynx::editor::graph_editors::CanOpen(entry.path()))
                 lynx::editor::graph_editors::Open(entry.path());
+            // .vfx : Particle Editor (Cascade-like).
+            else if (lynx::editor::particle_editor::CanOpen(entry.path()))
+                lynx::editor::particle_editor::Open(entry.path());
             else if (lynx::editor::script_editors::CanOpen(entry.path()))
                 lynx::editor::script_editors::Open(entry.path());
         }
@@ -5841,6 +5845,10 @@ namespace editor
         {
             return DrawAssetPathField(value);
         });
+        lynx::editor::particle_editor::SetAssetFieldDrawer([](std::string& value)
+        {
+            return DrawAssetPathField(value);
+        });
 
         // Apply persisted audio/camera preferences.
         lynx::SetMasterVolume(
@@ -6411,6 +6419,7 @@ namespace editor
             lynx::editor::script_editors::HasKeyboardFocus() ||
             lynx::editor::widget_editor::HasFocus() ||
             lynx::editor::graph_editors::HasFocus() ||
+            lynx::editor::particle_editor::HasFocus() ||
             lynx::editor::plugins::HasFocus();
 
 
@@ -7344,6 +7353,7 @@ namespace editor
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             !lynx::editor::widget_editor::HasFocus() &&
             !lynx::editor::graph_editors::HasFocus() &&
+            !lynx::editor::particle_editor::HasFocus() &&
             !lynx::editor::plugins::HasFocus() &&
             io.KeyCtrl &&
             ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
@@ -7364,6 +7374,7 @@ namespace editor
             !content_browser_focused &&
             !lynx::editor::widget_editor::HasFocus() &&
             !lynx::editor::graph_editors::HasFocus() &&
+            !lynx::editor::particle_editor::HasFocus() &&
             !lynx::editor::plugins::HasFocus() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts() &&
             ImGui::IsKeyPressed(ImGuiKey_Delete, false))
@@ -7838,6 +7849,9 @@ namespace editor
 
             // Anim Graph / Behavior Tree editors (one window per open file).
             lynx::editor::graph_editors::DrawAll(central_dock_id);
+
+            // Particle editors (one window per open .vfx).
+            lynx::editor::particle_editor::DrawAll(central_dock_id);
 
 
             // --------------------------------------------------------
@@ -8808,7 +8822,8 @@ namespace editor
             const bool scripts_dirty =
                 lynx::editor::script_editors::HasUnsavedChanges() ||
                 lynx::editor::widget_editor::HasUnsavedChanges() ||
-                lynx::editor::graph_editors::HasUnsavedChanges();
+                lynx::editor::graph_editors::HasUnsavedChanges() ||
+                lynx::editor::particle_editor::HasUnsavedChanges();
 
             if (editor_dirty || scripts_dirty)
             {
@@ -8832,6 +8847,7 @@ namespace editor
                     lynx::editor::script_editors::SaveAll();
                     lynx::editor::widget_editor::SaveAll();
                     lynx::editor::graph_editors::SaveAll();
+                    lynx::editor::particle_editor::SaveAll();
                     glfwSetWindowShouldClose(win, GLFW_TRUE);
                     ImGui::CloseCurrentPopup();
                 }
@@ -10376,6 +10392,9 @@ int main(int argc, char** argv)
     gameModule.reset();
     lynx::editor::plugins::UnloadEditorModules();
     lynx::plugins::UnloadAll();
+
+    // Preview scenes of the Particle Editor : before the renderer goes.
+    lynx::editor::particle_editor::Shutdown();
 
     lynx::Engine::Destroy();
 

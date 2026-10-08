@@ -13,6 +13,7 @@
 #include "Plugins.h"
 #include "CameraState.h"
 #include "Lighting2D.h"
+#include "Particles.h"
 #include "VoxelPhysics.h"
 #include "../gameplay/PhysicsQueries.h"
 #include "../gameplay/Actor.h"
@@ -69,6 +70,7 @@ namespace lynx
 
 		// frees every HRL object, the scene too
 		lighting2d::Shutdown();
+		particles::Shutdown();
 		camera_state::Clear();
 		HRL_Shutdown();
 		scene_ = HRL_INVALID_ID;
@@ -206,6 +208,9 @@ namespace lynx
 			lighting2d::Update(dt);
 		}
 
+		// One-shot particle effects (Particles.spawn) : the finished ones go.
+		particles::Tick(game_dt);
+
 		LYNX_PROFILE_PLOT("Actors", static_cast<int64_t>(current_level_ ? current_level_->GetActors().size() : 0));
 
 		// Le listener suit l'acteur attache (AttachAudioListener) : sans cet appel,
@@ -301,6 +306,9 @@ namespace lynx
 
 		// The widgets of the game go with it (NativeDestruct while the actors live).
 		ui::DestroyAllWidgets();
+
+		// One-shot particle effects of the game (Particles.spawn).
+		particles::ClearSpawned();
 
 		ecs::EndPlay();
 

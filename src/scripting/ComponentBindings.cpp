@@ -24,6 +24,7 @@
 #include "../gameplay/Components.h"
 #include "../gameplay/LightComponent.h"
 #include "../gameplay/Light2DComponent.h"
+#include "../gameplay/FogComponent.h"
 #include "../gameplay/Private/ECS.h"
 #include "../gameplay/SoundSourceComponent.h"
 #include "../gameplay/SpriteComponents.h"
@@ -1248,6 +1249,52 @@ namespace lynx::script_detail
 				 .field("direction", &Light2DComponent::direction)
 				 .field("useActorRotation", &Light2DComponent::use_actor_rotation)
 				 .field("flicker", &Light2DComponent::flicker);
+			}
+
+			// ---------------- Fog / VolumetricFog (gameplay/FogComponent.h) ----------------
+			{
+				Binder<FogComponent> b(ctx, "Fog");
+				b.prop("mode",
+					[](JSContext* c, FogComponent& t)
+					{
+						switch (t.mode)
+						{
+							case FogComponent::Mode::Linear:     return ToJS(c, std::string("linear"));
+							case FogComponent::Mode::ExpSquared: return ToJS(c, std::string("exp2"));
+							default:                             return ToJS(c, std::string("exponential"));
+						}
+					},
+					[](JSContext* c, FogComponent& t, JSValueConst v) -> JSValue
+					{
+						const std::string mode = ToStdString(c, v);
+						if (mode == "linear")
+							t.mode = FogComponent::Mode::Linear;
+						else if (mode == "exponential" || mode == "exp")
+							t.mode = FogComponent::Mode::Exponential;
+						else if (mode == "exp2" || mode == "expSquared")
+							t.mode = FogComponent::Mode::ExpSquared;
+						else
+							return JS_ThrowTypeError(c, "mode : \"linear\", \"exponential\" or \"exp2\"");
+						return JS_UNDEFINED;
+					});
+				b.field("enabled", &FogComponent::enabled)
+				 .field("color", &FogComponent::color)
+				 .field("density", &FogComponent::density)
+				 .field("start", &FogComponent::start)
+				 .field("end", &FogComponent::end)
+				 .get("active", [](JSContext* c, FogComponent& t) { return ToJS(c, t.IsActive()); })
+				 .action("refresh", [](FogComponent& t) { t.Refresh(); });
+			}
+			{
+				Binder<VolumetricFogComponent> b(ctx, "VolumetricFog");
+				b.field("enabled", &VolumetricFogComponent::enabled)
+				 .field("global", &VolumetricFogComponent::global)
+				 .field("color", &VolumetricFogComponent::color)
+				 .field("density", &VolumetricFogComponent::density)
+				 .field("radius", &VolumetricFogComponent::radius)
+				 .field("offset", &VolumetricFogComponent::offset)
+				 .field("steps", &VolumetricFogComponent::steps)
+				 .action("refresh", [](VolumetricFogComponent& t) { t.Refresh(); });
 			}
 
 			// ---------------- Velocity / Lifetime ----------------

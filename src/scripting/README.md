@@ -217,6 +217,14 @@ C++ : `lynx::physics::Raycast(from, to, params)`, `RaycastAll`, `LineOfSight`, `
 `PostProcess.get("bloomStrength")`, `PostProcess.reset()`, `PostProcess.params()`.
 Les valeurs de départ viennent de `assets/postprocess.json` (fenêtre **Post Process** de l'éditeur).
 
+## Particules
+
+Systèmes de particules `.vfx` faits dans le **Particle Editor** (Content Browser > New file >
+Particle System, double-clic). Effet ponctuel : `Particles.spawn("fx/explosion.vfx", position, rotation?, scale?)`
+le joue une fois puis le retire (renvoie `false` si le fichier est introuvable) ; `Particles.clear()` retire
+tous les effets ponctuels. Effet permanent : l'acteur `ParticleActor` (propriétés `system`, `auto_play`,
+`time_scale`, `visible`), qui suit l'acteur et se recharge quand le `.vfx` est sauvegardé.
+
 ## Éclairage 2D
 
 Éclaire le niveau vu de face (sprites, voxels, décor) avec des lumières 2D, et les voxels projettent
@@ -521,6 +529,23 @@ s.play(); s.stop(); s.playing; s.playAt(vec3(0, 0, 0));
 
 `type` (`"point"` / `"sky"`), `color`, `intensity`, `offset`, `enabled`.
 
+### Fog / VolumetricFog
+
+`Fog` : brouillard de distance de toute la scène (le dernier activé gagne). `mode`
+(`"linear"`, `"exponential"`, `"exp2"`), `enabled`, `color`, `density` (modes exponentiels),
+`start` / `end` (mode linéaire), `active` (lecture seule), `refresh()`.
+
+`VolumetricFog` : brume volumétrique. Une boule autour de l'acteur (`radius`, `offset`), ou
+toute la scène avec `global: true` (une seule à la fois). `enabled`, `color`, `density`,
+`steps` (4 à 64), `refresh()`. Au plus 64 volumes par scène.
+
+```js
+this.addComponent("Fog", { mode: "exponential", color: {x: 0.5, y: 0.55, z: 0.65}, density: 0.02 });
+this.addComponent("VolumetricFog", { radius: 18, density: 0.5 });
+```
+
+Retirer le composant (ou détruire l'acteur) enlève son brouillard.
+
 ### Light2D
 
 Lumière de l'éclairage 2D (voir *Éclairage 2D*). `color`, `intensity`, `radius` (voxels),
@@ -536,7 +561,10 @@ this.addComponent("Light2D", { color: {x: 1, y: 0.6, z: 0.3}, radius: 18, flicke
 ## Acteurs du moteur
 
 `Actor`, `PointLightActor`, `SpotLightActor`, `DirectionalLightActor`, `SkyLightActor`,
-`SpriteActor`, `SoundActor`, `ColliderActor` et `Humanoid` sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
+`SpriteActor`, `SoundActor`, `ColliderActor`, `Humanoid`, `Light2DActor`, `FogActor`
+(brouillard de distance : `enabled`, `mode`, `color`, `density`, `start`, `end`) et
+`VolumetricFogActor` (brume : `enabled`, `global`, `color`, `density`, `radius`, `steps`) et
+`ParticleActor` (`system` : un `.vfx`, `auto_play`, `time_scale`, `visible`) sont enregistrés par le moteur (`gameplay/EngineActors.h`) :
 `Level.spawn("PointLightActor")`, et une classe JS peut en hériter
 (`class Torch extends PointLightActor { ... }`).
 

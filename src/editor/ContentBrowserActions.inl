@@ -34,6 +34,7 @@ namespace content_browser_actions
         Widget,
         AnimGraph,
         BehaviorTree,
+        ParticleSystem,
         Count,
     };
 
@@ -53,6 +54,7 @@ namespace content_browser_actions
         { "Widget (.widget, UI)",                "NewWidget", ".widget" },
         { "Anim Graph (.animgraph, sprites)",    "NewAnimGraph", ".animgraph" },
         { "Behavior Tree (.bt, AI)",             "NewBehaviorTree", ".bt" },
+        { "Particle System (.vfx)",              "NewParticles", ".vfx" },
     };
 
     struct State
@@ -416,6 +418,9 @@ namespace content_browser_actions
         case NewFileKind::BehaviorTree:
             return lynx::editor::graph_editors::NewBehaviorTreeTemplate();
 
+        case NewFileKind::ParticleSystem:
+            return lynx::editor::particle_editor::NewFileTemplate();
+
         default:
             return {};
         }
@@ -511,6 +516,8 @@ namespace content_browser_actions
             lynx::editor::widget_editor::Open(path);
         else if (lynx::editor::graph_editors::CanOpen(path))
             lynx::editor::graph_editors::Open(path);
+        else if (lynx::editor::particle_editor::CanOpen(path))
+            lynx::editor::particle_editor::Open(path);
         else if (lynx::editor::script_editors::CanOpen(path))
             lynx::editor::script_editors::Open(path);
         else
@@ -666,6 +673,10 @@ namespace content_browser_actions
         {
             lynx::editor::graph_editors::Open(destination);
         }
+        else if (lynx::editor::particle_editor::CanOpen(destination))
+        {
+            lynx::editor::particle_editor::Open(destination);
+        }
         else if (lynx::editor::plugins::CanOpen(destination))
         {
             lynx::editor::plugins::OpenFile(destination);
@@ -771,6 +782,7 @@ namespace content_browser_actions
             lynx::editor::script_editors::PathDeleted(target);
             lynx::editor::widget_editor::PathDeleted(target);
             lynx::editor::graph_editors::PathDeleted(target);
+            lynx::editor::particle_editor::PathDeleted(target);
 
             if (IsPathInside(content_browser_current_path, target))
                 content_browser_current_path = target.parent_path();
@@ -838,6 +850,7 @@ namespace content_browser_actions
                     lynx::editor::script_editors::PathMoved(source, destination);
                     lynx::editor::widget_editor::PathMoved(source, destination);
                     lynx::editor::graph_editors::PathMoved(source, destination);
+                    lynx::editor::particle_editor::PathMoved(source, destination);
                 }
             }
             else

@@ -26,7 +26,7 @@ namespace lynx::lighting2d
 
 		const std::vector<ParamInfo> kParams = {
 			{ "enabled", "Enabled", "Lighting", PT::Toggle, {0.f}, 0.f, 1.f,
-			  "2D lighting of the project (off : the scene is drawn as before).", false },
+			  "2D lighting of the project (off : the 2D lights are not drawn).", false },
 			{ "ambientColor", "Ambient color", "Lighting", PT::Color, {1.f, 1.f, 1.f}, 0.f, 1.f,
 			  "Color of the scene outside the 2D lights. White : the normal lighting is kept as it is.", false },
 			{ "ambientIntensity", "Ambient intensity", "Lighting", PT::Float, {1.f}, 0.f, 2.f,
@@ -84,16 +84,6 @@ namespace lynx::lighting2d
 		// Shader (HRL post process : vertex "apos" -> uv, scene in uScene)
 		// ---------------------------------------------------------------------
 
-		const char* kVertex = R"(#version 330 core
-layout(location=0) in vec2 apos;
-out vec2 uv;
-void main()
-{
-    uv = apos * 0.5 + 0.5;
-    gl_Position = vec4(apos, 0.0, 1.0);
-}
-)";
-
 		std::string FragmentSource()
 		{
 			std::string light_uniforms;
@@ -107,12 +97,10 @@ void main()
 					arrays[k] += (i ? ", " : "") + name;
 				}
 
-			std::string s = R"(#version 330 core
-in vec2 uv;
-out vec4 frag_color;
-
-uniform sampler2D uScene;
-uniform vec2 uScreenSize;
+			// Inserted in the post process shader (PostProcess.cpp) : uv, uScene and
+			// uScreenSize come from it ; ApplyLighting2D is called on the scene color.
+			std::string s = R"(
+// ---- 2D lighting (core/Lighting2D.cpp) ----
 uniform sampler2D uOcc;
 
 uniform int uEnabled = 0;
@@ -188,30 +176,20 @@ float Shadow(vec2 p, vec2 l, float sourceRadius)
     return (Ray(p, l - side) + Ray(p, l) + Ray(p, l + side)) / 3.0;
 }
 
-void main()
+vec3 ApplyLighting2D(vec3 scene)
 {
-    vec3 scene = texture(uScene, uv).rgb;
     if (uEnabled == 0 || uValid == 0)
-    {
-        frag_color = vec4(scene, 1.0);
-        return;
-    }
+        return scene;
 
     // World position of the pixel on the voxel plane (Z = 0).
     vec2 ndc = uv * 2.0 - 1.0;
     float aspect = uScreenSize.x / max(uScreenSize.y, 1.0);
     vec3 ray = normalize(uCamFwd + ndc.x * aspect * uTanHalfFov * uCamRight + ndc.y * uTanHalfFov * uCamUp);
     if (abs(ray.z) < 1e-6)
-    {
-        frag_color = vec4(scene, 1.0);
-        return;
-    }
+        return scene;
     float hit = -uCamPos.z / ray.z;
     if (hit < 0.0)
-    {
-        frag_color = vec4(scene, 1.0);
-        return;
-    }
+        return scene;
     vec2 world = uCamPos.xy + ray.xy * hit;
     vec2 vox = (world - uVoxelOrigin) / uVoxelScale;
     if (uPixelSnap != 0)
@@ -263,8 +241,9 @@ void main()
     vec3 color = scene * light;
     if (uKeepBright != 0)
         color += max(scene - vec3(1.0), vec3(0.0));   // emissive (HDR) pixels keep their glow
-    frag_color = vec4(color, 1.0);
+    return color;
 }
+// ---- end of the 2D lighting ----
 )";
 			return s;
 		}
@@ -277,7 +256,6 @@ void main()
 		{
 			uint32_t viewport = HRL_INVALID_ID;
 			uint32_t material = HRL_INVALID_ID;
-			uint32_t post = HRL_INVALID_ID;
 			uint32_t texture = HRL_INVALID_ID;
 			int rect[4] = { 0, 0, 0, 0 };   // occlusion area : x, y, w, h (voxels)
 			int step = 1;                   // voxels per texel
@@ -286,7 +264,6 @@ void main()
 			int last_light_count = 0;
 		};
 
-		uint32_t g_shader = HRL_INVALID_ID;
 		bool g_installed = false;
 		bool g_dirty = false;
 		std::vector<View> g_views;
@@ -365,24 +342,31 @@ void main()
 			g_opacity_valid = false;   // opacities may have changed
 		}
 
+		// The 2D lighting is computed in the post process shader (one pass : the
+		// post process reads the scene once, lighting then bloom / tone mapping).
 		void AttachTo(PlayerController* player)
 		{
-			if (!player || g_shader == HRL_INVALID_ID)
+			if (!player)
 				return;
 			const uint32_t viewport = player->GetViewportBackend();
-			if (viewport == HRL_INVALID_ID)
+			const uint32_t material = postprocess::GetMaterialFor(viewport);
+			if (viewport == HRL_INVALID_ID || material == HRL_INVALID_ID)
 				return;
-			for (const View& v : g_views)
+			for (View& v : g_views)
 				if (v.viewport == viewport)
+				{
+					if (v.material != material)
+					{
+						v.material = material;   // recreated : settings and texture again
+						v.rect[2] = v.rect[3] = 0;
+						ApplySettings(v);
+					}
 					return;
+				}
 
 			View view;
 			view.viewport = viewport;
-			view.material = HRL_CreateMaterial(g_shader);
-			if (view.material == HRL_INVALID_ID)
-				return;
-			// Before the default post process (priority 1) : light in HDR, then bloom / tone mapping.
-			view.post = HRL_CreatePostProcess(viewport, view.material, 0);
+			view.material = material;
 			ApplySettings(view);
 			g_views.push_back(std::move(view));
 		}
@@ -636,6 +620,11 @@ void main()
 
 	// =========================================================================
 
+	std::string ShaderCode()
+	{
+		return FragmentSource();
+	}
+
 	const std::vector<ParamInfo>& GetParams()
 	{
 		return kParams;
@@ -658,17 +647,17 @@ void main()
 			return;
 		g_installed = true;
 
-		const std::string frag = FragmentSource();
-		g_shader = HRL_CreateShader(kVertex, std::strlen(kVertex), frag.c_str(), frag.size());
-		if (g_shader == HRL_INVALID_ID)
+		if (postprocess::HasLighting2D())
+			std::cout << "[LIGHTING 2D] ready (in the post process shader)\n";
+		else
 		{
-			g_error = "2D lighting shader could not be compiled (see the HRL errors in the output).";
+			g_error = "The post process shader with the 2D lighting could not be compiled (see the HRL errors "
+			          "in the output) : the default post process is used, without 2D lighting.";
 			std::cout << "[LIGHTING 2D] " << g_error << "\n";
 		}
 
 		for (PlayerController* player : engine->GetPlayers())
 			AttachTo(player);
-		engine->ED_player_created.Subscribe([](PlayerController* player) { AttachTo(player); });
 
 		Load();
 	}
@@ -676,7 +665,6 @@ void main()
 	void Shutdown()
 	{
 		g_views.clear();
-		g_shader = HRL_INVALID_ID;
 		g_installed = false;
 		g_opacity_valid = false;
 	}
@@ -684,7 +672,7 @@ void main()
 	void Update(float dt)
 	{
 		g_drawn = 0;
-		if (!g_installed || g_shader == HRL_INVALID_ID)
+		if (!g_installed || !postprocess::HasLighting2D())
 			return;
 		g_time += dt;
 
@@ -700,8 +688,21 @@ void main()
 		for (PlayerController* player : engine->GetPlayers())
 			AttachTo(player);
 
+		// Off : the default post process of HRL, exactly as without the 2D lighting.
+		postprocess::SetLighting2DActive(IsEnabled());
+
 		if (!IsEnabled())
+		{
+			// 2D lights in the level but the lighting is off : say it once (else "nothing happens").
+			static bool warned = false;
+			if (!warned && !Light2DComponent::GetAll().empty())
+			{
+				warned = true;
+				std::cout << "[LIGHTING 2D] warning : the level has 2D lights but the 2D lighting is off "
+				             "(window 2D Lighting > Enabled, or Lighting2D.set(\"enabled\", true))\n";
+			}
 			return;
+		}
 
 		for (View& v : g_views)
 		{

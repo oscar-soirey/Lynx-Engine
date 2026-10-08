@@ -12,8 +12,6 @@ parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
 revoir le logo et les banieres tout ca
 
-quand on se fait ensevlir sous du sable par exemple, on peut plus du tout bouger, il faudrait faire un truc pour eviter ca
-
 le plugin dialogue gere mal l'editeur de nodes, on ne peux pas placer de nouveau nodes, pas de ctrl+z, certains textes dépassent de l'interface
 
 afficher les sprites au dessus des voxels dans hrl

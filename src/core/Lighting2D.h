@@ -10,6 +10,9 @@
  *     hard or soft shadows (source_radius), optional pixel-art look
  *     (light computed per voxel, banding).
  *
+ * The lighting is computed inside the post process shader (PostProcess.h), on
+ * the scene color, before bloom and tone mapping.
+ *
  * Settings of the project (assets/lighting2d.json, loaded by the editor AND the
  * shipped game), like the post process (PostProcess.h) :
  *
@@ -75,6 +78,13 @@ namespace lynx::lighting2d
 
 	/** Lights drawn last frame (all viewports), for the editor window. */
 	LYNX_API int GetDrawnLightCount();
+
+	/**
+	 * GLSL inserted in the post process shader (PostProcess.cpp) : the uniforms and
+	 * `vec3 ApplyLighting2D(vec3 scene)`, called on the scene color before the
+	 * exposure / bloom / tone mapping. One pass : nothing can draw over it.
+	 */
+	LYNX_API std::string ShaderCode();
 
 	/** "" or why the pass could not start (shader error...). */
 	LYNX_API const std::string& GetError();

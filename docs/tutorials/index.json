@@ -1,10 +1,67 @@
 [
   {
-    "slug": "writing-a-tutorial",
-    "title": "How to write a tutorial",
+    "slug": "your-first-project",
+    "title": "Your first project",
     "date": "2026-10-07",
-    "summary": "A sample tutorial showing the structure and syntax available. Delete it when you publish your first real one.",
-    "tags": ["meta"],
+    "summary": "Open a project, place an Actor, attach a script and press Play. The ten-minute introduction to Lynx.",
+    "tags": [
+      "getting-started"
+    ],
+    "level": "Beginner"
+  },
+  {
+    "slug": "your-first-script",
+    "title": "Your first script",
+    "date": "2026-10-07",
+    "summary": "Understand the script model, the BeginPlay / Update / EndPlay lifecycle and how to control an Actor from JavaScript.",
+    "tags": [
+      "scripting",
+      "getting-started"
+    ],
+    "level": "Beginner"
+  },
+  {
+    "slug": "handling-player-input",
+    "title": "Handling player input",
+    "date": "2026-10-07",
+    "summary": "Define actions and axes in Input Settings and read them from a script to move and jump.",
+    "tags": [
+      "scripting",
+      "input"
+    ],
+    "level": "Beginner"
+  },
+  {
+    "slug": "spawning-and-finding-actors",
+    "title": "Spawning and finding Actors",
+    "date": "2026-10-07",
+    "summary": "Spawn bullets and enemies, give them a lifetime, find them by id or tag and make Actors talk to each other.",
+    "tags": [
+      "scripting",
+      "gameplay"
+    ],
+    "level": "Intermediate"
+  },
+  {
+    "slug": "your-first-cpp-actor",
+    "title": "Your first C++ Actor",
+    "date": "2026-10-07",
+    "summary": "Build a game DLL, write an Actor with reflected properties, register it in the factory and use it from JavaScript.",
+    "tags": [
+      "c++",
+      "native"
+    ],
+    "level": "Advanced"
+  },
+  {
+    "slug": "how-to-publish-a-plugin-on-the-official-registry",
+    "title": "How to publish a plugin on the official registry",
+    "date": "2026-10-09",
+    "summary": "Plugins allow you to add new features to Lynx Engine without modifying the engine itself. Each plugin is distributed through its own GitHub repository and...",
+    "tags": [
+      "plugins",
+      "community"
+    ],
     "level": "Beginner"
   }
 ]

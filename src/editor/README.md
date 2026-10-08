@@ -111,6 +111,26 @@ Options, Plugins, Lynxie, éclairage 2D, centrer sur l'acteur sélectionné), fe
 `@` acteurs, `#` fichiers ; **Ctrl+Shift+P** ouvre directement avec `>`. Les derniers
 éléments lancés reviennent en tête. Code : `CommandPalette.h/.cpp`.
 
+## Particle Editor (.vfx)
+
+Éditeur de systèmes de particules façon Cascade (Unreal), `ParticleEditor.h/.cpp` ; le moteur :
+`core/Particles.h` (format JSON, construction des VFX de HRL, `ParticleActor`, `Particles.spawn`).
+Content Browser > New file > *Particle System*, ou double-clic sur un `.vfx`.
+
+- **Aperçu** : une scène HRL à part (hors écran, affichée avec `ImGui::Image`), grille du plan du
+  niveau ; clic droit glissé : orbite, clic du milieu : déplacement, molette : zoom. Restart (Espace),
+  Pause, vitesse, Loop / durée du cycle, couleur du fond.
+- **Émetteurs** : une colonne par émetteur (case : activé, double-clic : renommer, clic droit : renommer,
+  dupliquer, déplacer, supprimer, *Add module*), ses modules en blocs colorés : Required (texture,
+  blend, rendu billboard / étiré, espace, taille, max), Spawn (débit, bursts), Lifetime, Initial
+  Location (forme), Initial Velocity, Initial Rotation, Forces (gravité, frottement, force, bruit),
+  Color Over Life, Size Over Life, Rotation Over Life, Collision. Clic droit sur un module optionnel :
+  *Remove module*.
+- **Details** : les réglages du module choisi. Courbes et dégradé éditables à la souris
+  (glisser les clés, double-clic : ajouter, clic droit : supprimer).
+- Ctrl+S, Ctrl+Z / Ctrl+Y. Sauvegarder recharge les `ParticleActor` du niveau qui utilisent le fichier.
+  Fermer avec des changements demande Save / Discard / Cancel.
+
 ## Éclairage 2D
 
 Fenêtre **2D Lighting** (menu Windows) : réglages de `lynx::lighting2d`

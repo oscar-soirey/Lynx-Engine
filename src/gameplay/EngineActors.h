@@ -33,6 +33,8 @@
 #include "BoxColliderComponent.h"
 #include "LightComponent.h"
 #include "Light2DComponent.h"
+#include "FogComponent.h"
+#include "../core/Particles.h"
 #include "SpriteComponents.h"
 
 namespace lynx
@@ -204,6 +206,96 @@ namespace lynx
 		bool playing_ = false;
 	};
 
+
+	/**
+	 * Distance fog of the whole scene (FogComponent). One at a time : the last
+	 * enabled one wins. mode : "linear" (start -> end), "exponential", "exp2".
+	 */
+	class LYNX_API FogActor : public Actor
+	{
+	public:
+		FogActor();
+
+		bool enabled = true;
+		std::string mode = "exponential";
+		vec3 color{0.62f, 0.68f, 0.78f};
+		float density = 0.015f;
+		float start = 40.f;
+		float end = 160.f;
+
+		void Init() override;
+		void Update(double dt) override;
+
+		FogComponent* GetFog() const { return fog_; }
+
+	private:
+		FogComponent* fog_ = nullptr;
+	};
+
+	/**
+	 * Volumetric fog (VolumetricFogComponent) : a ball of mist around the actor
+	 * (radius, world units ; drawn as a circle in the editor), or the whole
+	 * scene with `global` (one at a time).
+	 */
+	class LYNX_API VolumetricFogActor : public Actor
+	{
+	public:
+		VolumetricFogActor();
+
+		bool enabled = true;
+		bool global = false;
+		vec3 color{0.75f, 0.78f, 0.85f};
+		float density = 0.3f;
+		float radius = 16.f;
+		int steps = 24;
+
+		void Init() override;
+		void Update(double dt) override;
+		void StartGame() override;
+		void EndGame() override;
+
+		VolumetricFogComponent* GetFog() const { return fog_; }
+
+	private:
+		VolumetricFogComponent* fog_ = nullptr;
+		bool playing_ = false;
+	};
+
+	/**
+	 * A particle system (.vfx, Particle Editor) at the actor : it follows the
+	 * actor (location, rotation, scale). Plays in the editor too. JS one-shot
+	 * effects : Particles.spawn(path, position).
+	 */
+	class LYNX_API ParticleActor : public Actor
+	{
+	public:
+		ParticleActor();
+		~ParticleActor() override;
+
+		/** Path in assets/ (.vfx). */
+		std::string system;
+		bool auto_play = true;
+		float time_scale = 1.f;
+		bool visible = true;
+
+		void Init() override;
+		void Update(double dt) override;
+		void StartGame() override;
+
+		/** The effect from the start (bursts again). */
+		void Restart();
+		/** No new particles (the living ones finish). */
+		void StopEmitting();
+
+	private:
+		void Rebuild();
+
+		particles::Instance* instance_ = nullptr;
+		std::string built_path_;
+		uint32_t built_version_ = 0;
+		bool built_visible_ = true;
+		bool stopped_ = false;
+	};
 
 	/** An image in the level (decor). */
 	class LYNX_API SpriteActor : public Actor

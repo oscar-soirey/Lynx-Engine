@@ -77,6 +77,9 @@ static const ApiEntry kApiEntries[] = {
 	{ "Lighting2D", "set", "set(name, value)", "Changes a 2D lighting setting now : Lighting2D.set(\"enabled\", true), set(\"ambientIntensity\", 0.1).", "", true },
 	{ "Lighting2D", "reset", "reset(name?)", "Back to the default value (all settings without a name).", "", true },
 	{ "Lighting2D", "params", "params()", "Names of every 2D lighting setting.", "Array", true },
+	{ "", "Particles", "Particles", "Particle systems (.vfx, Particle Editor) : one-shot effects.", "", false },
+	{ "Particles", "spawn", "spawn(path, position, rotation?, scale?)", "Plays a .vfx once at a position (not looping), then removes it. false : asset not found.", "", true },
+	{ "Particles", "clear", "clear()", "Removes every one-shot effect.", "", true },
 	{ "Interface", "call", "call(actor, iface, fn, ...args)", "Sends fn of the interface to the actor (nothing if it does not implement it). On an interface class : Collectible.call(actor, fn, ...).", "", true },
 	{ "Interface", "broadcast", "broadcast(iface, fn, ...args)", "Sends fn to every actor that implements the interface. Returns how many.", "", true },
 	{ "Interface", "find", "find(iface)", "Actors that implement the interface (Collectible.find()).", "Array", true },
@@ -142,7 +145,7 @@ static const ApiEntry kApiEntries[] = {
 	{ "Actor", "send", "send(iface, fn, ...args)", "Interface message : calls fn if the actor implements the interface, otherwise nothing. Returns the last value.", "", true },
 	{ "Actor", "callNative", "callNative(name, ...args)", "Calls the C++ function (HFUNCTION) even if a JS method has the same name.", "", true },
 	{ "Actor", "destroy", "destroy()", "Destroys the actor at the end of the frame.", "", true },
-	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, Collider, SoundSource, Light, Light2D, Velocity, Lifetime, AI.", "Component:0", true },
+	{ "Actor", "addComponent", "addComponent(type, options?)", "Adds a component (or returns the one already there) and applies `options`.\nTypes : StaticSprite, AnimationSprite, Camera, Collider, SoundSource, Light, Light2D, Fog, VolumetricFog, Velocity, Lifetime, AI.", "Component:0", true },
 	{ "Actor", "getComponent", "getComponent(type)", "The component of this type (or null).", "Component:0", true },
 	{ "Actor", "hasComponent", "hasComponent(type)", "The actor has a component of this type.", "", true },
 	{ "Actor", "removeComponent", "removeComponent(type)", "Removes the component (EndPlay is called).", "", true },
@@ -292,6 +295,25 @@ static const ApiEntry kApiEntries[] = {
 	{ "Light2D", "useActorRotation", "useActorRotation : boolean", "", "", false },
 	{ "Light2D", "flicker", "flicker : number", "0 steady, 0.1-0.3 torch.", "", false },
 
+	// Fog (distance fog of the scene, the last enabled one wins)
+	{ "Fog", "mode", "mode : \"linear\" | \"exponential\" | \"exp2\"", "", "", false },
+	{ "Fog", "enabled", "enabled : boolean", "", "", false },
+	{ "Fog", "color", "color : Vec3", "", "Vec3", false },
+	{ "Fog", "density", "density : number", "Exponential modes : 0.005 light, 0.05 thick.", "", false },
+	{ "Fog", "start", "start : number", "Linear : distance where the fog starts.", "", false },
+	{ "Fog", "end", "end : number", "Linear : distance of full fog.", "", false },
+	{ "Fog", "active", "active : boolean", "This fog is the one drawn (read only).", "", false },
+	{ "Fog", "refresh", "refresh()", "Applies the fields now.", "", true },
+	// VolumetricFog (a ball of mist at the actor, or the whole scene with global)
+	{ "VolumetricFog", "enabled", "enabled : boolean", "", "", false },
+	{ "VolumetricFog", "global", "global : boolean", "true : fills the whole scene.", "", false },
+	{ "VolumetricFog", "color", "color : Vec3", "", "Vec3", false },
+	{ "VolumetricFog", "density", "density : number", "", "", false },
+	{ "VolumetricFog", "radius", "radius : number", "World units around the actor.", "", false },
+	{ "VolumetricFog", "offset", "offset : Vec3", "From the actor location.", "Vec3", false },
+	{ "VolumetricFog", "steps", "steps : number", "Ray-march samples, 4..64.", "", false },
+	{ "VolumetricFog", "refresh", "refresh()", "Applies the fields now.", "", true },
+
 	// AI
 	{ "AI", "behaviorTree", "behaviorTree : string", "Behavior tree asset (.bt) ; changing it reloads the tree.", "", false },
 	{ "AI", "startOnBegin", "startOnBegin : boolean", "", "", false },
@@ -379,7 +401,7 @@ static const ApiEntry kApiEntries[] = {
 
 // Types of component (addComponent("...")).
 static const char* const kComponentTypes[] = {
-	"StaticSprite", "AnimationSprite", "Camera", "Collider", "SoundSource", "Light", "Light2D", "Velocity", "Lifetime", "AI",
+	"StaticSprite", "AnimationSprite", "Camera", "Collider", "SoundSource", "Light", "Light2D", "Fog", "VolumetricFog", "Velocity", "Lifetime", "AI",
 };
 
 // JavaScript built-ins, when the scripting context can't be read.
@@ -393,7 +415,7 @@ static const char* const kBuiltinGlobals[] = {
 	"decodeURIComponent", "escape", "unescape", "eval", "queueMicrotask", "structuredClone",
 	"print", "console", "vec3", "vec2", "Level", "Input", "Engine", "UI", "BT", "Actor", "UserWidget", "BTTask",
 	"BTDecorator", "BTService", "PointLightActor", "SpotLightActor", "DirectionalLightActor", "SkyLightActor",
-	"Light2DActor", "Lighting2D", "PostProcess",
+	"Light2DActor", "FogActor", "VolumetricFogActor", "ParticleActor", "Particles", "Lighting2D", "PostProcess",
 	"SpriteActor", "SoundActor", "ColliderActor",
 };
 
