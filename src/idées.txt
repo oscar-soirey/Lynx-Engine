@@ -2,6 +2,8 @@ obligé:
 
 ameliorer le zorder entre les sprites
 
+Aussi, quand on ship un jeu, le jeu fonctionne mais il y a ecran noir complet, le jeu es quand meme claculé puisque on entend les sons et tout.
+
 mettre une vraie toolbar
 
 prévenir au premier lancement d'un projet que Lynx est 100% gratuit et local, mais pour les jeux commercials, y'a 5% de royalties a renverser a lynx (voir licence complete)

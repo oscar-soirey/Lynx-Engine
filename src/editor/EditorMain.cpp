@@ -4196,6 +4196,9 @@ static void tryPaintVoxel(int x, int y)
         brushActiveType
     });
 
+    // Simulate : the voxel physics keeps a copy of the voxels.
+    lynx::voxel_physics::InvalidateAllVoxels();
+
     HRL_SetVoxelType(
         scene,
         x,
@@ -4224,6 +4227,8 @@ static std::vector<BrushPreviewVoxel> brushPreviewVoxels;
 // Does NOT mark the editor dirty (a preview is not a modification).
 static void ClearBrushPreview()
 {
+    if (!brushPreviewVoxels.empty())
+        lynx::voxel_physics::InvalidateAllVoxels();   // Simulate : physics voxel cache
     for (auto it = brushPreviewVoxels.rbegin();
          it != brushPreviewVoxels.rend();
          ++it)
@@ -4278,6 +4283,7 @@ static void ApplyBrushPreview(int centerX, int centerY)
 // removed without creating an editor modification.
 static void PreviewStampBrush(int centerX, int centerY)
 {
+    lynx::voxel_physics::InvalidateAllVoxels();   // Simulate : physics voxel cache
     const int iterationRadius = GetBrushIterationRadius();
 
     for (int y = -iterationRadius; y <= iterationRadius; ++y)

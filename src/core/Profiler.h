@@ -42,6 +42,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 #include <vector>
 
 #include "Common.h"
@@ -76,6 +77,11 @@ namespace lynx::profiler
 	LYNX_API const char* Intern(std::string_view name);
 	inline const char* Intern(const std::string& name) { return Intern(std::string_view(name)); }
 	inline const char* Intern(const char* name) { return name ? Intern(std::string_view(name)) : nullptr; }
+
+	// Readable C++ type name for a zone ("lynx::SpriteComponent" -> "SpriteComponent",
+	// demangled on GCC / MinGW), interned and cached by type : cheap per call.
+	// nullptr when the fine zones are off (see Detailed()).
+	LYNX_API const char* TypeName(const std::type_info& type);
 
 	// Zones of the built-in profiler (use the macros instead). BeginZone
 	// returns a token (0 : not recorded) given back to EndZone : a zone left

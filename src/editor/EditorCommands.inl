@@ -1679,6 +1679,7 @@ static void RegisterEditorCommands()
             changes->push_back({ cell[0], cell[1], previous });
             HRL_SetVoxelType(scene, cell[0], cell[1], cell[2]);
         }
+        lynx::voxel_physics::InvalidateAllVoxels();   // physics voxel cache (Play / Simulate)
 
         if (!changes->empty())
         {
@@ -1686,6 +1687,7 @@ static void RegisterEditorCommands()
             {
                 for (auto it = changes->rbegin(); it != changes->rend(); ++it)
                     HRL_SetVoxelType(scene, it->x, it->y, it->previous);
+                lynx::voxel_physics::InvalidateAllVoxels();
 
                 MarkEditorDirty();
             });

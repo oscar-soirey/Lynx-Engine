@@ -170,6 +170,8 @@ namespace lynx
 				LYNX_PROFILE_SCOPE("Actors Tick");
 				for (const auto& a : current_level_->GetActors())
 				{
+					// One zone per C++ class (Humanoid...) with the fine zones.
+					LYNX_PROFILE_SCOPE_PTR(profiler::TypeName(typeid(*a)));
 					a->Tick(game_dt);
 				}
 			}

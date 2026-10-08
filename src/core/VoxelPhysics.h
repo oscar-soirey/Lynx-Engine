@@ -73,8 +73,17 @@ namespace lynx::voxel_physics
 
 	// ---- Engine ---------------------------------------------------------------
 
-	/** Game start / end : contacts forgotten. */
+	/** Game start / end : contacts forgotten, voxel cache emptied. */
 	LYNX_API void Reset();
+
+	/**
+	 * The simulation keeps a copy of the voxels it reads (tiles of 32 x 32,
+	 * re-read from HRL at least once per second). Whoever changes voxels
+	 * while the game runs says so : the touched tiles are read again.
+	 * (VoxelEdit does it for the game ; the editor brush in Simulate too.)
+	 */
+	LYNX_API void InvalidateVoxels(int x0, int y0, int x1, int y1);
+	LYNX_API void InvalidateAllVoxels();
 
 	/** Every frame while the game runs (Engine::ProgressOneFrame). */
 	LYNX_API void Tick(float dt);

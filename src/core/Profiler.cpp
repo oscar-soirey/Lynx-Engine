@@ -10,6 +10,11 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <typeinfo>
+#if defined(__GNUG__)
+#include <cxxabi.h>
+#include <cstdlib>
+#endif
 
 namespace lynx::profiler
 {
@@ -237,6 +242,53 @@ namespace lynx::profiler
 		std::lock_guard<std::mutex> lock(g_intern_mutex);
 		auto it = g_interned.emplace(name).first;   // nodes are stable : c_str() stays valid
 		return it->c_str();
+	}
+
+
+	const char* TypeName(const std::type_info& type)
+	{
+		if (!IsDetailed() || !Active())
+			return nullptr;
+
+		// Main thread in practice ; a lock keeps it safe anyway (one lookup).
+		static std::mutex mutex;
+		static std::unordered_map<const char*, const char*> cache;   // type name -> interned
+		std::lock_guard<std::mutex> lock(mutex);
+
+		const char* raw = type.name();
+		auto it = cache.find(raw);
+		if (it != cache.end())
+			return it->second;
+
+		std::string name = raw;
+#if defined(__GNUG__)
+		// GCC / MinGW / Clang : "N4lynx15SpriteComponentE" -> "lynx::SpriteComponent".
+		int status = 0;
+		if (char* demangled = abi::__cxa_demangle(raw, nullptr, nullptr, &status))
+		{
+			if (status == 0)
+				name = demangled;
+			std::free(demangled);
+		}
+#endif
+		for (const char* prefix : { "class ", "struct " })
+			if (name.rfind(prefix, 0) == 0)
+				name.erase(0, std::char_traits<char>::length(prefix));
+		// Last "::" outside template arguments.
+		int angle = 0;
+		size_t cut = std::string::npos;
+		for (size_t i = 0; i + 1 < name.size(); ++i)
+		{
+			if (name[i] == '<') ++angle;
+			else if (name[i] == '>') --angle;
+			else if (angle == 0 && name[i] == ':' && name[i + 1] == ':') cut = i + 2;
+		}
+		if (cut != std::string::npos)
+			name.erase(0, cut);
+
+		const char* interned = Intern(name);
+		cache.emplace(raw, interned);
+		return interned;
 	}
 
 

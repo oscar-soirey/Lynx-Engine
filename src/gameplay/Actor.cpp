@@ -15,10 +15,6 @@
 #include <string>
 #include <type_traits>
 #include <typeinfo>
-#if defined(__GNUG__)
-#include <cxxabi.h>
-#include <cstdlib>
-#endif
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -180,15 +176,48 @@ namespace lynx
 		}
 
 		/** Acteurs : ordre du niveau, puis les autres (spawns en attente...). */
+		// Bumped when an actor entity is created or destroyed (see the cache
+		// of OrderedActors).
+		uint64_t g_entity_version = 0;
+
+		/**
+		 * Every actor : the level order, then the ones not in the level yet
+		 * (spawned this frame). Called by every physics query, collider and
+		 * component loop : the list is cached and rebuilt only when it can
+		 * have changed (another level, its actor list resized or moved, an
+		 * actor entity created or destroyed). Before : a copy and a hash set
+		 * of every actor per call (~0.1 ms with 500 actors, x hundreds).
+		 */
 		std::vector<Actor*> OrderedActors()
 		{
-			std::vector<Actor*> out;
-			std::unordered_set<Actor*> seen;
+			struct Cache
+			{
+				bool valid = false;
+				const Level* level = nullptr;
+				const void* data = nullptr;
+				size_t size = 0;
+				uint64_t version = 0;
+				std::vector<Actor*> actors;
+			};
+			static Cache cache;
 
 			Level* level = Engine::Get() ? Engine::Get()->GetCurrentLevel() : nullptr;
-			if (level)
+			const std::vector<Actor*>* list = level ? &level->GetActors() : nullptr;
+			const void* data = list ? static_cast<const void*>(list->data()) : nullptr;
+			const size_t size = list ? list->size() : 0;
+
+			if (cache.valid && cache.level == level && cache.data == data && cache.size == size &&
+			    cache.version == g_entity_version)
+				return cache.actors;
+
+			std::vector<Actor*>& out = cache.actors;
+			out.clear();
+			std::unordered_set<Actor*> seen;
+			seen.reserve(size + 16);
+
+			if (list)
 			{
-				for (Actor* a : level->GetActors())
+				for (Actor* a : *list)
 				{
 					if (a && seen.insert(a).second)
 						out.push_back(a);
@@ -200,54 +229,19 @@ namespace lynx
 				if (ref.actor && seen.insert(ref.actor).second)
 					out.push_back(ref.actor);
 			}
+
+			cache.valid = true;
+			cache.level = level;
+			cache.data = data;
+			cache.size = size;
+			cache.version = g_entity_version;
 			return out;
 		}
 
-		/**
-		 * Profiler zone of a component : its C++ type, without namespace
-		 * ("struct lynx::SpriteComponent" -> "SpriteComponent"). nullptr when
-		 * the fine zones are off. Cached by type (no string work per call).
-		 */
+		/** Profiler zone of a component : its C++ type (nullptr : fine zones off). */
 		const char* ProfileName(const Component& c)
 		{
-			if (!profiler::Detailed())
-				return nullptr;
-
-			static std::unordered_map<const char*, const char*> cache;   // typeid name -> interned
-			const char* raw = typeid(c).name();
-			auto it = cache.find(raw);
-			if (it != cache.end())
-				return it->second;
-
-			std::string name = raw;
-#if defined(__GNUG__)
-			// GCC / MinGW / Clang : "N4lynx15SpriteComponentE" -> "lynx::SpriteComponent".
-			int status = 0;
-			if (char* demangled = abi::__cxa_demangle(raw, nullptr, nullptr, &status))
-			{
-				if (status == 0)
-					name = demangled;
-				std::free(demangled);
-			}
-#endif
-			for (const char* prefix : { "class ", "struct " })
-				if (name.rfind(prefix, 0) == 0)
-					name.erase(0, std::char_traits<char>::length(prefix));
-			// Last "::" outside template arguments.
-			int angle = 0;
-			size_t cut = std::string::npos;
-			for (size_t i = 0; i + 1 < name.size(); ++i)
-			{
-				if (name[i] == '<') ++angle;
-				else if (name[i] == '>') --angle;
-				else if (angle == 0 && name[i] == ':' && name[i + 1] == ':') cut = i + 2;
-			}
-			if (cut != std::string::npos)
-				name.erase(0, cut);
-
-			const char* interned = profiler::Intern(name);
-			cache.emplace(raw, interned);
-			return interned;
+			return profiler::TypeName(typeid(c));
 		}
 
 		/** Tous les composants vivants, acteur par acteur. */
@@ -318,6 +312,7 @@ namespace lynx
 			auto& reg = Registry();
 			const entt::entity e = reg.create();
 			reg.emplace<ActorRef>(e, owner);
+			++g_entity_version;
 			return static_cast<uint32_t>(entt::to_integral(e));
 		}
 
@@ -341,6 +336,7 @@ namespace lynx
 			}
 
 			Registry().destroy(ToEntity(entity));
+			++g_entity_version;
 		}
 
 		void RebindEntity(uint32_t entity, Actor* owner)

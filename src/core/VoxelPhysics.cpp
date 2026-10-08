@@ -145,6 +145,56 @@ namespace lynx::voxel_physics
 		// One region : read, move, write back
 		// ---------------------------------------------------------------------
 
+		// ---- Voxel cache -------------------------------------------------
+		// HRL_GetVoxelType costs ~100 ns per call : reading two regions of
+		// 193 x 193 every step was ~8 ms per frame. The cells are kept in
+		// tiles ; a tile is read from HRL when missing, invalidated (VoxelEdit,
+		// editor brush), or older than kTileRefreshSteps (safety net for any
+		// other writer ; the refresh times are spread over the steps).
+		constexpr int kTile = 32;
+		constexpr uint32_t kTileRefreshSteps = 30;
+
+		struct Tile
+		{
+			std::array<uint8_t, kTile * kTile> cells{};
+			uint32_t stamp = 0;   // g_frame of the last read (minus a jitter)
+		};
+
+		std::unordered_map<uint64_t, Tile> g_tiles;
+
+		int FloorDiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+		uint64_t TileKey(int tx, int ty) { return (static_cast<uint64_t>(static_cast<uint32_t>(tx)) << 32) | static_cast<uint32_t>(ty); }
+
+		Tile& GetTile(int tx, int ty)
+		{
+			auto [it, added] = g_tiles.try_emplace(TileKey(tx, ty));
+			Tile& tile = it->second;
+			if (added || g_frame - tile.stamp >= kTileRefreshSteps)
+			{
+				LYNX_PROFILE_COUNT("Voxel tiles read", 1);
+				const uint32_t scene = Scene();
+				for (int y = 0; y < kTile; ++y)
+					for (int x = 0; x < kTile; ++x)
+						tile.cells[static_cast<size_t>(y) * kTile + x] =
+							static_cast<uint8_t>(HRL_GetVoxelType(scene, tx * kTile + x, ty * kTile + y));
+				// A new tile gets an earlier first refresh (jitter) : the tiles
+				// read together do not all expire on the same step. Then one
+				// refresh every kTileRefreshSteps.
+				const uint32_t jitter = added ? static_cast<uint32_t>((tx * 7 + ty * 13) & 0x7fffffff) % kTileRefreshSteps : 0u;
+				tile.stamp = g_frame - jitter;
+			}
+			return tile;
+		}
+
+		void CacheWrite(int x, int y, uint8_t type)
+		{
+			auto it = g_tiles.find(TileKey(FloorDiv(x, kTile), FloorDiv(y, kTile)));
+			if (it == g_tiles.end())
+				return;
+			const int lx = x - FloorDiv(x, kTile) * kTile, ly = y - FloorDiv(y, kTile) * kTile;
+			it->second.cells[static_cast<size_t>(ly) * kTile + lx] = type;
+		}
+
 		struct Region
 		{
 			int x0 = 0, y0 = 0, w = 0, h = 0;
@@ -311,14 +361,29 @@ namespace lynx::voxel_physics
 			LYNX_PROFILE_COUNT("Voxel cells read", n);
 			r.cells.resize(n);
 			bool any = false;
-			LYNX_PROFILE_SCOPE("Read region");
-			for (int y = 0; y < r.h; ++y)
-				for (int x = 0; x < r.w; ++x)
-				{
-					const uint8_t t = static_cast<uint8_t>(HRL_GetVoxelType(scene, r.x0 + x, r.y0 + y));
-					r.cells[static_cast<size_t>(y) * r.w + x] = t;
-					any = any || g_types[t].behavior != VoxelBehavior::Static;
-				}
+			{
+				LYNX_PROFILE_SCOPE("Read region");
+				// From the tile cache, tile by tile (see GetTile).
+				const int tx0 = FloorDiv(r.x0, kTile), ty0 = FloorDiv(r.y0, kTile);
+				const int tx1 = FloorDiv(r.x0 + r.w - 1, kTile), ty1 = FloorDiv(r.y0 + r.h - 1, kTile);
+				for (int ty = ty0; ty <= ty1; ++ty)
+					for (int tx = tx0; tx <= tx1; ++tx)
+					{
+						const Tile& tile = GetTile(tx, ty);
+						const int ax = std::max(r.x0, tx * kTile), bx = std::min(r.x0 + r.w, (tx + 1) * kTile);
+						const int ay = std::max(r.y0, ty * kTile), by = std::min(r.y0 + r.h, (ty + 1) * kTile);
+						for (int y = ay; y < by; ++y)
+						{
+							const uint8_t* src = &tile.cells[static_cast<size_t>(y - ty * kTile) * kTile + (ax - tx * kTile)];
+							uint8_t* dst = &r.cells[static_cast<size_t>(y - r.y0) * r.w + (ax - r.x0)];
+							for (int x = 0; x < bx - ax; ++x)
+							{
+								dst[x] = src[x];
+								any = any || g_types[src[x]].behavior != VoxelBehavior::Static;
+							}
+						}
+					}
+			}
 			if (!any)
 				return;
 
@@ -370,6 +435,7 @@ namespace lynx::voxel_physics
 						began = true;
 					}
 					HRL_SetVoxelType(scene, r.x0 + x, r.y0 + y, r.cells[i]);
+					CacheWrite(r.x0 + x, r.y0 + y, r.cells[i]);
 				}
 			if (began)
 				HRL_EndVoxelEdit(scene);
@@ -387,6 +453,11 @@ namespace lynx::voxel_physics
 			for (Actor* a : actors)
 			{
 				if (!a || !a->GetComponent<ColliderComponent>())
+					continue;
+				// Damage goes through Damageable, events through VoxelEvents :
+				// the others cannot react, no need to scan their box (the big
+				// triggers of an arena are thousands of voxels per step).
+				if (!a->Implements("Damageable") && !a->Implements("VoxelEvents"))
 					continue;
 				int x0, y0, x1, y1;
 				// Grown a little : touching from outside counts (standing on lava).
@@ -527,6 +598,30 @@ namespace lynx::voxel_physics
 	{
 		g_contacts.clear();
 		g_accumulator = 0.f;
+		g_tiles.clear();
+	}
+
+	void InvalidateVoxels(int x0, int y0, int x1, int y1)
+	{
+		if (g_tiles.empty())
+			return;
+		if (x1 < x0) std::swap(x0, x1);
+		if (y1 < y0) std::swap(y0, y1);
+		const int tx0 = FloorDiv(x0, kTile), ty0 = FloorDiv(y0, kTile);
+		const int tx1 = FloorDiv(x1, kTile), ty1 = FloorDiv(y1, kTile);
+		if (static_cast<long long>(tx1 - tx0 + 1) * (ty1 - ty0 + 1) > static_cast<long long>(g_tiles.size()))
+		{
+			g_tiles.clear();
+			return;
+		}
+		for (int ty = ty0; ty <= ty1; ++ty)
+			for (int tx = tx0; tx <= tx1; ++tx)
+				g_tiles.erase(TileKey(tx, ty));
+	}
+
+	void InvalidateAllVoxels()
+	{
+		g_tiles.clear();
 	}
 
 	void Tick(float dt)

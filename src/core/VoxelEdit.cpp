@@ -2,6 +2,7 @@
 
 #include "Engine.h"
 #include "Voxels.h"
+#include "VoxelPhysics.h"
 
 #include <hrl/hrl.h>
 
@@ -197,6 +198,7 @@ namespace lynx::voxels
 				}
 
 				HRL_SetVoxelType(scene, x, y, 0u);
+				voxel_physics::InvalidateVoxels(x, y, x, y);   // its cache tile is read again
 				Record(r, x, y, t, filter.keep_cells);
 				if (filter.fire_events)
 					QueueDestroyedEvent(events, t, x, y);
@@ -233,6 +235,7 @@ namespace lynx::voxels
 				}
 
 				HRL_SetVoxelType(scene, x, y, type);
+				voxel_physics::InvalidateVoxels(x, y, x, y);
 				Record(r, x, y, t, options.filter.keep_cells);
 			});
 
