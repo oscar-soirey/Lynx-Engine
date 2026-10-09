@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Lynx Engine — Build the engine</title><meta name="description" content="Build Lynx Engine from source: clone the repository, set up CMake and the dependencies, then run the debug or release scripts."><link rel="icon" href="app-icon.png"><link rel="stylesheet" href="styles.css?v=0d1f8e0b"></head>
+<body>
+<header class="topbar"><a class="brand" href="index.html"><img class="brand-logo" src="assets/logo-white.png" alt="" width="32" height="32"><span>LYNX ENGINE</span></a><button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="main-nav"><span></span><span></span><span></span></button><nav class="main-nav" id="main-nav" aria-label="Main"><a href="index.html">Home</a><div class="nav-group"><button class="nav-drop" type="button" aria-haspopup="true" aria-expanded="false">Docs</button><div class="nav-menu"><a href="documentation.html">Documentation</a><a href="tutorials.html">Tutorials</a><a href="architecture.html">Architecture</a><a href="scripting.html">JavaScript</a><a href="api.html">API</a><a href="thirdparty.html">Third-party</a></div></div><div class="nav-group"><button class="nav-drop" type="button" aria-haspopup="true" aria-expanded="false">Discover</button><div class="nav-menu"><a href="showcase.html">Showcase</a><a href="devlog.html">Devlog</a></div></div><a class="lynxie-link" href="lynxie.html"><img class="lynxie-nav-icon" src="assets/lynxie.png" alt="">Lynxie</a><a class="nav-plugins" href="plugins.html">Plugins</a><a class="nav-cta" href="download.html">Download</a></nav></header>
+<main class="docs">
+<section class="doc-hero"><p class="eyebrow">LYNX ENGINE // BUILD</p><h1>Build the engine</h1><p>Compile Lynx Engine from source with MinGW. Clone the repository, get CMake and the dependencies ready, then run the generate and build scripts. Debug and Release each have their own pair of scripts.</p></section>
+<div class="vox-divider" aria-hidden="true"></div>
+
+<section class="section build-step"><div class="section-head"><p class="eyebrow">STEP 1</p><h2>Requirements</h2></div>
+<article class="card"><p>Install these tools first and make sure they are available from a terminal:</p>
+<ul class="build-list">
+<li><strong>Git</strong>, to clone the repository.</li>
+<li><strong>CMake</strong>, added to your <code>PATH</code>. Check it with <code>cmake --version</code>.</li>
+<li><strong>MinGW</strong>, the compiler used to build Lynx. Make sure <code>gcc</code> and <code>g++</code> are in your <code>PATH</code>. Check it with <code>g++ --version</code>.</li>
+</ul></article></section>
+
+<section class="section build-step"><div class="section-head"><p class="eyebrow">STEP 2</p><h2>Clone the repository</h2></div>
+<pre data-lang="Command Prompt" data-fixed="1">git clone https://github.com/oscar-soirey/Lynx-Engine.git
+cd Lynx-Engine</pre></section>
+
+<section class="section build-step"><div class="section-head"><p class="eyebrow">STEP 3</p><h2>Dependencies</h2><p>The easiest way to install the dependencies is through the <strong>Lynx launcher</strong>.</p></div>
+<article class="card"><p>Lynx relies on open-source libraries: HRL, EnTT, QuickJS, GLFW, Dear ImGui, dr_libs, OpenAL, Tracy and cURL. See the <a href="thirdparty.html"><u>Third-party</u></a> page for what each library does.</p></article></section>
+
+<section class="section build-step"><div class="section-head"><p class="eyebrow">STEP 4</p><h2>Configure and build</h2><p>Run the scripts from the root of the repository. Generate the CMake project first, then build it.</p></div>
+<div class="build-grid">
+<article class="card"><p class="eyebrow">DEBUG</p><h3>Debug build</h3><p>The default configuration, for development.</p>
+<pre data-lang="Command Prompt" data-fixed="1">generate-cmake-project.bat
+build.bat</pre>
+<ul class="build-list"><li><code>generate-cmake-project.bat</code> configures the CMake project.</li><li><code>build.bat</code> compiles it.</li></ul></article>
+<article class="card"><p class="eyebrow">RELEASE</p><h3>Release build</h3><p>Optimized build, for shipping.</p>
+<pre data-lang="Command Prompt" data-fixed="1">generate-release.bat
+build-release.bat</pre>
+<ul class="build-list"><li><code>generate-release.bat</code> configures the CMake project.</li><li><code>build-release.bat</code> compiles it.</li></ul></article>
+</div></section>
+</main>
+<footer><span>LYNX ENGINE</span><span>Build from source</span><span>Developed by Oscar Soirey</span><a class="foot-link" href="https://www.youtube.com/@oscar-soirey" target="_blank" rel="noopener">YouTube</a><a class="foot-link" href="build.html">Build engine</a></footer>
+<script src="site.js?v=e356b9e8" defer></script></body></html>

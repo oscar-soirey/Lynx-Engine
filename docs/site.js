@@ -60,15 +60,25 @@
   window.LynxHL = { apply: apply };
 })();
 
-/* toolbar : menu mobile + dropdown Docs */
+/* toolbar : menu mobile + menus déroulants (Docs, Discover) */
 (function () {
   var bar = document.querySelector('.topbar'); if (!bar) return;
-  var toggle = bar.querySelector('.nav-toggle'), group = bar.querySelector('.nav-group'), drop = group && group.querySelector('.nav-drop');
-  function setGroup(open) { if (!group) return; group.classList.toggle('open', open); drop.setAttribute('aria-expanded', String(open)); }
-  function setMenu(open) { bar.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); if (!open) setGroup(false); }
+  var toggle = bar.querySelector('.nav-toggle'), groups = Array.prototype.slice.call(bar.querySelectorAll('.nav-group'));
+  function setGroup(g, open) { g.classList.toggle('open', open); var d = g.querySelector('.nav-drop'); if (d) d.setAttribute('aria-expanded', String(open)); }
+  function closeGroups(except) { groups.forEach(function (g) { if (g !== except) setGroup(g, false); }); }
+  function setMenu(open) { bar.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); if (!open) closeGroups(); }
   toggle.addEventListener('click', function () { setMenu(!bar.classList.contains('open')); });
-  if (drop) drop.addEventListener('click', function (e) { e.stopPropagation(); setGroup(!group.classList.contains('open')); });
-  document.addEventListener('click', function (e) { if (group && !group.contains(e.target)) setGroup(false); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { setGroup(false); setMenu(false); } });
+  groups.forEach(function (g) {
+    var d = g.querySelector('.nav-drop'); if (!d) return;
+    d.addEventListener('click', function (e) { e.stopPropagation(); var open = !g.classList.contains('open'); closeGroups(g); setGroup(g, open); });
+  });
+  document.addEventListener('click', function (e) { groups.forEach(function (g) { if (!g.contains(e.target)) setGroup(g, false); }); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeGroups(); setMenu(false); } });
   window.addEventListener('resize', function () { if (window.innerWidth > 900) setMenu(false); });
+})();
+/* lecteur YouTube : refusé (erreur 153) quand la page est ouverte depuis un fichier local */
+(function () {
+  var frame = document.querySelector('.yt-frame');
+  if (!frame || location.protocol !== 'file:') return;
+  frame.innerHTML = '<div class="yt-offline"><p>The YouTube player is blocked when the site is opened from a local file. It works once the site is online.</p><a class="button primary" href="https://www.youtube.com/@oscar-soirey" target="_blank" rel="noopener">Watch on YouTube →</a></div>';
 })();

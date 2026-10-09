@@ -1,5 +1,9 @@
 obligé:
 
+actions github pour compiler et tout
+
+le launcher devrait accepter une version modifiée ou préinstallée du moteur
+
 ameliorer le zorder entre les sprites
 
 le jeu en shipped crash quand on quitte
