@@ -1,6 +1,7 @@
 #include "SpriteVoxelizer.h"
 
 #include "../core/Filesystem.h"
+#include "../core/JobSystem.h"
 #include "../core/RessourceManager.h"
 #include "../core/Voxels.h"
 #include "../gameplay/Actor.h"
@@ -228,9 +229,10 @@ namespace lynx::editor::sprite_voxels
 			v = source.v0 + fy * (source.v1 - source.v0);
 		};
 
-		// 1. One color (or empty) per cell
+		// 1. One color (or empty) per cell. The rows are independent (they
+		//    only read the image) : worker threads, a few rows each.
 		std::vector<int64_t> cell_color(r.cells.size(), -1);
-		for (int row = 0; row < r.rows; ++row)
+		lynx::jobs::ParallelFor(0, r.rows, 4, [&](int row)
 		{
 			for (int col = 0; col < r.cols; ++col)
 			{
@@ -285,7 +287,7 @@ namespace lynx::editor::sprite_voxels
 				}
 				cell_color[static_cast<size_t>(row) * r.cols + col] = color;
 			}
-		}
+		});
 
 		// 2. Distinct colors (weight = number of cells)
 		std::map<uint32_t, int> weights;

@@ -26,6 +26,25 @@ namespace lynx
 	/** Bytes of an asset ready for HRL_CreateTexture (decoded by a plugin if needed). Empty : failed. */
 	LYNX_API std::vector<std::uint8_t> ReadTextureFile(const char* path);
 
+	/**
+	 * Several textures at once (level start, voxel types...) : the files are
+	 * read and decoded (plugins) on the worker threads, then decoded by HRL
+	 * in the background (HRL_CreateTextureAsync) ; returns when every texture
+	 * is uploaded. ids[i] : HRL_INVALID_ID when paths[i] failed. Not cached
+	 * (see PreloadTextures). Main thread.
+	 */
+	LYNX_API std::vector<std::uint32_t> CreateTextures(const std::vector<std::string>& paths);
+
+	/** CreateTextures for the paths RessourceTex does not know yet : RessourceTex(path) is then instant. */
+	LYNX_API void PreloadTextures(const std::vector<std::string>& paths);
+
+	/**
+	 * true (default) : CreateTextures lets HRL decode in the background
+	 * (HRL_CreateTextureAsync). false : HRL_CreateTexture, one after the other
+	 * (the files are still read in parallel).
+	 */
+	LYNX_API void SetAsyncTextureDecoding(bool enabled);
+
 	/** The file changed : the cached texture is reloaded in place (same id, every user sees it). */
 	LYNX_API bool ReloadRessourceTexture(const char* path);
 

@@ -59,6 +59,15 @@ namespace lynx
 			std::unique_ptr<Component> ptr;
 		};
 
+		// Bumped when an actor entity is created or destroyed (see the cache
+		// of OrderedActors).
+		uint64_t g_entity_version = 0;
+		// Bumped when a component is added to / removed from an entity
+		// (cache of CollectActorsWith / CollectComponentPtrs).
+		uint64_t g_component_version = 0;
+		// Bumped each time the OrderedActors cache is rebuilt.
+		uint64_t g_actor_list_generation = 0;
+
 		entt::registry& Registry()
 		{
 			static entt::registry registry;
@@ -172,13 +181,11 @@ namespace lynx
 
 			std::unique_ptr<Component> owned = std::move(storage->get(e).ptr);
 			storage->erase(e);
+			++g_component_version;
 			return owned;
 		}
 
 		/** Acteurs : ordre du niveau, puis les autres (spawns en attente...). */
-		// Bumped when an actor entity is created or destroyed (see the cache
-		// of OrderedActors).
-		uint64_t g_entity_version = 0;
 
 		/**
 		 * Every actor : the level order, then the ones not in the level yet
@@ -188,7 +195,7 @@ namespace lynx
 		 * actor entity created or destroyed). Before : a copy and a hash set
 		 * of every actor per call (~0.1 ms with 500 actors, x hundreds).
 		 */
-		std::vector<Actor*> OrderedActors()
+		const std::vector<Actor*>& OrderedActorsRef()
 		{
 			struct Cache
 			{
@@ -209,6 +216,8 @@ namespace lynx
 			if (cache.valid && cache.level == level && cache.data == data && cache.size == size &&
 			    cache.version == g_entity_version)
 				return cache.actors;
+
+			++g_actor_list_generation;
 
 			std::vector<Actor*>& out = cache.actors;
 			out.clear();
@@ -238,6 +247,12 @@ namespace lynx
 			return out;
 		}
 
+		/** A copy : the callers may spawn / destroy actors while iterating. */
+		std::vector<Actor*> OrderedActors()
+		{
+			return OrderedActorsRef();
+		}
+
 		/** Profiler zone of a component : its C++ type (nullptr : fine zones off). */
 		const char* ProfileName(const Component& c)
 		{
@@ -245,15 +260,32 @@ namespace lynx
 		}
 
 		/** Tous les composants vivants, acteur par acteur. */
+		/**
+		 * Every component, actor by actor (3 times per frame : Update, Tick,
+		 * LateUpdate). GetComponents tests every component type for each
+		 * actor (~10 000 lookups with 500 actors) : the list is cached and
+		 * rebuilt only when an actor or a component is added / removed.
+		 * A copy is returned : the loops may add / remove components.
+		 */
 		std::vector<Component*> CollectAllComponents()
 		{
-			std::vector<Component*> out;
-			for (Actor* a : OrderedActors())
+			static uint64_t list_generation = ~0ull;
+			static uint64_t component_version = ~0ull;
+			static std::vector<Component*> cache;
+
+			const std::vector<Actor*>& actors = OrderedActorsRef();   // may rebuild (generation)
+			if (list_generation != g_actor_list_generation || component_version != g_component_version)
 			{
-				for (Component* c : a->GetComponents())
-					out.push_back(c);
+				cache.clear();
+				for (Actor* a : actors)
+				{
+					for (Component* c : a->GetComponents())
+						cache.push_back(c);
+				}
+				list_generation = g_actor_list_generation;
+				component_version = g_component_version;
 			}
-			return out;
+			return cache;
 		}
 
 		void StartComponent(Component& c)
@@ -355,18 +387,52 @@ namespace lynx
 			return ref ? ref->actor : nullptr;
 		}
 
+		namespace
+		{
+			// Actors (and their component) of one type, in the actor order.
+			struct TypeList
+			{
+				uint64_t list_generation = ~0ull;
+				uint64_t component_version = ~0ull;
+				std::vector<Actor*> actors;
+				std::vector<Component*> components;
+			};
+
+			const TypeList& TypeListFor(uint32_t type_id)
+			{
+				static std::unordered_map<uint32_t, TypeList> lists;
+				const std::vector<Actor*>& all = OrderedActorsRef();   // may rebuild (generation)
+				TypeList& list = lists[type_id];
+				if (list.list_generation == g_actor_list_generation && list.component_version == g_component_version)
+					return list;
+
+				list.actors.clear();
+				list.components.clear();
+				if (SlotStorage* storage = FindStorage(type_id); storage && !storage->empty())
+				{
+					for (Actor* a : all)
+					{
+						const entt::entity e = ToEntity(a->GetEntity());
+						if (!storage->contains(e))
+							continue;
+						list.actors.push_back(a);
+						list.components.push_back(storage->get(e).ptr.get());
+					}
+				}
+				list.list_generation = g_actor_list_generation;
+				list.component_version = g_component_version;
+				return list;
+			}
+		}
+
 		void CollectActorsWith(uint32_t type_id, std::vector<Actor*>& out)
 		{
-			out.clear();
-			SlotStorage* storage = FindStorage(type_id);
-			if (!storage || storage->empty())
-				return;
+			out = TypeListFor(type_id).actors;
+		}
 
-			for (Actor* a : OrderedActors())
-			{
-				if (storage->contains(ToEntity(a->GetEntity())))
-					out.push_back(a);
-			}
+		void CollectComponentPtrs(uint32_t type_id, std::vector<Component*>& out)
+		{
+			out = TypeListFor(type_id).components;
 		}
 
 		void BeginPlay()
@@ -592,6 +658,7 @@ namespace lynx
 
 		SlotStorage& storage = GetOrCreateStorage(type_id, typeid(*component).name());
 		storage.emplace(ToEntity(entity_), ComponentSlot{std::move(owned)});
+		++g_component_version;
 
 		ComponentAccess::SetEntity(*component, entity_);
 		ComponentAccess::OnAttach(*component);

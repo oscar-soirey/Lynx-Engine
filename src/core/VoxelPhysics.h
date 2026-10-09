@@ -85,6 +85,16 @@ namespace lynx::voxel_physics
 	LYNX_API void InvalidateVoxels(int x0, int y0, int x1, int y1);
 	LYNX_API void InvalidateAllVoxels();
 
+	/**
+	 * Type of a voxel from that copy, when its tile is cached and fresh (the
+	 * area simulated around the cameras) : voxels::GetTypeAt uses it while
+	 * the game runs (an HRL call per voxel is ~100 ns). false : ask HRL.
+	 */
+	LYNX_API bool CachedType(int voxel_x, int voxel_y, uint8_t& type);
+
+	/** Game end : the copy is dropped (the editor edits the world again). */
+	LYNX_API void OnGameEnd();
+
 	/** Every frame while the game runs (Engine::ProgressOneFrame). */
 	LYNX_API void Tick(float dt);
 }

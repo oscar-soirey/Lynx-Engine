@@ -81,6 +81,95 @@ namespace lynx
 			return out;
 		}
 
+		// Same as ColliderComponent::GetWorldBox, with the owner already known
+		// (GetOwner is a registry lookup : once per collider, not three times).
+		void BoxOf(const ColliderComponent& c, const Actor* owner, float& center_x, float& center_y, float& width, float& height)
+		{
+			const transform& t = owner->transform;
+			const float flip_x = t.scale.x < 0.f ? -1.f : 1.f;
+			const float flip_y = t.scale.y < 0.f ? -1.f : 1.f;
+			const float abs_x = std::fabs(t.scale.x);
+			const float abs_y = std::fabs(t.scale.y);
+			center_x = t.location.x + c.offset.x * abs_x * flip_x;
+			center_y = t.location.y + c.offset.y * abs_y * flip_y;
+			width = std::fabs(c.size.x) * abs_x;
+			height = std::fabs(c.size.y) * abs_y;
+		}
+
+		/**
+		 * Broadphase of one MoveAndCollide : the colliders whose box crosses the
+		 * swept area (boxes frozen : nobody else moves during the move) and the
+		 * voxels of that area, read once. The ~15 tests of the move (steps,
+		 * contact, dichotomy) then look only at that, instead of every collider
+		 * of the level and HRL for every voxel, each time.
+		 */
+		struct Sweep
+		{
+			struct Other { ColliderComponent* collider; float x, y, w, h; };
+			std::vector<Other> others;
+
+			bool voxels = false;        // test the voxels
+			uint32_t flags = 0u;
+			bool cached = false;        // `solid` covers [vx0, vx1] x [vy0, vy1]
+			int vx0 = 0, vy0 = 0, vx1 = -1, vy1 = -1;
+			std::vector<uint8_t> solid;
+
+			bool SolidAt(int x, int y) const
+			{
+				if (cached && x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1)
+					return solid[static_cast<size_t>(y - vy0) * static_cast<size_t>(vx1 - vx0 + 1) + static_cast<size_t>(x - vx0)] != 0;
+				return (voxels::GetFlagsAt(x, y) & flags) != 0u;
+			}
+
+			// VoxelBoxBlocked, reading the cached cells.
+			bool VoxelBlocked(float cx, float cy, float w, float h) const
+			{
+				const uint32_t scene = Engine::GetScene();
+				float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f;
+				if (HRL_WorldToVoxelCoordinates(scene, cx - w * 0.5f, cy - h * 0.5f, &x0, &y0) != HRL_TRUE ||
+				    HRL_WorldToVoxelCoordinates(scene, cx + w * 0.5f, cy + h * 0.5f, &x1, &y1) != HRL_TRUE)
+					return false;
+				if (x1 < x0) std::swap(x0, x1);
+				if (y1 < y0) std::swap(y0, y1);
+				const int min_x = static_cast<int>(std::floor(x0 + kEpsilon));
+				const int max_x = static_cast<int>(std::floor(x1 - kEpsilon));
+				const int min_y = static_cast<int>(std::floor(y0 + kEpsilon));
+				const int max_y = static_cast<int>(std::floor(y1 - kEpsilon));
+				if (max_x < min_x || max_y < min_y)
+					return false;
+				const long long cells =
+					static_cast<long long>(max_x - min_x + 1) * static_cast<long long>(max_y - min_y + 1);
+				if (cells > kMaxVoxelCells)
+					return false;
+				for (int y = min_y; y <= max_y; ++y)
+					for (int x = min_x; x <= max_x; ++x)
+						if (SolidAt(x, y))
+							return true;
+				return false;
+			}
+
+			// BlockedAt of the collider, on the broadphase.
+			bool Blocked(float cx, float cy, float w, float h, ColliderComponent** by = nullptr, bool* voxel = nullptr) const
+			{
+				if (by) *by = nullptr;
+				if (voxel) *voxel = false;
+				if (voxels && VoxelBlocked(cx, cy, w, h))
+				{
+					if (voxel) *voxel = true;
+					return true;
+				}
+				for (const Other& o : others)
+				{
+					if (BoxesOverlap(cx, cy, w, h, o.x, o.y, o.w, o.h))
+					{
+						if (by) *by = o.collider;
+						return true;
+					}
+				}
+				return false;
+			}
+		};
+
 		constexpr uint32_t kNoEntity = 0xFFFFFFFFu;
 
 		/**
@@ -159,9 +248,21 @@ namespace lynx
 	{
 		std::vector<ColliderComponent*> out;
 
+		const Actor* self_owner = GetOwner();
+		if (!self_owner)
+			return out;
+		float ax, ay, aw, ah;
+		BoxOf(*this, self_owner, ax, ay, aw, ah);
 		for (ColliderComponent* other : AllColliders())
 		{
-			if (CanInteractWith(*other) && IsOverlapping(*other))
+			if (other == this || !CanInteractWith(*other))
+				continue;
+			const Actor* other_owner = other->GetOwner();
+			if (!other_owner || other_owner == self_owner)
+				continue;
+			float bx, by, bw, bh;
+			BoxOf(*other, other_owner, bx, by, bw, bh);
+			if (BoxesOverlap(ax, ay, aw, ah, bx, by, bw, bh))
 				out.push_back(other);
 		}
 
@@ -203,13 +304,17 @@ namespace lynx
 			return true;
 		}
 
+		const Actor* self_owner = GetOwner();
 		for (ColliderComponent* other : AllColliders())
 		{
-			if (other == this || other->trigger || other->GetOwner() == GetOwner() || !CanInteractWith(*other))
+			if (other == this || other->trigger || !CanInteractWith(*other))
+				continue;
+			const Actor* other_owner = other->GetOwner();
+			if (!other_owner || other_owner == self_owner)
 				continue;
 
 			float bx, by_, bw, bh;
-			other->GetWorldBox(bx, by_, bw, bh);
+			BoxOf(*other, other_owner, bx, by_, bw, bh);
 
 			if (BoxesOverlap(cx, cy, w, h, bx, by_, bw, bh))
 			{
@@ -240,10 +345,13 @@ namespace lynx
 			vec3 push(0.f);
 			for (ColliderComponent* other : AllColliders())
 			{
-				if (other == this || other->trigger || other->GetOwner() == owner || !CanInteractWith(*other))
+				if (other == this || other->trigger || !CanInteractWith(*other))
+					continue;
+				const Actor* other_owner = other->GetOwner();
+				if (!other_owner || other_owner == owner)
 					continue;
 				float bx, by, bw, bh;
-				other->GetWorldBox(bx, by, bw, bh);
+				BoxOf(*other, other_owner, bx, by, bw, bh);
 				if (!BoxesOverlap(ax, ay, aw, ah, bx, by, bw, bh))
 					continue;
 
@@ -287,10 +395,62 @@ namespace lynx
 			return vec3(0.f);
 
 		float cx, cy, w, h;
-		GetWorldBox(cx, cy, w, h);
+		BoxOf(*this, owner, cx, cy, w, h);
+
+		// Broadphase du deplacement (voir Sweep). Un trigger ne bloque jamais.
+		Sweep sweep;
+		if (!trigger)
+		{
+			constexpr float kMargin = 0.01f;
+			const float sx0 = cx - w * 0.5f + std::min(0.f, delta.x) - kMargin;
+			const float sx1 = cx + w * 0.5f + std::max(0.f, delta.x) + kMargin;
+			const float sy0 = cy - h * 0.5f + std::min(0.f, delta.y) - kMargin;
+			const float sy1 = cy + h * 0.5f + std::max(0.f, delta.y) + kMargin;
+
+			for (ColliderComponent* other : AllColliders())
+			{
+				if (other == this || other->trigger || !CanInteractWith(*other))
+					continue;
+				const Actor* other_owner = other->GetOwner();
+				if (!other_owner || other_owner == owner)
+					continue;
+				float bx, by, bw, bh;
+				BoxOf(*other, other_owner, bx, by, bw, bh);
+				if (bx + bw * 0.5f < sx0 || bx - bw * 0.5f > sx1 || by + bh * 0.5f < sy0 || by - bh * 0.5f > sy1)
+					continue;
+				sweep.others.push_back({ other, bx, by, bw, bh });
+			}
+
+			if (collide_with_voxels)
+			{
+				sweep.voxels = true;
+				sweep.flags = voxel_flags ? voxel_flags : SolidVoxelFlags();
+				const uint32_t scene = Engine::GetScene();
+				float vx0 = 0.f, vy0 = 0.f, vx1 = 0.f, vy1 = 0.f;
+				if (HRL_WorldToVoxelCoordinates(scene, sx0, sy0, &vx0, &vy0) == HRL_TRUE &&
+				    HRL_WorldToVoxelCoordinates(scene, sx1, sy1, &vx1, &vy1) == HRL_TRUE)
+				{
+					if (vx1 < vx0) std::swap(vx0, vx1);
+					if (vy1 < vy0) std::swap(vy0, vy1);
+					const int x0 = static_cast<int>(std::floor(vx0)) - 1, x1 = static_cast<int>(std::floor(vx1)) + 1;
+					const int y0 = static_cast<int>(std::floor(vy0)) - 1, y1 = static_cast<int>(std::floor(vy1)) + 1;
+					const long long cells = static_cast<long long>(x1 - x0 + 1) * static_cast<long long>(y1 - y0 + 1);
+					if (cells > 0 && cells <= 4096)
+					{
+						sweep.cached = true;
+						sweep.vx0 = x0; sweep.vy0 = y0; sweep.vx1 = x1; sweep.vy1 = y1;
+						sweep.solid.resize(static_cast<size_t>(cells));
+						size_t i = 0;
+						for (int y = y0; y <= y1; ++y)
+							for (int x = x0; x <= x1; ++x)
+								sweep.solid[i++] = (voxels::GetFlagsAt(x, y) & sweep.flags) != 0u ? 1 : 0;
+					}
+				}
+			}
+		}
 
 		// Deja coince dans quelque chose : on laisse sortir.
-		const bool stuck = BlockedAt(cx, cy, w, h);
+		const bool stuck = sweep.Blocked(cx, cy, w, h);
 
 		// Pas maximal : un deplacement plus long ne doit pas traverser un mur
 		// fin. Moitie de la boite, et au plus un demi voxel.
@@ -318,9 +478,9 @@ namespace lynx
 			ColliderComponent* by = nullptr;
 			bool voxel = false;
 			if (axis_x)
-				BlockedAt(cx + m, cy, w, h, &by, &voxel);
+				sweep.Blocked(cx + m, cy, w, h, &by, &voxel);
 			else
-				BlockedAt(cx, cy + m, w, h, &by, &voxel);
+				sweep.Blocked(cx, cy + m, w, h, &by, &voxel);
 			vec3 normal(0.f);
 			(axis_x ? normal.x : normal.y) = -dir;
 			if (by && by->GetOwner())
@@ -336,7 +496,7 @@ namespace lynx
 
 			auto free_at = [&](float m)
 			{
-				return axis_x ? !BlockedAt(cx + m, cy, w, h) : !BlockedAt(cx, cy + m, w, h);
+				return axis_x ? !sweep.Blocked(cx + m, cy, w, h) : !sweep.Blocked(cx, cy + m, w, h);
 			};
 
 			const float dir = move > 0.f ? 1.f : -1.f;

@@ -98,7 +98,10 @@ static const ApiEntry kApiEntries[] = {
 	{ "Engine", "setTimeDilation", "setTimeDilation(value, duration?)", "Changes the speed of the game time (for `duration` seconds).", "", true },
 	{ "Engine", "isPlaying", "isPlaying()", "The game is running (not only the editor).", "", true },
 	{ "Engine", "isSimulating", "isSimulating()", "Simulate mode of the editor : the game runs, nobody is possessed, the editor camera stays.", "", true },
-	{ "Engine", "cameraShake", "cameraShake()", "Shakes the cameras whose useCameraShake is on, with the settings of Windows > Camera Shake (assets/camera_shake.json).", "", true },
+	{ "Engine", "setMouseCursorVisible", "setMouseCursorVisible(visible)", "Shows / hides the mouse cursor over the game window (shown again when the game ends).", "", true },
+	{ "Engine", "isMouseCursorVisible", "isMouseCursorVisible()", "true when the mouse cursor is shown.", "", true },
+	{ "Engine", "quit", "quit()", "Quits the game : closes the shipped game, stops Play in the editor.", "", true },
+	{ "Engine", "cameraShake", "cameraShake(intensity?, length?)", "Shakes the cameras whose useCameraShake is on, with the settings of Windows > Camera Shake (assets/camera_shake.json). intensity (1) scales the amplitudes, length (1) the duration ; a weaker shake does not cut a stronger one.", "", true },
 	{ "Engine", "createPlayer", "createPlayer()", "Adds a player (split screen). Destroyed at the end of the game if created during it.", "PlayerController", true },
 	{ "Engine", "destroyPlayer", "destroyPlayer(player)", "Removes a player.", "", true },
 	{ "Engine", "getPlayer", "getPlayer(index)", "The player with this index.", "PlayerController", true },
@@ -284,6 +287,7 @@ static const ApiEntry kApiEntries[] = {
 	{ "Light", "intensity", "intensity : number", "", "", false },
 	{ "Light", "offset", "offset : Vec3", "", "Vec3", false },
 	{ "Light", "enabled", "enabled : boolean", "", "", false },
+	{ "Light", "priority", "priority : number", "Over 32 lights on : the highest priority ones are kept first (the player's light : 10), then the closest.", "", false },
 
 	// Light2D (2D lighting, needs Lighting2D enabled)
 	{ "Light2D", "color", "color : Vec3", "", "Vec3", false },

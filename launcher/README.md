@@ -26,7 +26,11 @@ Petit programme (ImGui + GLFW) qui prépare une machine Windows pour Lynx.
   *Installer* / *Lancer* / *Dossier* / *Retirer*. L'archive Windows de la
   release (`lynx-w-x64-binaries.zip`) est téléchargée puis extraite avec `tar`
   dans `%LOCALAPPDATA%\Lynx\versions\<tag>\` : plusieurs versions peuvent
-  cohabiter. *Lancer* ouvre `LynxEditor.exe` de la version. L'installation
+  cohabiter. Le SDK de la version (`<tag>\sdk\cmake`, voir `cmake/LynxSdkConfig.cmake.in`)
+  est enregistré dans le registre de paquets CMake de l'utilisateur
+  (`HKCU\Software\Kitware\CMake\Packages\Lynx`, valeur `LynxLauncher-<tag>`) : `find_package(Lynx)`
+  des projets de jeu le trouve. Les versions installées sont réenregistrées au démarrage, la valeur
+  est retirée avec la version. *Lancer* ouvre `LynxEditor.exe` de la version. L'installation
   demande que toutes les dépendances soient présentes.
 
   `curl.exe` et `tar.exe` sont fournis avec Windows 10 (1803+) et 11.
@@ -78,7 +82,12 @@ Pour ajouter un modèle au catalogue : une ligne dans `Models::Catalog()`.
 
 ## Mise à jour du launcher (LynxUpdater)
 
-`LynxUpdater.exe` (dossier `updater/`) se lance **avant** le launcher, dans le même dossier :
+`LynxUpdater.exe` (dossier `updater/`) se lance **avant** le launcher. Il est autonome : l'installateur
+ne livre que lui, il télécharge le launcher au premier lancement (fenêtre de progression affichée tout de suite).
+
+Dossier du launcher : à côté de l'updater si ce dossier est modifiable, sinon
+`%LOCALAPPDATA%\Lynx\launcher\` (installation dans *Program Files* : l'updater tourne sans droits
+administrateur). Un launcher déjà présent dans `%LOCALAPPDATA%` est prioritaire.
 
 1. il lit la dernière release GitHub dont le tag commence par `launcher` (les tags `v26.x`
    du moteur sont ignorés, brouillons et pré-releases aussi) ;

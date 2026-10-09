@@ -35,6 +35,9 @@ namespace lynx::camera_state
 	LYNX_API void SetFov(uint32_t camera, float fov);
 	LYNX_API void SetViewportCamera(uint32_t viewport, uint32_t camera);
 
+	/** Location of the camera moved last (false : none yet). */
+	LYNX_API bool GetLastLocation(vec3& out);
+
 	/** false : camera never set through these functions. */
 	LYNX_API bool Get(uint32_t camera, State& out);
 

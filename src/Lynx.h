@@ -17,6 +17,7 @@
 #include "core/Utils.h"
 #include "core/Voxels.h"
 #include "core/Profiler.h"
+#include "core/JobSystem.h"
 
 #include "core/data/DataEnum.h"
 #include "core/data/EventDispatcher.h"

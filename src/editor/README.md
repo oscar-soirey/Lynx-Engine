@@ -243,10 +243,21 @@ add_library(MonJeu SHARED ...)
 target_link_libraries(MonJeu PRIVATE Lynx::Lynx Lynx::HRL)
 ```
 
-Configurer le moteur génère `LynxConfig.cmake` dans son dossier de build et
-l'enregistre dans le registre de paquets CMake de l'utilisateur
-(`HKEY_CURRENT_USER\Software\Kitware\CMake\Packages\Lynx`). Pour forcer un
-build précis du moteur : `-DLynx_DIR=<dossier de build du moteur>`.
+Où `find_package(Lynx)` trouve le moteur :
+
+1. **builds lancés par l'éditeur** (Build.bat, IDE ouvert depuis l'éditeur) : l'éditeur
+   définit la variable d'environnement `Lynx_DIR` vers son propre moteur
+   (`<build>/LynxConfig.cmake`, ou `<version>/sdk/cmake` pour une version installée) ;
+2. **registre de paquets CMake** de l'utilisateur
+   (`HKEY_CURRENT_USER\Software\Kitware\CMake\Packages\Lynx`) : configurer les
+   sources du moteur y enregistre son dossier de build, le launcher y enregistre
+   les versions qu'il installe ;
+3. en dernier recours, la version la plus récente de `%LOCALAPPDATA%/Lynx/versions`.
+
+Le SDK (`<build>/sdk/` : headers, `libLynx.dll.a`, `LynxConfig.cmake` relocalisable)
+est produit à chaque build (cible `LynxSDK`) et doit être dans l'archive de la release,
+à côté de `LynxEditor.exe`. Pour forcer un moteur précis :
+`-DLynx_DIR=<version>/sdk/cmake` (ou `<dossier de build du moteur>`).
 Le jeu doit être compilé avec le même compilateur que le moteur (vérifié).
 
 ## Runtime

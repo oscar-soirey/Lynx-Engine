@@ -169,6 +169,110 @@ static void FramebufferSizeCallback(
 }
 
 
+// -----------------------------------------------------------------------------
+// Presenting the scene : the engine creates its HRL scene off screen (the
+// editor shows that texture in its Scene panel). The game copies it into the
+// window every frame, like the editor does, else the window stays black
+// while the game runs (sounds, scripts...).
+// -----------------------------------------------------------------------------
+
+#ifdef _WIN32
+#define LYNX_GL_CALL __stdcall
+#else
+#define LYNX_GL_CALL
+#endif
+
+struct ScenePresenter
+{
+    using GenFramebuffers = void (LYNX_GL_CALL*)(GLsizei, GLuint*);
+    using BindFramebuffer = void (LYNX_GL_CALL*)(GLenum, GLuint);
+    using FramebufferTexture2D = void (LYNX_GL_CALL*)(GLenum, GLenum, GLenum, GLuint, GLint);
+    using CheckFramebufferStatus = GLenum (LYNX_GL_CALL*)(GLenum);
+    using BlitFramebuffer = void (LYNX_GL_CALL*)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
+
+    static constexpr GLenum kFramebuffer = 0x8D40;          // GL_FRAMEBUFFER
+    static constexpr GLenum kReadFramebuffer = 0x8CA8;      // GL_READ_FRAMEBUFFER
+    static constexpr GLenum kDrawFramebuffer = 0x8CA9;      // GL_DRAW_FRAMEBUFFER
+    static constexpr GLenum kColorAttachment0 = 0x8CE0;     // GL_COLOR_ATTACHMENT0
+    static constexpr GLenum kFramebufferComplete = 0x8CD5;  // GL_FRAMEBUFFER_COMPLETE
+
+    GenFramebuffers gen = nullptr;
+    BindFramebuffer bind = nullptr;
+    FramebufferTexture2D attach = nullptr;
+    CheckFramebufferStatus status = nullptr;
+    BlitFramebuffer blit = nullptr;
+
+    GLuint fbo = 0;
+    GLuint attached = 0;
+    bool ready = false;
+    bool warned = false;
+
+    bool Init()
+    {
+        gen = reinterpret_cast<GenFramebuffers>(glfwGetProcAddress("glGenFramebuffers"));
+        bind = reinterpret_cast<BindFramebuffer>(glfwGetProcAddress("glBindFramebuffer"));
+        attach = reinterpret_cast<FramebufferTexture2D>(glfwGetProcAddress("glFramebufferTexture2D"));
+        status = reinterpret_cast<CheckFramebufferStatus>(glfwGetProcAddress("glCheckFramebufferStatus"));
+        blit = reinterpret_cast<BlitFramebuffer>(glfwGetProcAddress("glBlitFramebuffer"));
+        ready = gen && bind && attach && status && blit;
+        if (!ready)
+            std::cerr << "[RUNTIME] OpenGL framebuffer functions missing : the scene cannot be shown\n";
+        return ready;
+    }
+
+    void Present(HRL_id scene, GLFWwindow* win)
+    {
+        if (!ready || scene == HRL_INVALID_ID)
+            return;
+
+        const GLuint texture = static_cast<GLuint>(HRL_GL_GetSceneTextureGL_ID(scene));
+        if (texture == 0)
+            return;
+
+        if (fbo == 0)
+            gen(1, &fbo);
+
+        bind(kReadFramebuffer, fbo);
+        if (texture != attached)
+        {
+            attach(kReadFramebuffer, kColorAttachment0, GL_TEXTURE_2D, texture, 0);
+            attached = texture;
+        }
+        if (status(kReadFramebuffer) != kFramebufferComplete)
+        {
+            if (!warned)
+                std::cerr << "[RUNTIME] the scene texture cannot be read (framebuffer incomplete)\n";
+            warned = true;
+            bind(kFramebuffer, 0);
+            return;
+        }
+
+        GLint source_w = 0, source_h = 0;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &source_w);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &source_h);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        int target_w = 0, target_h = 0;
+        glfwGetFramebufferSize(win, &target_w, &target_h);
+        if (source_w <= 0 || source_h <= 0 || target_w <= 0 || target_h <= 0)
+        {
+            bind(kFramebuffer, 0);
+            return;
+        }
+
+        bind(kDrawFramebuffer, 0);
+        glViewport(0, 0, target_w, target_h);
+        // Same orientation (OpenGL, bottom-up) : no flip.
+        blit(0, 0, source_w, source_h, 0, 0, target_w, target_h, GL_COLOR_BUFFER_BIT,
+             source_w == target_w && source_h == target_h ? GL_NEAREST : GL_LINEAR);
+        bind(kFramebuffer, 0);
+    }
+};
+
+static ScenePresenter scenePresenter;
+
+
 static double lastMouseX = 0.0;
 static double lastMouseY = 0.0;
 static bool haveLastMousePosition = false;
@@ -478,8 +582,11 @@ int main(int argc, char** argv)
 
     HRL_Init(HRL_OPENGL_33);
 
+    // Physical pixels (the framebuffer : DPI scale of Windows), like the
+    // FramebufferSizeCallback (registered after the maximize : it may have
+    // missed it).
     int winX, winY;
-    glfwGetWindowSize(win, &winX, &winY);
+    glfwGetFramebufferSize(win, &winX, &winY);
 
     HRL_InitContext(
         winX,
@@ -493,6 +600,8 @@ int main(int argc, char** argv)
     HRL_RegisterErrorCallback(
         ErrorCallback
     );
+
+    scenePresenter.Init();
 
     HRL_SetDebugLineThickness(
         3.f
@@ -660,6 +769,23 @@ int main(int argc, char** argv)
 
         lynx::gamepad::Poll(false);
         engine->ProgressOneFrame(dt);
+
+        // Requests of the game (lynx::QuitGame / SetMouseCursorVisible, JS Engine.quit()...).
+        if (lynx::IsQuitRequested())
+            glfwSetWindowShouldClose(win, GLFW_TRUE);
+        {
+            static bool cursor_visible = true;
+            if (lynx::IsMouseCursorVisible() != cursor_visible)
+            {
+                cursor_visible = lynx::IsMouseCursorVisible();
+                glfwSetInputMode(win, GLFW_CURSOR, cursor_visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+            }
+        }
+
+        {
+            LYNX_PROFILE_SCOPE("Present scene");
+            scenePresenter.Present(scene, win);
+        }
 
         {
             LYNX_PROFILE_SCOPE("Swap buffers");

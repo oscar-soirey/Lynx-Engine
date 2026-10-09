@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <array>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -32,7 +33,11 @@ namespace lynx::profiler
 		// Interned names : one pointer per text, kept forever (a zone name of
 		// an unloaded DLL stays valid, two modules share the same zones).
 		std::mutex g_intern_mutex;
-		std::unordered_set<std::string> g_interned;
+		// Interned names : the strings live in a deque (stable addresses), the
+		// map is looked up with a string_view (no allocation when the name
+		// already exists : the common case, every frame).
+		std::deque<std::string> g_intern_storage;
+		std::unordered_map<std::string_view, const char*> g_intern_map;
 
 		// ---- Zones (main thread only, no lock) -----------------------------
 		struct Zone
@@ -139,6 +144,25 @@ namespace lynx::profiler
 			return g_main_known.load(std::memory_order_acquire) && std::this_thread::get_id() == g_main_thread;
 		}
 
+		// Direct-mapped cache (parent zone, name pointer) -> zone : most zones
+		// open under the same parent every frame, so BeginZone skips the two
+		// hash lookups (name, then zone). Cleared with the zones.
+		struct FastSlot { int parent; const char* name; int zone; };
+		constexpr size_t kFastSlots = 1024;
+		std::array<FastSlot, kFastSlots> g_fast{};
+		void ClearFast()
+		{
+			for (FastSlot& s : g_fast)
+				s = { -2, nullptr, -1 };
+		}
+		bool g_fast_ready = (ClearFast(), true);
+
+		size_t FastIndex(int parent, const char* name)
+		{
+			const size_t h = (reinterpret_cast<uintptr_t>(name) >> 3) ^ (static_cast<size_t>(parent + 1) * 0x9E3779B1u);
+			return h & (kFastSlots - 1);
+		}
+
 		const char* InternedName(const char* name)
 		{
 			auto it = g_name_cache.find(name);
@@ -193,6 +217,7 @@ namespace lynx::profiler
 			g_zones.clear();
 			g_zone_index.clear();
 			g_name_cache.clear();   // literals of an unloaded DLL : addresses reused
+			ClearFast();
 			g_stack.clear();
 			g_next_order = 0;
 			g_counters.clear();
@@ -240,8 +265,12 @@ namespace lynx::profiler
 	const char* Intern(std::string_view name)
 	{
 		std::lock_guard<std::mutex> lock(g_intern_mutex);
-		auto it = g_interned.emplace(name).first;   // nodes are stable : c_str() stays valid
-		return it->c_str();
+		auto it = g_intern_map.find(name);
+		if (it != g_intern_map.end())
+			return it->second;
+		const std::string& stored = g_intern_storage.emplace_back(name);
+		g_intern_map.emplace(std::string_view(stored), stored.c_str());
+		return stored.c_str();
 	}
 
 
@@ -321,7 +350,17 @@ namespace lynx::profiler
 			return 0;
 
 		const int parent = g_stack.empty() ? -1 : g_stack.back().zone;
-		const int zone = FindOrAddZone(parent, InternedName(name));
+		FastSlot& slot = g_fast[FastIndex(parent, name)];
+		int zone;
+		if (slot.parent == parent && slot.name == name)
+		{
+			zone = slot.zone;
+		}
+		else
+		{
+			zone = FindOrAddZone(parent, InternedName(name));
+			slot = { parent, name, zone };
+		}
 		g_next_serial = g_next_serial >= 0x3FFFFFFF ? 1 : g_next_serial + 1;
 		g_stack.push_back({ zone, Clock::now(), 0.0, g_next_serial });
 		return g_next_serial;

@@ -1049,11 +1049,32 @@ namespace lynx
 			return JS_NewBool(ctx, ecs::IsPlaying());
 		}
 
-		// Engine.cameraShake() : the camera shake of the project (Windows >
-		// Camera Shake), on the cameras whose useCameraShake is on.
-		JSValue EngineCameraShake(JSContext*, JSValueConst, int, JSValueConst*)
+		// Engine.cameraShake(intensity = 1, length = 1) : the camera shake of the
+		// project (Windows > Camera Shake), on the cameras whose useCameraShake
+		// is on ; intensity scales the amplitudes, length the duration.
+		JSValue EngineCameraShake(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 		{
-			GetCameraShake().Trigger();
+			double intensity = 1.0, length = 1.0;
+			if (argc > 0 && !JS_IsUndefined(argv[0]) && JS_ToFloat64(ctx, &intensity, argv[0])) return JS_EXCEPTION;
+			if (argc > 1 && !JS_IsUndefined(argv[1]) && JS_ToFloat64(ctx, &length, argv[1])) return JS_EXCEPTION;
+			GetCameraShake().Trigger(static_cast<float>(intensity), static_cast<float>(length));
+			return JS_UNDEFINED;
+		}
+
+		JSValue EngineSetMouseCursorVisible(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+		{
+			SetMouseCursorVisible(argc < 1 || JS_ToBool(ctx, argv[0]) != 0);
+			return JS_UNDEFINED;
+		}
+
+		JSValue EngineIsMouseCursorVisible(JSContext* ctx, JSValueConst, int, JSValueConst*)
+		{
+			return JS_NewBool(ctx, IsMouseCursorVisible());
+		}
+
+		JSValue EngineQuit(JSContext*, JSValueConst, int, JSValueConst*)
+		{
+			QuitGame();
 			return JS_UNDEFINED;
 		}
 
@@ -1551,7 +1572,10 @@ namespace lynx
 			DefFunc(ctx, engine, "setTimeDilation", EngineSetTimeDilation, 2);
 			DefFunc(ctx, engine, "isPlaying", EngineIsPlaying, 0);
 			DefFunc(ctx, engine, "isSimulating", EngineIsSimulating, 0);
-			DefFunc(ctx, engine, "cameraShake", EngineCameraShake, 0);
+			DefFunc(ctx, engine, "cameraShake", EngineCameraShake, 2);
+			DefFunc(ctx, engine, "setMouseCursorVisible", EngineSetMouseCursorVisible, 1);
+			DefFunc(ctx, engine, "isMouseCursorVisible", EngineIsMouseCursorVisible, 0);
+			DefFunc(ctx, engine, "quit", EngineQuit, 0);
 			JS_SetPropertyStr(ctx, global, "Engine", engine);
 
 			JS_FreeValue(ctx, global);
@@ -1584,6 +1608,29 @@ namespace lynx
 			return JS_IsObject(a) && JS_IsObject(b) && JS_VALUE_GET_PTR(a) == JS_VALUE_GET_PTR(b);
 		}
 
+		/**
+		 * Zone name "<owner>.<method>" (Lueur.Update, player.js.Update), interned.
+		 * Cached by content (hash of both parts, checked) : no string built per
+		 * call. nullptr when the fine zones are off.
+		 */
+		const char* MethodZoneName(std::string_view owner, std::string_view method)
+		{
+			if (!profiler::Detailed())
+				return nullptr;
+			struct Entry { std::string owner, method; const char* name; };
+			static std::unordered_map<size_t, std::vector<Entry>> cache;
+			const size_t h = std::hash<std::string_view>{}(owner) * 31u ^ std::hash<std::string_view>{}(method);
+			auto& bucket = cache[h];
+			for (const Entry& e : bucket)
+				if (e.owner == owner && e.method == method)
+					return e.name;
+			std::string full;
+			full.reserve(owner.size() + method.size() + 1);
+			full.append(owner).append(".").append(method);
+			bucket.push_back({ std::string(owner), std::string(method), profiler::Intern(full) });
+			return bucket.back().name;
+		}
+
 		/** Appelle obj.name(...) sur l'objet de l'acteur. false si pas de methode. */
 		bool CallClassMethod(Actor* a, const char* name, int argc, JSValueConst* argv, JSValue* result = nullptr)
 		{
@@ -1609,7 +1656,7 @@ namespace lynx
 			}
 
 			// "Lueur.Update", "Arena.OnBeginOverlap"... in the Profiler.
-			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? profiler::Intern(a->GetTypeName() + "." + name) : nullptr);
+			LYNX_PROFILE_SCOPE_PTR(MethodZoneName(a->script_class_.empty() ? std::string_view(a->GetTypeName()) : std::string_view(a->script_class_), name));
 			LYNX_PROFILE_COUNT("JS calls", 1);
 
 			++g->call_depth;
@@ -2886,9 +2933,8 @@ namespace lynx
 			const std::string path = inst.path;
 
 			// "player.js.Update" in the Profiler (file name, not the folders).
-			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed()
-				? profiler::Intern(path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1) + "." + name)
-				: nullptr);
+			LYNX_PROFILE_SCOPE_PTR(MethodZoneName(
+				std::string_view(path).substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1), name));
 			LYNX_PROFILE_COUNT("JS calls", 1);
 
 			++g->call_depth;

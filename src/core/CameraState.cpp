@@ -21,9 +21,25 @@ namespace lynx::camera_state
 		}
 	}
 
+	namespace
+	{
+		vec3 g_last_location{0.f};
+		bool g_has_last = false;
+	}
+
+	bool GetLastLocation(vec3& out)
+	{
+		if (!g_has_last)
+			return false;
+		out = g_last_location;
+		return true;
+	}
+
 	void SetLocation(uint32_t camera, float x, float y, float z)
 	{
 		HRL_SetCameraLocation(camera, x, y, z);
+		g_last_location = vec3(x, y, z);
+		g_has_last = true;
 		State& s = Cameras()[camera];
 		s.location = vec3(x, y, z);
 		s.has_location = true;

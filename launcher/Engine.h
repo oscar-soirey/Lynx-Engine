@@ -46,6 +46,18 @@ namespace Engine
 	bool Install(const EngineRelease& release, const LogFn& log, const std::function<void(float)>& on_progress);
 	bool Uninstall(const std::string& tag, const LogFn& log);
 
+	// SDK de la version (headers, libLynx.dll.a, LynxConfig.cmake) : <version>\sdk\cmake.
+	// Les versions publiées avant le SDK n'en ont pas (find_package(Lynx) impossible).
+	std::filesystem::path SdkConfigDirectory(const std::string& tag);
+
+	// Registre de paquets CMake de l'utilisateur
+	// (HKEY_CURRENT_USER\Software\Kitware\CMake\Packages\Lynx) : find_package(Lynx)
+	// d'un projet de jeu trouve les versions installées sans -DLynx_DIR.
+	void RegisterCMakePackage(const std::string& tag, const LogFn& log);
+	void UnregisterCMakePackage(const std::string& tag);
+	// Enregistre toutes les versions installées qui ont un SDK (au démarrage du launcher).
+	void RegisterInstalledVersions(const LogFn& log);
+
 	// Lance LynxEditor.exe de cette version (dossier de travail = dossier de la version).
 	bool Launch(const std::string& tag, const LogFn& log);
 

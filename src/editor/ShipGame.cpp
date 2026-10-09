@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -291,6 +292,80 @@ namespace lynx::editor::ship_game
 				return false;
 			}
 			return true;
+		}
+
+		// ---------------------------------------------------------------------
+		// C++ runtime of the compiler (MinGW) : libLynx.dll, the executable,
+		// the game DLL and the plugins need them. On the developer's PC they
+		// come from the PATH (MinGW's bin) : a shipped game must carry them,
+		// else it does not start on another PC.
+		// ---------------------------------------------------------------------
+
+		// Folder of the C++ compiler used for the engine (its CMakeCache.txt).
+		fs::path CompilerBinFolder(const fs::path& engine_dir)
+		{
+			std::ifstream cache(engine_dir / "CMakeCache.txt");
+			std::string line;
+			while (std::getline(cache, line))
+			{
+				const std::string key = "CMAKE_CXX_COMPILER:FILEPATH=";
+				if (line.rfind(key, 0) == 0)
+					return fs::path(line.substr(key.size())).parent_path();
+			}
+			return {};
+		}
+
+		// Copies libstdc++ / libgcc / winpthread next to the game. Found next
+		// to the editor, in the compiler's folder or in the PATH. Built with
+		// MSVC (none of them anywhere) : nothing to do.
+		int CopyCompilerRuntime(const fs::path& engine_dir, const fs::path& output, std::string& warnings)
+		{
+			std::vector<fs::path> folders = { engine_dir };
+			if (fs::path compiler = CompilerBinFolder(engine_dir); !compiler.empty())
+				folders.push_back(compiler);
+			if (const char* path_env = std::getenv("PATH"))
+			{
+				std::string paths = path_env;
+				size_t start = 0;
+				while (start <= paths.size())
+				{
+					const size_t end = paths.find(';', start);
+					const std::string dir = paths.substr(start, end == std::string::npos ? std::string::npos : end - start);
+					if (!dir.empty())
+						folders.emplace_back(dir);
+					if (end == std::string::npos)
+						break;
+					start = end + 1;
+				}
+			}
+
+			int copied = 0;
+			bool any_found = false;
+			std::vector<std::string> missing;
+			for (const char* name : { "libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll" })
+			{
+				bool found = false;
+				for (const fs::path& folder : folders)
+				{
+					std::error_code ec;
+					const fs::path file = folder / name;
+					if (!fs::is_regular_file(file, ec))
+						continue;
+					found = true;
+					fs::copy_file(file, output / name, fs::copy_options::overwrite_existing, ec);
+					if (!ec)
+						++copied;
+					break;
+				}
+				any_found = any_found || found;
+				if (!found)
+					missing.emplace_back(name);
+			}
+			// Some found, some not : MinGW without one of them is suspicious.
+			if (any_found && !missing.empty())
+				for (const std::string& m : missing)
+					warnings += "Warning : " + m + " not found (the game may not start on another PC)\n";
+			return copied;
 		}
 
 		// ---------------------------------------------------------------------
@@ -785,6 +860,15 @@ namespace lynx::editor::ship_game
 				return fail(error);
 			Log(std::to_string(dll_count) + " engine DLLs + " + ToUtf8(game_dll.filename()));
 
+			{
+				std::string warnings;
+				const int runtime_count = CopyCompilerRuntime(engine_dir, output, warnings);
+				if (runtime_count > 0)
+					Log(std::to_string(runtime_count) + " C++ runtime DLLs (MinGW)");
+				if (!warnings.empty())
+					Log(warnings);
+			}
+
 			if (fs::is_regular_file(root / "input.json", ec) && !CopyInto(root / "input.json", output, error))
 				return fail(error);
 
@@ -819,8 +903,15 @@ namespace lynx::editor::ship_game
 					}
 					const fs::path dest = output / "plugins" / FromUtf8(p.name);
 					const fs::path dll_rel = p.runtime_dll.lexically_relative(p.folder);
+					// The plugin built with the shipped engine (build-release/plugins
+					// for the Release engine) : a plugin of another build of the
+					// engine does not match its classes and factory.
+					fs::path source = p.runtime_dll;
+					const fs::path same_engine = engine_dir / "plugins" / FromUtf8(p.name) / dll_rel;
+					if (p.engine_plugin && fs::is_regular_file(same_engine, ec))
+						source = same_engine;
 					fs::create_directories(dest / dll_rel.parent_path(), ec);
-					fs::copy_file(p.runtime_dll, dest / dll_rel, fs::copy_options::overwrite_existing, ec);
+					fs::copy_file(source, dest / dll_rel, fs::copy_options::overwrite_existing, ec);
 					if (ec)
 						return fail("could not copy the plugin " + p.name + " : " + ec.message());
 
@@ -930,9 +1021,18 @@ namespace lynx::editor::ship_game
 			g_state = State::Packing;
 
 			const fs::path release_dir = FindReleaseEngineDir();
-			const fs::path engine_dir = (g_use_release && !release_dir.empty())
-				? release_dir
-				: host::GetEditorDirectory();
+			bool use_release = g_use_release && !release_dir.empty();
+			// A Release engine older than the editor's misses the changes made
+			// since (scripts, fixes) : the game ran in the editor, then broke
+			// once shipped. The editor's engine is shipped instead.
+			if (use_release && ReleaseEngineOutdated(release_dir))
+			{
+				use_release = false;
+				Log("Warning : the Release engine (build-release) is older than the editor's : the editor's engine "
+				    "is shipped instead. Run build-release.bat again for an optimized game.");
+			}
+			const fs::path engine_dir = use_release ? release_dir : host::GetEditorDirectory();
+			Log(std::string("Engine : ") + (use_release ? "Release (" : "editor build (") + ToUtf8(engine_dir) + ")");
 
 			g_worker = std::thread(Pack, g_root, FromUtf8(g_output), SafeFileName(g_game_name), g_hide_console,
 			                       engine_dir, FromUtf8(g_icon));
@@ -1099,7 +1199,8 @@ namespace lynx::editor::ship_game
 			if (g_use_release && ReleaseEngineOutdated(release_dir))
 			{
 				ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.2f, 1.f),
-				                   "The Release engine is older than the editor's : run build-release.bat again.");
+				                   "The Release engine is older than the editor's : the editor build will be shipped.\n"
+				                   "Run build-release.bat again for an optimized game.");
 			}
 		}
 

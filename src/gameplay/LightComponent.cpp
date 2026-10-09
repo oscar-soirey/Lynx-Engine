@@ -7,12 +7,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
+
+#include "../core/CameraState.h"
 
 namespace lynx
 {
 	namespace
 	{
 		constexpr uint32_t kInvalid = 0xFFFFFFFFu;
+
+		// Every LightComponent alive (for the light budget).
+		std::vector<LightComponent*>& Registry()
+		{
+			static std::vector<LightComponent*> lights;
+			return lights;
+		}
 		constexpr float kDegToRad = 3.14159265358979f / 180.f;
 
 		HRL_ELightType ToHRL(LightComponent::Type type)
@@ -29,18 +40,95 @@ namespace lynx
 
 	LightComponent::~LightComponent()
 	{
+		if (registered_)
+		{
+			auto& all = Registry();
+			const auto it = std::find(all.begin(), all.end(), this);
+			if (it != all.end())
+			{
+				*it = all.back();
+				all.pop_back();
+			}
+		}
 		if (light_ != kInvalid && HRL_IsValidLight(light_))
 			HRL_DeleteLight(light_);
 	}
 
 	void LightComponent::OnAttach()
 	{
+		if (!registered_)
+		{
+			Registry().push_back(this);
+			registered_ = true;
+		}
 		Sync(true);
+	}
+
+	void LightComponent::UpdateBudget()
+	{
+		auto& all = Registry();
+		std::vector<std::pair<float, LightComponent*>> on;
+		on.reserve(all.size());
+
+		// The reference point : the light with the highest priority (the
+		// player's), else the camera moved last.
+		const LightComponent* ref = nullptr;
+		for (LightComponent* l : all)
+		{
+			l->budget_ok_ = false;
+			if (!l->enabled || l->intensity <= 0.f)
+				continue;
+			if (l->priority > 0 && (!ref || l->priority > ref->priority))
+				ref = l;
+			on.emplace_back(0.f, l);
+		}
+		if (static_cast<int>(on.size()) <= kLightBudget)
+		{
+			for (auto& [score, l] : on)
+				l->budget_ok_ = true;
+			return;
+		}
+
+		vec3 center(0.f);
+		bool has_center = false;
+		if (ref)
+		{
+			center = ref->GetWorldLocation();
+			has_center = true;
+		}
+		else
+		{
+			has_center = camera_state::GetLastLocation(center);
+		}
+
+		for (auto& [score, l] : on)
+		{
+			if (l->type == Type::Sky || l->type == Type::Directional)
+			{
+				score = -1e30f;
+				continue;
+			}
+			float d2 = 0.f;
+			if (has_center)
+			{
+				const vec3 p = l->GetWorldLocation();
+				const float dx = p.x - center.x, dy = p.y - center.y;
+				d2 = dx * dx + dy * dy;
+			}
+			score = d2 - static_cast<float>(l->priority) * 1e12f;
+		}
+		std::nth_element(on.begin(), on.begin() + (kLightBudget - 1), on.end(),
+		                 [](const auto& a, const auto& b) { return a.first < b.first; });
+		for (int i = 0; i < kLightBudget; ++i)
+			on[i].second->budget_ok_ = true;
 	}
 
 	void LightComponent::Update(float)
 	{
-		Sync(false);
+		// LateUpdate sends the final state of the frame to HRL ; here only
+		// the creation (a light exists from its first frame on).
+		if (light_ == kInvalid)
+			Sync(false);
 	}
 
 	void LightComponent::LateUpdate(float)
@@ -88,6 +176,23 @@ namespace lynx
 		// Deleted by the renderer (HRL_Shutdown, scene recreated...).
 		if (light_ != kInvalid && !HRL_IsValidLight(light_))
 			light_ = kInvalid;
+
+		// Off (enabled false, or no intensity) : no HRL light at all. HRL sends
+		// only 32 of its scene lights to the shaders, taken in the order of a
+		// hash map, the switched-off ones included : with many lights turned
+		// off (Glow, gameplay), the ones that are on were dropped at random
+		// (the light of the player...). Created again when switched on.
+		if (!enabled || intensity <= 0.f || !budget_ok_)
+		{
+			if (light_ != kInvalid)
+			{
+				if (HRL_IsValidLight(light_))
+					HRL_DeleteLight(light_);
+				light_ = kInvalid;
+			}
+			has_last_ = false;
+			return;
+		}
 
 		if (light_ == kInvalid)
 		{

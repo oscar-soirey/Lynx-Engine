@@ -2,7 +2,15 @@ obligé:
 
 ameliorer le zorder entre les sprites
 
-Aussi, quand on ship un jeu, le jeu fonctionne mais il y a ecran noir complet, le jeu es quand meme claculé puisque on entend les sons et tout.
+le jeu en shipped crash quand on quitte
+
+parfois le sky light fonctionne dans l'editeur mais pas dans le jeu, parfois l'inverse
+
+permettre d'editer et de distrubuer en cross platform windows/linux/macos (et plus tard distribuer aux consoles mais on en est loin)
+
+pipeline vulkan voxels complet
+
+compiler hrl en release
 
 mettre une vraie toolbar
 
@@ -10,13 +18,11 @@ prévenir au premier lancement d'un projet que Lynx est 100% gratuit et local, m
 
 les liquident buguent pas mal
 
-pouvoir masquer le curseur de la souris avec une fonction globale simple C++/javascript
+pouvoir masquer le curseur de la souris avec une fonction globale simple C++/javascript et fonction quit game en javasript
 
 parler du moteur sur reddit, linkedin, twitter, discord, etc...
 
 revoir le logo et les banieres tout ca
-
-le plugin dialogue gere mal l'editeur de nodes, on ne peux pas placer de nouveau nodes, pas de ctrl+z, certains textes dépassent de l'interface
 
 afficher les sprites au dessus des voxels dans hrl
 

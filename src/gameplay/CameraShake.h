@@ -16,6 +16,9 @@ namespace lynx
 	 * start (editor and shipped game).
 	 *
 	 * C++ : lynx::GetCameraShake().Trigger();   JS : Engine.cameraShake();
+	 * Trigger(intensity, length) scales the amplitudes and the duration of the
+	 * settings for this shake only (a big impact : Engine.cameraShake(2.5, 1.6)).
+	 * A weaker shake does not cut a stronger one still running.
 	 */
 	struct CameraShake
 	{
@@ -35,15 +38,38 @@ namespace lynx
 		bool shake_roll = true;
 
 		bool active = false;
+		float scale = 1.f;          // running shake : amplitude multiplier
+		float length_scale = 1.f;   // running shake : duration multiplier
 		float phaseX = 0.f;
 		float phaseY = 0.f;
 		float phaseR = 0.f;
 
-		void Trigger()
+		/** Duration of the running shake (settings x length of the trigger). */
+		float Duration() const
+		{
+			return duration * length_scale;
+		}
+
+		/** Amplitude multiplier left in the running shake (0 : none). */
+		float CurrentStrength() const
+		{
+			if (!active)
+				return 0.f;
+			const float t = std::clamp(elapsed / std::max(Duration(), 0.0001f), 0.f, 1.f);
+			return scale * std::pow(1.f - t, std::max(falloff, 0.01f));
+		}
+
+		void Trigger(float intensity = 1.f, float length = 1.f)
 		{
 			if (!enabled)
 				return;
 
+			intensity = std::clamp(intensity, 0.f, 20.f);
+			if (active && CurrentStrength() > intensity)
+				return;
+
+			scale = intensity;
+			length_scale = std::clamp(length, 0.05f, 20.f);
 			elapsed = 0.f;
 			active = true;
 
@@ -58,6 +84,8 @@ namespace lynx
 		void Stop()
 		{
 			active = false;
+			scale = 1.f;
+			length_scale = 1.f;
 			elapsed = 0.f;
 		}
 
@@ -65,11 +93,12 @@ namespace lynx
 		void Sample(float time, float& x, float& y, float& rotationZ) const
 		{
 			x = y = rotationZ = 0.f;
-			if (time < 0.f || time >= duration)
+			const float total = Duration();
+			if (time < 0.f || time >= total)
 				return;
 
-			const float t = time / std::max(duration, 0.0001f);
-			const float strength = std::pow(1.f - t, std::max(falloff, 0.01f));
+			const float t = time / std::max(total, 0.0001f);
+			const float strength = scale * std::pow(1.f - t, std::max(falloff, 0.01f));
 			const float w = time * frequency;
 
 			if (shake_x)
@@ -87,7 +116,7 @@ namespace lynx
 
 			elapsed += dt;
 
-			if (elapsed >= duration)
+			if (elapsed >= Duration())
 			{
 				active = false;
 				return;

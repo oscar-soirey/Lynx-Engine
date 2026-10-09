@@ -229,6 +229,22 @@ namespace lynx
 	// "2026.1.0" : LYNX_VERSION_YEAR.LYNX_VERSION_MAJOR.LYNX_VERSION_MINOR (CMakeLists.txt).
 	LYNX_API std::string GetEngineVersion();
 
+	// ---- Mouse cursor / quit -------------------------------------------------
+	// The window belongs to the host (runtime, editor) : the engine keeps the
+	// request, the host applies it every frame. Both are reset by EndGame().
+
+	/** Shows / hides the mouse cursor over the game window. JS : Engine.setMouseCursorVisible(b). */
+	LYNX_API void SetMouseCursorVisible(bool visible);
+	LYNX_API bool IsMouseCursorVisible();
+
+	/**
+	 * Quits the game : the shipped game closes its window, the editor stops
+	 * Play (end of the current frame). JS : Engine.quit().
+	 */
+	LYNX_API void QuitGame();
+	LYNX_API bool IsQuitRequested();
+	LYNX_API void ClearQuitRequest();
+
 	//apelle un callback apres un certain temps donné
 	LYNX_API void AsyncFunc(float time, std::function<void()> callback);
 }

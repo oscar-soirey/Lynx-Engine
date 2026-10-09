@@ -7,10 +7,13 @@
 #     build/         Blocky.dll (the Lynx editor / runtime look for it here)
 #     input.json     key bindings
 #
-# The engine is found with find_package(Lynx) : configuring the engine once
-# registers its build folder in the CMake package registry, so this project
-# can be anywhere on the computer. To use another engine build :
-#     cmake ... -DLynx_DIR=<engine build folder>
+# The engine is found with find_package(Lynx), the project can be anywhere :
+#   1. builds started by the Lynx editor : the engine of that editor (Lynx_DIR) ;
+#   2. CMake package registry : versions installed by the Lynx launcher, and
+#      engine build folders (configuring the engine sources registers them) ;
+#   3. otherwise, the most recent version in %LOCALAPPDATA%/Lynx/versions.
+# To choose an engine :
+#     cmake ... -DLynx_DIR=<version>/sdk/cmake   (or <engine build folder>)
 #
 # Use the same compiler as the engine (MinGW).
 # =============================================================================
@@ -24,13 +27,24 @@ project(Blocky
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Lynx CONFIG)
+# Versions installed by the Lynx launcher, most recent first (last resort)
+set(LYNX_INSTALLED_VERSIONS "")
+if(DEFINED ENV{LOCALAPPDATA})
+	file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}" LYNX_LOCALAPPDATA)
+	file(GLOB LYNX_INSTALLED_VERSIONS LIST_DIRECTORIES true
+		"${LYNX_LOCALAPPDATA}/Lynx/versions/*/sdk/cmake")
+	list(SORT LYNX_INSTALLED_VERSIONS COMPARE NATURAL ORDER DESCENDING)
+endif()
+
+find_package(Lynx CONFIG PATHS ${LYNX_INSTALLED_VERSIONS})
 
 if(NOT Lynx_FOUND)
 	message(FATAL_ERROR
-		"Lynx engine not found. Configure the engine once (its CMake registers it "
-		"for every project of this computer), or give its build folder : "
-		"-DLynx_DIR=C:/path/to/lynx/<build folder>")
+		"Lynx engine not found. Install a version of the engine with the Lynx "
+		"launcher (Engine tab), or give its folder : "
+		"-DLynx_DIR=%LOCALAPPDATA%/Lynx/versions/<version>/sdk/cmake "
+		"(engine sources : -DLynx_DIR=<engine build folder>). "
+		"Versions published before the SDK cannot compile C++ games : install a newer one.")
 endif()
 
 message(STATUS "Lynx engine : ${LYNX_BUILD_DIR}")

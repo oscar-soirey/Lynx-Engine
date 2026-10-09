@@ -1,5 +1,6 @@
 #include "Voxels.h"
 #include "RessourceManager.h"
+#include "VoxelPhysics.h"
 
 #include <algorithm>
 #include <cmath>
@@ -320,9 +321,15 @@ namespace lynx::voxels
 
 
 	// Textures of the voxel types : loaded once per asset path (HRL texture).
-	static HRL_id VoxelTexture(const std::string& path)
+	static std::unordered_map<std::string, HRL_id>& VoxelTextureCache()
 	{
 		static std::unordered_map<std::string, HRL_id> cache;
+		return cache;
+	}
+
+	static HRL_id VoxelTexture(const std::string& path)
+	{
+		auto& cache = VoxelTextureCache();
 		const auto it = cache.find(path);
 		if (it != cache.end())
 			return it->second;
@@ -340,6 +347,27 @@ namespace lynx::voxels
 
 	void ApplyToScene(uint32_t scene)
 	{
+		// The new textures of the types : all at once (files read on the
+		// worker threads, decoded by HRL in the background).
+		{
+			auto& cache = VoxelTextureCache();
+			std::vector<std::string> missing;
+			for (const VoxelType& t : g_types)
+				if (!t.texture.empty() && !cache.count(t.texture) &&
+				    std::find(missing.begin(), missing.end(), t.texture) == missing.end())
+					missing.push_back(t.texture);
+			if (missing.size() > 1)
+			{
+				const std::vector<std::uint32_t> ids = CreateTextures(missing);
+				for (size_t i = 0; i < missing.size(); ++i)
+				{
+					if (ids[i] == HRL_INVALID_ID)
+						WarnOnce("texture:" + missing[i], "voxel texture \"" + missing[i] + "\" could not be loaded");
+					cache[missing[i]] = ids[i];
+				}
+			}
+		}
+
 		// A type removed in the editor keeps no texture.
 		if (g_types.size() < 255)
 			HRL_SetVoxelTypeTexture(scene, static_cast<uint32_t>(g_types.size()) + 1u, HRL_INVALID_ID, 1.f);
@@ -623,6 +651,11 @@ namespace lynx::voxels
 
 	uint8_t GetTypeAt(int voxel_x, int voxel_y)
 	{
+		// While the game runs : the copy kept by the voxel physics (see
+		// voxel_physics::CachedType), else HRL.
+		uint8_t cached = 0;
+		if (voxel_physics::CachedType(voxel_x, voxel_y, cached))
+			return cached;
 		return static_cast<uint8_t>(HRL_GetVoxelType(Engine::GetScene(), voxel_x, voxel_y));
 	}
 

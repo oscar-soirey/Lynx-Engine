@@ -326,6 +326,12 @@ namespace lynx::editor::title_bar
 					const ImVec2 pos(ImGui::GetItemRectMax().x + std::floor(height * 0.22f),
 					                 std::floor(origin.y + (height - text_size.y) * 0.5f));
 					dl->AddText(font, size, pos, ImGui::GetColorU32(ImGuiCol_TextDisabled), g_version.c_str());
+#ifndef NDEBUG
+					// Editor compiled in Debug (build.bat, CLion Debug...) : not a release build.
+					static const char* kDevelopmentBuild = "Development build";
+					dl->AddText(font, size, ImVec2(pos.x + text_size.x + std::floor(size * 0.6f), pos.y),
+					            IM_COL32(230, 150, 60, 255), kDevelopmentBuild);
+#endif
 				}
 			}
 

@@ -13,7 +13,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-cmake --build . -j12
+cmake --build . -j16
 if errorlevel 1 (
     echo.
     echo Erreur pendant la compilation.

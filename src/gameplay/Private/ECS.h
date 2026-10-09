@@ -37,6 +37,13 @@ namespace lynx::ecs
 	 */
 	void CollectActorsWith(uint32_t type_id, std::vector<Actor*>& out);
 
+	/**
+	 * Composants du type `type_id`, dans l'ordre des acteurs. Liste gardee en
+	 * cache : refaite seulement quand un acteur ou un composant est ajoute /
+	 * retire (appelee des milliers de fois par frame par la physique).
+	 */
+	void CollectComponentPtrs(uint32_t type_id, std::vector<Component*>& out);
+
 	/** Version typee de CollectActorsWith, qui retourne les composants. */
 	template<typename T>
 	void CollectComponents(std::vector<T*>& out);
@@ -73,13 +80,12 @@ namespace lynx::ecs
 	template<typename T>
 	void CollectComponents(std::vector<T*>& out)
 	{
-		std::vector<Actor*> actors;
-		CollectActorsWith(detail::ComponentTypeId<T>(), actors);
+		thread_local std::vector<Component*> all;
+		CollectComponentPtrs(detail::ComponentTypeId<T>(), all);
 		out.clear();
-		for (Actor* a : actors)
-		{
-			if (T* c = a->GetComponent<T>())
-				out.push_back(c);
-		}
+		out.reserve(all.size());
+		// Meme type exact que GetComponent<T> (ComponentTypeId<T>).
+		for (Component* c : all)
+			out.push_back(static_cast<T*>(c));
 	}
 }

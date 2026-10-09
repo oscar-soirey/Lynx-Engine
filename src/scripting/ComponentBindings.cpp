@@ -1224,6 +1224,7 @@ namespace lynx::script_detail
 				 .field("offset", &LightComponent::offset)
 				 .field("enabled", &LightComponent::enabled)
 				 .field("attenuation", &LightComponent::attenuation)
+				 .field("priority", &LightComponent::priority)
 				 .field("rotation", &LightComponent::rotation)
 				 .field("useActorRotation", &LightComponent::use_actor_rotation)
 				 .field("innerAngle", &LightComponent::inner_angle)

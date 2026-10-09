@@ -4,6 +4,7 @@
 #include "Level.h"
 #include "Voxels.h"
 #include "Profiler.h"
+#include "JobSystem.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/BoxColliderComponent.h"
 #include "../gameplay/CameraComponent.h"
@@ -31,7 +32,6 @@ namespace lynx::voxel_physics
 		float g_step = 1.f / 30.f;
 		float g_accumulator = 0.f;
 		uint32_t g_frame = 0;
-		uint32_t g_random = 0x9E3779B9u;
 
 		struct Focus { float x, y; };
 		std::vector<Focus> g_extra_focus;
@@ -39,13 +39,30 @@ namespace lynx::voxel_physics
 		// Contacts of the last step : entity -> types touched.
 		std::unordered_map<uint32_t, std::vector<uint8_t>> g_contacts;
 
-		uint32_t Random()
+		// xorshift32. One state per chunk of a step (see Simulate) : the
+		// chunks run on several threads, and the result does not depend on
+		// the number of threads (same seeds every time).
+		uint32_t Random(uint32_t& state)
 		{
-			g_random ^= g_random << 13;
-			g_random ^= g_random >> 17;
-			g_random ^= g_random << 5;
-			return g_random;
+			state ^= state << 13;
+			state ^= state >> 17;
+			state ^= state << 5;
+			return state;
 		}
+
+		uint32_t Seed(uint32_t frame, uint32_t region, uint32_t chunk)
+		{
+			// splitmix-like mixing ; never 0 (xorshift would stay at 0).
+			uint32_t h = frame * 0x9E3779B9u ^ (region + 1u) * 0x85EBCA6Bu ^ (chunk + 1u) * 0xC2B2AE35u;
+			h ^= h >> 16; h *= 0x7FEB352Du;
+			h ^= h >> 15; h *= 0x846CA68Bu;
+			h ^= h >> 16;
+			return h ? h : 0x9E3779B9u;
+		}
+
+		// Farthest a voxel moves sideways in one step (liquid / gas
+		// dispersion). The parallel move depends on it (see MoveChunks).
+		constexpr int kMaxReach = 16;
 
 		struct TypeInfo
 		{
@@ -67,7 +84,7 @@ namespace lynx::voxel_physics
 				{
 					info.behavior = t->physics.behavior;
 					info.density = t->physics.density;
-					info.dispersion = std::clamp(t->physics.dispersion, 0, 16);
+					info.dispersion = std::clamp(t->physics.dispersion, 0, kMaxReach);
 				}
 				g_types[i] = info;
 				g_any_dynamic = g_any_dynamic || info.behavior != VoxelBehavior::Static;
@@ -152,12 +169,16 @@ namespace lynx::voxel_physics
 		// editor brush), or older than kTileRefreshSteps (safety net for any
 		// other writer ; the refresh times are spread over the steps).
 		constexpr int kTile = 32;
-		constexpr uint32_t kTileRefreshSteps = 30;
+		// Game frames (not physics steps : the physics can be off) before a
+		// tile is read again from HRL.
+		constexpr uint32_t kTileRefreshSteps = 60;
+		uint32_t g_cache_clock = 0;     // game frames (Tick)
+		bool g_cache_active = false;    // between StartGame (Reset) and EndGame
 
 		struct Tile
 		{
 			std::array<uint8_t, kTile * kTile> cells{};
-			uint32_t stamp = 0;   // g_frame of the last read (minus a jitter)
+			uint32_t stamp = 0;   // g_cache_clock of the last read (minus a jitter)
 		};
 
 		std::unordered_map<uint64_t, Tile> g_tiles;
@@ -169,7 +190,7 @@ namespace lynx::voxel_physics
 		{
 			auto [it, added] = g_tiles.try_emplace(TileKey(tx, ty));
 			Tile& tile = it->second;
-			if (added || g_frame - tile.stamp >= kTileRefreshSteps)
+			if (added || g_cache_clock - tile.stamp >= kTileRefreshSteps)
 			{
 				LYNX_PROFILE_COUNT("Voxel tiles read", 1);
 				const uint32_t scene = Scene();
@@ -181,10 +202,15 @@ namespace lynx::voxel_physics
 				// read together do not all expire on the same step. Then one
 				// refresh every kTileRefreshSteps.
 				const uint32_t jitter = added ? static_cast<uint32_t>((tx * 7 + ty * 13) & 0x7fffffff) % kTileRefreshSteps : 0u;
-				tile.stamp = g_frame - jitter;
+				tile.stamp = g_cache_clock - jitter;
 			}
 			return tile;
 		}
+
+		// Last tile looked up by CachedType (reads come in runs on the same tile).
+		uint64_t g_memo_key = ~0ull;
+		Tile* g_memo_tile = nullptr;
+		void ForgetMemo() { g_memo_key = ~0ull; g_memo_tile = nullptr; }
 
 		void CacheWrite(int x, int y, uint8_t type)
 		{
@@ -254,7 +280,7 @@ namespace lynx::voxel_physics
 		}
 
 		// Falling materials (gravity : -y).
-		void StepFalling(Region& r, int x, int y)
+		void StepFalling(Region& r, int x, int y, uint32_t& rng)
 		{
 			const int i = r.Index(x, y);
 			const uint8_t type = r.cells[i];
@@ -268,7 +294,7 @@ namespace lynx::voxel_physics
 			}
 
 			// Down diagonals (random side first)
-			const int side = (Random() & 1u) ? 1 : -1;
+			const int side = (Random(rng) & 1u) ? 1 : -1;
 			for (int k = 0; k < 2; ++k)
 			{
 				const int dx = k == 0 ? side : -side;
@@ -305,7 +331,7 @@ namespace lynx::voxel_physics
 		}
 
 		// Gases (rise : +y).
-		void StepGas(Region& r, int x, int y)
+		void StepGas(Region& r, int x, int y, uint32_t& rng)
 		{
 			const uint8_t type = r.cells[r.Index(x, y)];
 			const TypeInfo& info = g_types[type];
@@ -326,7 +352,7 @@ namespace lynx::voxel_physics
 				Move(r, x, y, x, y + 1);
 				return;
 			}
-			const int side = (Random() & 1u) ? 1 : -1;
+			const int side = (Random(rng) & 1u) ? 1 : -1;
 			for (int k = 0; k < 2; ++k)
 			{
 				const int dx = k == 0 ? side : -side;
@@ -346,7 +372,7 @@ namespace lynx::voxel_physics
 						break;
 					reach = s;
 				}
-				if (reach > 0 && (Random() % 3u) == 0)   // drifts slowly
+				if (reach > 0 && (Random(rng) % 3u) == 0)   // drifts slowly
 				{
 					Move(r, x, y, x + dx * reach, y);
 					return;
@@ -354,7 +380,82 @@ namespace lynx::voxel_physics
 			}
 		}
 
-		void Simulate(Region& r, Level& level)
+		// ---- Parallel move ------------------------------------------------
+		// The region is cut in horizontal bands of kBand rows, each band in
+		// chunks of kChunk columns. The bands go one after the other, in the
+		// order of the old loop (bottom band first for what falls, top band
+		// first for the gases) : a voxel falls through as many bands per step
+		// as before. Inside a band, the even chunks run in parallel, then the
+		// odd ones : two chunks of one batch are a whole chunk apart. A cell
+		// moves at most kMaxReach cells sideways (dispersion, clamped in
+		// RefreshTypes) and 1 cell up / down, so what a chunk reads and writes
+		// stays in its columns + kMaxReach : the chunks of a batch never touch
+		// the same cell -> no lock, and the same result with 1 or N threads
+		// (the random numbers are per chunk, see Seed).
+		constexpr int kChunk = 36;
+		constexpr int kBand = 64;
+		static_assert(kChunk > 2 * kMaxReach, "the chunks of a batch would overlap");
+
+		// One phase (falling materials, or gases) of the region.
+		void MoveChunks(Region& r, uint32_t region_index, bool gases)
+		{
+			const int cw = (r.w + kChunk - 1) / kChunk;
+			const int bands = (r.h + kBand - 1) / kBand;
+			const bool flip = (g_frame & 1u) != 0;
+
+			for (int b = 0; b < bands; ++b)
+			{
+				const int band = gases ? bands - 1 - b : b;
+				const int ay = r.y0 + band * kBand, by = std::min(r.y0 + r.h, ay + kBand);
+
+				// Even chunks then odd ones (the other way every other step).
+				for (int parity = 0; parity < 2; ++parity)
+				{
+					const int first = parity ^ (flip ? 1 : 0);
+					const int count = first < cw ? (cw - first + 1) / 2 : 0;
+					jobs::ParallelFor(0, count, 1, [&](int k)
+					{
+						const int cx = first + k * 2;
+						const int chunk = band * cw + cx;
+						const int ax = r.x0 + cx * kChunk, bx = std::min(r.x0 + r.w, ax + kChunk);
+						const int width = bx - ax;
+						uint32_t rng = Seed(g_frame, region_index, static_cast<uint32_t>(chunk) * 2u + (gases ? 1u : 0u));
+
+						if (!gases)
+						{
+							// Powders and liquids : bottom row first.
+							for (int y = ay; y < by; ++y)
+								for (int k2 = 0; k2 < width; ++k2)
+								{
+									const int x = flip ? bx - 1 - k2 : ax + k2;
+									const int i = r.Index(x, y);
+									if (r.moved[i] || r.blocked[i])
+										continue;
+									const VoxelBehavior behavior = g_types[r.cells[i]].behavior;
+									if (behavior == VoxelBehavior::Powder || behavior == VoxelBehavior::Liquid)
+										StepFalling(r, x, y, rng);
+								}
+						}
+						else
+						{
+							// Gases : top row first.
+							for (int y = by - 1; y >= ay; --y)
+								for (int k2 = 0; k2 < width; ++k2)
+								{
+									const int x = flip ? ax + k2 : bx - 1 - k2;
+									const int i = r.Index(x, y);
+									if (r.moved[i] || r.blocked[i])
+										continue;
+									if (g_types[r.cells[i]].behavior == VoxelBehavior::Gas)
+										StepGas(r, x, y, rng);
+								}
+						}
+					});
+				}
+			}
+		}
+
+		void Simulate(Region& r, Level& level, uint32_t region_index)
 		{
 			const uint32_t scene = Scene();
 			const size_t n = static_cast<size_t>(r.w) * static_cast<size_t>(r.h);
@@ -393,32 +494,12 @@ namespace lynx::voxel_physics
 			r.dirty.assign(n, 0);
 			MarkColliders(r, level);
 
-			const bool flip = (g_frame & 1u) != 0;
-
-			// Powders and liquids : bottom row first.
-			for (int y = r.y0; y < r.y0 + r.h; ++y)
-				for (int k = 0; k < r.w; ++k)
-				{
-					const int x = flip ? r.x0 + r.w - 1 - k : r.x0 + k;
-					const int i = r.Index(x, y);
-					if (r.moved[i] || r.blocked[i])
-						continue;
-					const VoxelBehavior b = g_types[r.cells[i]].behavior;
-					if (b == VoxelBehavior::Powder || b == VoxelBehavior::Liquid)
-						StepFalling(r, x, y);
-				}
-
-			// Gases : top row first.
-			for (int y = r.y0 + r.h - 1; y >= r.y0; --y)
-				for (int k = 0; k < r.w; ++k)
-				{
-					const int x = flip ? r.x0 + k : r.x0 + r.w - 1 - k;
-					const int i = r.Index(x, y);
-					if (r.moved[i] || r.blocked[i])
-						continue;
-					if (g_types[r.cells[i]].behavior == VoxelBehavior::Gas)
-						StepGas(r, x, y);
-				}
+			// Worker threads : plain arrays only (no HRL, no actor) in there.
+			{
+				LYNX_PROFILE_SCOPE("Move (parallel)");
+				MoveChunks(r, region_index, false);   // powders, liquids
+				MoveChunks(r, region_index, true);    // gases
+			}
 
 			LYNX_PROFILE_SCOPE("Write voxels (remesh)");
 			bool began = false;
@@ -570,10 +651,10 @@ namespace lynx::voxel_physics
 				}
 
 				LYNX_PROFILE_COUNT("Voxel regions", regions.size());
-				for (Region& r : regions)
+				for (size_t i = 0; i < regions.size(); ++i)
 				{
 					LYNX_PROFILE_SCOPE("Region");
-					Simulate(r, *level);
+					Simulate(regions[i], *level, static_cast<uint32_t>(i));
 				}
 			}
 
@@ -599,6 +680,37 @@ namespace lynx::voxel_physics
 		g_contacts.clear();
 		g_accumulator = 0.f;
 		g_tiles.clear();
+		ForgetMemo();
+		g_cache_active = true;
+	}
+
+	void OnGameEnd()
+	{
+		g_tiles.clear();
+		ForgetMemo();
+		g_cache_active = false;
+	}
+
+	bool CachedType(int x, int y, uint8_t& type)
+	{
+		if (!g_cache_active || g_tiles.empty())
+			return false;
+		const int tx = FloorDiv(x, kTile), ty = FloorDiv(y, kTile);
+		const uint64_t key = TileKey(tx, ty);
+		Tile* tile = g_memo_tile;
+		if (key != g_memo_key)
+		{
+			auto it = g_tiles.find(key);
+			if (it == g_tiles.end())
+				return false;   // only the tiles already read (around the cameras)
+			tile = &it->second;
+			g_memo_key = key;
+			g_memo_tile = tile;
+		}
+		if (g_cache_clock - tile->stamp >= kTileRefreshSteps)
+			return false;       // due for a refresh : HRL is the truth
+		type = tile->cells[static_cast<size_t>(y - ty * kTile) * kTile + static_cast<size_t>(x - tx * kTile)];
+		return true;
 	}
 
 	void InvalidateVoxels(int x0, int y0, int x1, int y1)
@@ -609,6 +721,7 @@ namespace lynx::voxel_physics
 		if (y1 < y0) std::swap(y0, y1);
 		const int tx0 = FloorDiv(x0, kTile), ty0 = FloorDiv(y0, kTile);
 		const int tx1 = FloorDiv(x1, kTile), ty1 = FloorDiv(y1, kTile);
+		ForgetMemo();
 		if (static_cast<long long>(tx1 - tx0 + 1) * (ty1 - ty0 + 1) > static_cast<long long>(g_tiles.size()))
 		{
 			g_tiles.clear();
@@ -622,11 +735,13 @@ namespace lynx::voxel_physics
 	void InvalidateAllVoxels()
 	{
 		g_tiles.clear();
+		ForgetMemo();
 	}
 
 	void Tick(float dt)
 	{
 		LYNX_PROFILE_SCOPE("Voxel physics");
+		++g_cache_clock;
 		if (g_enabled && dt > 0.f)
 		{
 			g_accumulator = std::min(g_accumulator + dt, g_step * 3.f);

@@ -264,6 +264,9 @@ bool Launcher::OllamaInstalled() const
 void Launcher::RefreshReleases()
 {
 	RunTask("Lecture des versions sur GitHub", [this] {
+		// find_package(Lynx) des projets de jeu : versions installées dans le registre CMake
+		Engine::RegisterInstalledVersions([this](const std::string& l) { Log(l); });
+
 		std::vector<EngineRelease> releases;
 		std::string error;
 		bool ok = Engine::FetchReleases(releases, error, [this](const std::string& l) { Log(l); });

@@ -62,6 +62,14 @@ namespace lynx
 		/** false : intensity 0 (the light still exists). */
 		bool enabled = true;
 
+		/**
+		 * The renderer uses at most 32 lights. When more are on, the sky and
+		 * directional lights are kept first, then the highest priority, then
+		 * the closest to the highest priority light (the player's) or to the
+		 * camera ; the others are switched off for the frame (see UpdateBudget).
+		 */
+		int priority = 0;
+
 		// --- Point / spot ----------------------------------------------------
 
 		/** From the actor location. */
@@ -107,6 +115,16 @@ namespace lynx
 		/** Renderer id (advanced use) ; 0xFFFFFFFF before the first frame. */
 		uint32_t GetLightId() const { return light_; }
 
+		/** false : over the light budget this frame (no renderer light). */
+		bool IsInBudget() const { return budget_ok_; }
+
+		/** Picks the lights the renderer gets this frame (the engine calls it
+		 *  once per frame, before LateUpdate). */
+		static void UpdateBudget();
+
+		/** Lights given to the renderer at most (HRL : 32 ; a margin is kept). */
+		static constexpr int kLightBudget = 30;
+
 	protected:
 		void OnAttach() override;
 		void Update(float dt) override;
@@ -121,6 +139,8 @@ namespace lynx
 		// Last values sent to the renderer (no call when nothing changed).
 		float last_[24] = {};
 		bool has_last_ = false;
+		bool budget_ok_ = true;
+		bool registered_ = false;
 	};
 
 	struct LYNX_API PointLightComponent : LightComponent

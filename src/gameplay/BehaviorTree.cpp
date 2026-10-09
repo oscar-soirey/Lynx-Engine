@@ -723,6 +723,38 @@ namespace lynx
 
 		enum class Abort { None, Self, Lower, Both };
 
+		// Parameters of a node : constant once loaded. Looked up by name in a
+		// vector of strings (and parsed for the floats) at every tick before :
+		// now cached per call site (the name is a literal : its pointer).
+		struct ParamCache
+		{
+			struct Str { const char* name; const char* fallback; std::string value; };
+			struct Num { const char* name; float fallback; float value; };
+			mutable std::vector<Str> strings;
+			mutable std::vector<Num> numbers;
+
+			template <typename Desc>
+			std::string Get(const Desc* desc, const char* n, const char* f) const
+			{
+				for (const Str& e : strings)
+					if (e.name == n && e.fallback == f)
+						return e.value;
+				strings.push_back({ n, f, desc->Get(n, f) });
+				return strings.back().value;
+			}
+
+			template <typename Desc>
+			float GetFloat(const Desc* desc, const char* n, float f) const
+			{
+				for (const Num& e : numbers)
+					if (e.name == n && e.fallback == f)
+						return e.value;
+				const float v = ToFloat(desc->Get(n, ""), f);
+				numbers.push_back({ n, f, v });
+				return v;
+			}
+		};
+
 		struct RAux
 		{
 			const BTAux* desc = nullptr;
@@ -732,9 +764,13 @@ namespace lynx
 			bool inverse = false;
 			float interval = 0.5f;
 			float timer = 0.f;
+			double last_run = -1e30;    // tree time of the last run (services)
 			int loops_left = 0;
 			double cooldown_until = -1.0;
 
+			ParamCache params;
+			std::string Get(const char* n, const char* f = "") const { return params.Get(desc, n, f); }
+			float GetFloat(const char* n, float f) const { return params.GetFloat(desc, n, f); }
 			std::string Get(const std::string& n, const std::string& f = "") const { return desc->Get(n, f); }
 			float GetFloat(const std::string& n, float f) const { return ToFloat(desc->Get(n, ""), f); }
 		};
@@ -759,6 +795,9 @@ namespace lynx
 			float wait = 0.f;
 			float stuck = 0.f;
 
+			ParamCache params;
+			std::string Get(const char* n, const char* f = "") const { return params.Get(desc, n, f); }
+			float GetFloat(const char* n, float f) const { return params.GetFloat(desc, n, f); }
 			std::string Get(const std::string& n, const std::string& f = "") const { return desc->Get(n, f); }
 			float GetFloat(const std::string& n, float f) const { return ToFloat(desc->Get(n, ""), f); }
 		};
@@ -1008,12 +1047,15 @@ namespace lynx
 				Level* level = engine ? engine->GetCurrentLevel() : nullptr;
 				if (owner && level)
 				{
-					for (Actor* a : level->GetActors())
+					// Only the actors with tags (cached list), not the whole level.
+					std::vector<TagsComponent*> tagged;
+					ecs::CollectComponents(tagged);
+					for (TagsComponent* tags : tagged)
 					{
+						Actor* a = tags ? tags->GetOwner() : nullptr;
 						if (!a || a == owner)
 							continue;
-						auto* tags = a->GetComponent<TagsComponent>();
-						if (!tags || !tags->Has(tag))
+						if (!tags->Has(tag))
 							continue;
 						const vec3 d = a->transform.location - owner->transform.location;
 						const float dist = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
@@ -1030,12 +1072,16 @@ namespace lynx
 
 		void TickServices(RNode& n, float dt)
 		{
+			if (n.services.empty())
+				return;
+			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? "BT services" : nullptr);
 			for (RAux& s : n.services)
 			{
 				s.timer -= dt;
 				if (s.timer <= 0.f)
 				{
 					s.timer = s.interval;
+					s.last_run = time;
 					RunService(s, dt);
 				}
 			}
@@ -1058,7 +1104,11 @@ namespace lynx
 
 			for (RAux& s : n.services)
 			{
-				s.timer = 0.f;     // premier passage tout de suite
+				// Premier passage tout de suite... sauf si le service a tourne il
+				// y a moins de `interval` : la racine repart a chaque tick quand
+				// sa tache finit tout de suite, ses services tournaient alors a
+				// chaque frame (FindNearest : tout le niveau, 29 arbres).
+				s.timer = std::max(0.f, static_cast<float>(s.last_run + s.interval - time));
 				if (s.type == "Script" && s.script)
 					scripting::CallAINode(s.script, "Activated", 0.f);
 			}
@@ -1411,7 +1461,11 @@ namespace lynx
 				return;
 
 			time += dt;
-			CheckAborts(*root);
+			{
+				LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? "BT aborts" : nullptr);
+				CheckAborts(*root);
+			}
+			LYNX_PROFILE_SCOPE_PTR(profiler::Detailed() ? "BT exec" : nullptr);
 			const Status s = Exec(*root, dt);
 			if (s != Status::Running)
 				Exit(*root);    // la racine repart au prochain tick

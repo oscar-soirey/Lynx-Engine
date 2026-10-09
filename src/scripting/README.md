@@ -308,7 +308,8 @@ détruit lève une `ReferenceError` au lieu de crasher.
 - `Level.spawn(className, {position, rotation, scale} | {x,y,z})`, `Level.find(id)`,
   `Level.findWithTag(tag)`, `Level.all()`, `Level.count(className)`, `Level.destroy(actor)`
 - `Input.pressed(action)`, `Input.held(action)`, `Input.released(action)`, `Input.axis(axis)`
-- `Engine.getTimeDilation()`, `Engine.setTimeDilation(v[, durée])`, `Engine.isPlaying()`
+- `Engine.getTimeDilation()`, `Engine.setTimeDilation(v[, durée])`, `Engine.isPlaying()`,
+  `Engine.cameraShake([intensité[, longueur]])` (multiplie amplitude et durée des réglages)
 - Joueurs : `Engine.createPlayer()`, `Engine.destroyPlayer(p)`, `Engine.getPlayer(i)`,
   `Engine.players`, `Engine.playerCount`, `Engine.defaultPlayer`, `Engine.renderSize`
 - Widgets : `UI.create(path, player, classe)`, `UI.destroy(w)`, `UI.all()`, `UI.classes()`,

@@ -7,11 +7,14 @@
 #include <string>
 #include <hrl/hrl.h>
 #include "Filesystem.h"
+#include "JobSystem.h"
+#include "Profiler.h"
 
 namespace
 {
 	std::unordered_map<std::string, uint32_t> res_;
 	std::unordered_map<std::string, uint32_t> revisions_;
+	bool async_decoding_ = true;
 
 	struct Decoder
 	{
@@ -118,6 +121,86 @@ namespace lynx
 			return id;
 		}
 		return it->second;
+	}
+
+	void SetAsyncTextureDecoding(bool enabled)
+	{
+		async_decoding_ = enabled;
+	}
+
+	std::vector<std::uint32_t> CreateTextures(const std::vector<std::string>& paths)
+	{
+		LYNX_PROFILE_SCOPE("CreateTextures");
+		LYNX_ASSERT_MAIN_THREAD();
+
+		const int count = static_cast<int>(paths.size());
+		std::vector<std::uint32_t> ids(paths.size(), HRL_INVALID_ID);
+		if (count == 0)
+			return ids;
+
+		// 1. Files (disk / archive) and plugin decoders : worker threads.
+		//    Nothing but the bytes of the file here (no HRL).
+		std::vector<std::vector<std::uint8_t>> data(paths.size());
+		jobs::ParallelFor(0, count, 1, [&](int i)
+		{
+			data[static_cast<size_t>(i)] = ReadTextureFile(paths[static_cast<size_t>(i)].c_str());
+		});
+
+		// 2. HRL (OpenGL context) : main thread. The async version decodes the
+		//    images on the HRL threads while the next ones are queued.
+		{
+			LYNX_PROFILE_SCOPE("HRL textures");
+			for (int i = 0; i < count; ++i)
+			{
+				const auto& bytes = data[static_cast<size_t>(i)];
+				if (bytes.empty())
+					continue;
+				const char* ptr = reinterpret_cast<const char*>(bytes.data());
+				ids[static_cast<size_t>(i)] = async_decoding_ ? HRL_CreateTextureAsync(ptr, bytes.size())
+				                                              : HRL_CreateTexture(ptr, bytes.size());
+			}
+			// The buffers stay alive until the uploads are done.
+			if (async_decoding_)
+				HRL_WaitForAllAsyncResources();
+		}
+
+		for (int i = 0; i < count; ++i)
+		{
+			const uint32_t id = ids[static_cast<size_t>(i)];
+			if (id == HRL_INVALID_ID)
+				continue;
+			if (!HRL_IsValidTexture(id))
+			{
+				ids[static_cast<size_t>(i)] = HRL_INVALID_ID;
+				continue;
+			}
+			if (const Decoder* decoder = FindDecoder(paths[static_cast<size_t>(i)]); decoder && decoder->nearest)
+			{
+				HRL_SetTextureMinFilter(id, HRL_FILTER_NEAREST);
+				HRL_SetTextureMagFilter(id, HRL_FILTER_NEAREST);
+			}
+		}
+		return ids;
+	}
+
+	void PreloadTextures(const std::vector<std::string>& paths)
+	{
+		std::vector<std::string> missing;
+		for (const std::string& path : paths)
+		{
+			if (path.empty() || res_.count(path) ||
+			    std::find(missing.begin(), missing.end(), path) != missing.end())
+				continue;
+			missing.push_back(path);
+		}
+
+		const std::vector<std::uint32_t> ids = CreateTextures(missing);
+		for (size_t i = 0; i < missing.size(); ++i)
+		{
+			// Same rule as RessourceTex : a failed file is not cached.
+			if (ids[i] != HRL_INVALID_ID)
+				res_.emplace(missing[i], ids[i]);
+		}
 	}
 
 	uint32_t GetTextureRevision(const char* path)

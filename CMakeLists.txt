@@ -48,6 +48,7 @@ add_library(Lynx SHARED
 		src/core/RessourceManager.cpp
 		src/core/Voxels.cpp
 		src/core/Profiler.cpp
+		src/core/JobSystem.cpp
 
 		src/core/data/IniParser.cpp
 		src/core/Private/SystemModule.cpp
@@ -98,11 +99,17 @@ target_compile_definitions(Lynx PRIVATE
 	LYNX_BUILD_DLL
 )
 
+# Engine version (Engine::GetVersion, editor title bar, SDK package version)
+set(LYNX_VERSION_YEAR  26)
+set(LYNX_VERSION_MAJOR 1)
+set(LYNX_VERSION_MINOR 1)
+set(LYNX_VERSION "${LYNX_VERSION_YEAR}.${LYNX_VERSION_MAJOR}.${LYNX_VERSION_MINOR}")
+
 target_compile_definitions(Lynx
 		PRIVATE
-		LYNX_VERSION_YEAR=26
-		LYNX_VERSION_MAJOR=0
-		LYNX_VERSION_MINOR=6
+		LYNX_VERSION_YEAR=${LYNX_VERSION_YEAR}
+		LYNX_VERSION_MAJOR=${LYNX_VERSION_MAJOR}
+		LYNX_VERSION_MINOR=${LYNX_VERSION_MINOR}
 )
 
 target_link_libraries(Lynx PRIVATE
@@ -386,3 +393,50 @@ configure_file(
 
 set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
 export(PACKAGE Lynx)
+
+
+## SDK of the engine : what a game project needs on a computer WITHOUT the engine
+## sources (engine installed by the launcher). See cmake/LynxSdkConfig.cmake.in.
+# <build>/sdk/ is shipped in the release archive (lynx-w-x64-binaries.zip, with
+# LynxEditor.exe, libLynx.dll...). The launcher registers <version>/sdk/cmake in
+# the CMake package registry, and the editor gives it to the builds it starts
+# (environment variable Lynx_DIR) : find_package(Lynx) works everywhere.
+
+set(LYNX_SDK_DIR "${CMAKE_BINARY_DIR}/sdk")
+set(LYNX_SDK_DEFINITIONS "")
+if(LYNX_PROFILER_TRACY)
+	set(LYNX_SDK_DEFINITIONS "TRACY_ENABLE;TRACY_ON_DEMAND;TRACY_IMPORTS")
+endif()
+# MinGW names (libLynx.dll / libLynx.dll.a)
+set(LYNX_DLL_NAME    "${CMAKE_SHARED_LIBRARY_PREFIX}Lynx${CMAKE_SHARED_LIBRARY_SUFFIX}")
+set(LYNX_IMPLIB_NAME "${CMAKE_IMPORT_LIBRARY_PREFIX}Lynx${CMAKE_IMPORT_LIBRARY_SUFFIX}")
+
+configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxSdkConfig.cmake.in"
+		"${LYNX_SDK_DIR}/cmake/LynxConfig.cmake"
+		@ONLY
+)
+configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxPlugin.cmake"
+		"${LYNX_SDK_DIR}/cmake/LynxPlugin.cmake"
+		COPYONLY
+)
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+		"${LYNX_SDK_DIR}/cmake/LynxConfigVersion.cmake"
+		VERSION ${LYNX_VERSION}
+		COMPATIBILITY SameMinorVersion
+)
+
+# Headers, ImGui sources (plugins), import libraries : at every build.
+add_custom_target(LynxSDK ALL
+		COMMAND ${CMAKE_COMMAND}
+				"-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+				"-DSDK_DIR=${LYNX_SDK_DIR}"
+				"-DENGINE_IMPLIB=$<TARGET_LINKER_FILE:Lynx>"
+				-P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MakeSdk.cmake"
+		COMMENT "Updating the engine SDK (sdk/ : headers, libLynx.dll.a, LynxConfig.cmake)"
+		VERBATIM
+)
+add_dependencies(LynxSDK Lynx)
+add_dependencies(LynxEditor LynxSDK)

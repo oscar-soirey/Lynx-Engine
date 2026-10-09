@@ -40,7 +40,7 @@ if errorlevel 1 (
 
 echo.
 echo === Compilation Release ===
-cmake --build "%BUILD_DIR%" --config Release -j12
+cmake --build "%BUILD_DIR%" --config Release -j16
 if errorlevel 1 (
     echo.
     echo Erreur pendant la compilation.

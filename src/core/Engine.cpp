@@ -9,6 +9,7 @@
 
 #include "Filesystem.h"
 #include "Profiler.h"
+#include "JobSystem.h"
 #include "Level.h"
 #include "Plugins.h"
 #include "CameraState.h"
@@ -16,6 +17,7 @@
 #include "Particles.h"
 #include "VoxelPhysics.h"
 #include "../gameplay/PhysicsQueries.h"
+#include "../gameplay/LightComponent.h"
 #include "../gameplay/Actor.h"
 #include "../gameplay/EngineActors.h"
 #include "../gameplay/PlayerController.h"
@@ -31,11 +33,26 @@
 
 namespace lynx
 {
+	namespace
+	{
+		bool g_cursor_visible = true;
+		bool g_quit_requested = false;
+	}
+
+	void SetMouseCursorVisible(bool visible) { g_cursor_visible = visible; }
+	bool IsMouseCursorVisible() { return g_cursor_visible; }
+	void QuitGame() { g_quit_requested = true; }
+	bool IsQuitRequested() { return g_quit_requested; }
+	void ClearQuitRequest() { g_quit_requested = false; }
+
 	Engine* Engine::instance_ = nullptr;
 	bool Engine::release_mode_ = false;
 
 	Engine::Engine()
 	{
+		// Worker threads first : the systems below may already use them.
+		jobs::Init();
+
 		fs::AssetSource asset_src = fs::AssetSource::Directory;
 		if (release_mode_) asset_src = fs::AssetSource::Archive;
 		fs::Init(asset_src);
@@ -75,6 +92,9 @@ namespace lynx
 		HRL_Shutdown();
 		scene_ = HRL_INVALID_ID;
 		scene_created_ = false;
+
+		// Last : the queued jobs (file writes of the editor...) finish first.
+		jobs::Shutdown();
 	}
 
 	void Engine::RequestRenderRefresh(int frames)
@@ -85,6 +105,9 @@ namespace lynx
 	void Engine::ProgressOneFrame(float dt)
 	{
 		LYNX_PROFILE_SCOPE("Engine::ProgressOneFrame");
+
+		// Results of the jobs that need the main thread (HRL / OpenGL, JS...).
+		jobs::PumpMainThread();
 
 		// A mesh deletion makes HRL rebuild its draw lists (see
 		// RequestRenderRefresh) : a temporary sprite, created and deleted.
@@ -205,6 +228,8 @@ namespace lynx
 			// avait une frame de retard sur la camera -> saccades.)
 			LYNX_PROFILE_SCOPE("Components LateUpdate");
 			Level::IterationScope scope(*current_level_);
+			// the 32 lights of the renderer : the ones that matter this frame
+			LightComponent::UpdateBudget();
 			ecs::LateUpdate(game_dt);
 		}
 
@@ -321,6 +346,13 @@ namespace lynx
 			plugins::OnGameEnd();
 
 		game_tick_enabled_ = false;
+
+		// The editor gets its cursor back ; a Quit of this game is done.
+		g_cursor_visible = true;
+		g_quit_requested = false;
+
+		// The voxel cache of the physics : the editor edits the world again.
+		voxel_physics::OnGameEnd();
 
 		// The players release their actors while the game is still entire.
 		UnpossessAll();

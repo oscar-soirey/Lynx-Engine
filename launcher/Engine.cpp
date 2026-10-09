@@ -8,6 +8,13 @@
 #include <cstdlib>
 #include <regex>
 
+#ifdef _WIN32
+	#ifndef NOMINMAX
+		#define NOMINMAX
+	#endif
+	#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
 
@@ -206,12 +213,14 @@ namespace Engine
 			return false;
 		}
 		on_progress(1.0f);
+		RegisterCMakePackage(release.tag, log);
 		log("Lynx " + release.version + " installé.");
 		return true;
 	}
 
 	bool Uninstall(const std::string& tag, const LogFn& log)
 	{
+		UnregisterCMakePackage(tag);
 		std::error_code error;
 		fs::remove_all(VersionDirectory(tag), error);
 		if (error)
@@ -222,6 +231,70 @@ namespace Engine
 		}
 		log("Version " + tag + " désinstallée.");
 		return true;
+	}
+
+	fs::path SdkConfigDirectory(const std::string& tag)
+	{
+		return VersionDirectory(tag) / "sdk" / "cmake";
+	}
+
+	namespace
+	{
+		constexpr const wchar_t* kCMakeRegistryKey = L"Software\\Kitware\\CMake\\Packages\\Lynx";
+
+		// Nom de la valeur dans le registre CMake (libre, une par version)
+		std::wstring RegistryValueName(const std::string& tag)
+		{
+			return L"LynxLauncher-" + fs::path(tag).wstring();
+		}
+	}
+
+	void RegisterCMakePackage(const std::string& tag, const LogFn& log)
+	{
+		std::error_code error;
+		const fs::path config = SdkConfigDirectory(tag);
+		if (!fs::is_regular_file(config / "LynxConfig.cmake", error))
+		{
+			log("  (Lynx " + tag + " n'a pas de SDK : les projets C++ ne pourront pas utiliser cette version.)");
+			return;
+		}
+#ifdef _WIN32
+		HKEY key = nullptr;
+		if (RegCreateKeyExW(HKEY_CURRENT_USER, kCMakeRegistryKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+		{
+			log("Impossible d'enregistrer Lynx " + tag + " pour CMake (registre).");
+			return;
+		}
+		const std::wstring value = config.wstring();
+		RegSetValueExW(key, RegistryValueName(tag).c_str(), 0, REG_SZ,
+		               reinterpret_cast<const BYTE*>(value.c_str()), DWORD((value.size() + 1) * sizeof(wchar_t)));
+		RegCloseKey(key);
+#endif
+	}
+
+	void UnregisterCMakePackage(const std::string& tag)
+	{
+#ifdef _WIN32
+		HKEY key = nullptr;
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, kCMakeRegistryKey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS)
+		{
+			RegDeleteValueW(key, RegistryValueName(tag).c_str());
+			RegCloseKey(key);
+		}
+#else
+		(void)tag;
+#endif
+	}
+
+	void RegisterInstalledVersions(const LogFn& log)
+	{
+		std::error_code error;
+		for (fs::directory_iterator it(VersionsDirectory(), error), end; !error && it != end; it.increment(error))
+		{
+			const std::string tag = it->path().filename().string();
+			if (it->is_directory(error) && fs::is_regular_file(SdkConfigDirectory(tag) / "LynxConfig.cmake", error))
+				RegisterCMakePackage(tag, log);
+		}
 	}
 
 	bool Launch(const std::string& tag, const LogFn& log)

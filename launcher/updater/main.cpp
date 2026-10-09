@@ -1,15 +1,22 @@
-// LynxUpdater : se lance avant le launcher (même dossier).
-//   1. lit le tag installé (launcher.version) et la dernière release GitHub « launcher* » ;
-//   2. si une version plus récente existe : télécharge et remplace le launcher
+// LynxUpdater : se lance avant le launcher. Il est autonome : seul dans son dossier
+// (installateur), il télécharge le launcher.
+//   1. choisit le dossier du launcher : à côté de l'updater si ce dossier est modifiable,
+//      sinon %LOCALAPPDATA%\Lynx\launcher (installation dans Program Files : l'updater
+//      tourne sans droits administrateur et ne peut pas y écrire) ;
+//   2. lit le tag installé (launcher.version) et la dernière release GitHub « launcher* » ;
+//   3. si le launcher est absent ou plus ancien : télécharge et installe la dernière version
 //      (petite fenêtre de progression, affichée seulement dans ce cas) ;
-//   3. lance LynxLauncher.exe.
+//   4. lance LynxLauncher.exe.
 // Sans réseau ou en cas d'échec de la mise à jour, le launcher déjà installé est lancé quand même.
 
 #include "Updater.h"
 #include "../Process.h"
 
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -35,6 +42,61 @@ namespace
 			return fs::path(buffer);
 #endif
 		return fs::current_path() / "LynxUpdater.exe";
+	}
+
+	// Peut-on créer des fichiers dans ce dossier ? (Program Files : non, sans droits admin)
+	bool IsWritable(const fs::path& directory)
+	{
+		std::error_code error;
+		fs::create_directories(directory, error);
+		const fs::path probe = directory / ".lynx-write-test";
+		{
+			std::ofstream file(probe, std::ios::trunc);
+			if (!file)
+				return false;
+		}
+		fs::remove(probe, error);
+		return true;
+	}
+
+	// Dossier du launcher quand celui de l'updater n'est pas modifiable.
+	fs::path UserLauncherDirectory()
+	{
+#ifdef _WIN32
+		if (const char* base = std::getenv("LOCALAPPDATA"))
+			return fs::path(base) / "Lynx" / "launcher";
+#endif
+		if (const char* home = std::getenv("HOME"))
+			return fs::path(home) / ".local" / "share" / "Lynx" / "launcher";
+		return fs::temp_directory_path() / "Lynx" / "launcher";
+	}
+
+	bool HasLauncher(const fs::path& directory)
+	{
+		std::error_code error;
+		return fs::is_regular_file(directory / Updater::kLauncherExe, error);
+	}
+
+	// Mise à jour nécessaire si le launcher est absent, de version inconnue, ou plus ancien.
+	bool NeedsUpdate(const fs::path& directory, const Updater::Release& latest)
+	{
+		if (!HasLauncher(directory))
+			return true;
+		const std::string installed = Updater::ReadInstalledTag(directory);
+		return installed.empty() || Updater::Compare(latest.version, Updater::ParseVersion(installed)) > 0;
+	}
+
+	// GitHub peut ne pas répondre du premier coup (réseau qui s'éveille, limite de l'API).
+	bool FetchLatestWithRetries(Updater::Release& out, std::string& error, int attempts)
+	{
+		for (int i = 0; i < attempts; ++i)
+		{
+			if (Updater::FetchLatest(out, error))
+				return true;
+			if (i + 1 < attempts)
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+		}
+		return false;
 	}
 
 #ifdef _WIN32
@@ -144,53 +206,89 @@ namespace
 int main(int, char**)
 {
 	const fs::path self = ExecutablePath();
-	const fs::path directory = self.parent_path();
-	const fs::path launcher = directory / Updater::kLauncherExe;
+	const fs::path self_directory = self.parent_path();
+	const fs::path user_directory = UserLauncherDirectory();
 
-	std::error_code error;
-	const bool launcher_present = fs::is_regular_file(launcher, error);
-	const std::string installed_tag = Updater::ReadInstalledTag(directory);
+	// 1. Dossier du launcher : à côté de l'updater si possible, sinon dans le profil
+	//    de l'utilisateur. Un launcher déjà présent dans le profil est prioritaire
+	//    (installation précédente dans Program Files).
+	fs::path directory = self_directory;
+	if (!IsWritable(self_directory) && (HasLauncher(user_directory) || !HasLauncher(self_directory)))
+		directory = user_directory;
 
-	// 1. Quelle est la dernière version ? (quelques centaines de ms, sans fenêtre)
+	const bool first_install = !HasLauncher(directory);
+
 	Updater::Release latest;
 	std::string fetch_error;
-	const bool fetched = Updater::FetchLatest(latest, fetch_error);
-
-	// 2. Mise à jour si le launcher est absent, de version inconnue, ou plus ancien
-	const bool needs_update = fetched &&
-		(!launcher_present || installed_tag.empty() ||
-		 Updater::Compare(latest.version, Updater::ParseVersion(installed_tag)) > 0);
-
-	std::string update_error;
+	bool fetched = false;
 	bool update_failed = false;
-	if (needs_update)
-	{
-#ifdef _WIN32
-		RunWithWindow([&] {
-			auto status = [](const std::string& text) {
-				std::lock_guard<std::mutex> lock(g_state.mutex);
-				g_state.status = text;
-			};
-			auto progress = [](float value) { g_state.progress = value; };
-			update_failed = !Updater::Install(latest, directory, self.filename().string(), status, progress, update_error);
-		});
-#else
-		update_failed = !Updater::Install(latest, directory, self.filename().string(), [](const std::string&) {}, [](float) {}, update_error);
-#endif
-	}
+	std::string update_error;
 
-	// 3. Lancement du launcher (même si la mise à jour a échoué : l'ancienne version reste utilisable)
-	if (!fs::is_regular_file(launcher, error))
-	{
-		std::string message = std::string(Updater::kLauncherExe) + " est introuvable à côté de l'updater.";
-		if (!fetched)
-			message += "\n\n" + fetch_error;
-		if (update_failed)
-			message += "\n\n" + update_error;
+	// 3. Installation / mise à jour de `latest` dans `directory`.
+	auto install_latest = [&](const Updater::StatusFn& status, const Updater::ProgressFn& progress) {
+		// Launcher présent mais dans un dossier non modifiable : la nouvelle version
+		// va dans le profil de l'utilisateur.
+		if (!IsWritable(directory))
+			directory = user_directory;
+		update_failed = !Updater::Install(latest, directory, self.filename().string(), status, progress, update_error);
+	};
+
+	// Télécharge (si besoin) la dernière version dans `directory`.
+	auto check_and_update = [&](const Updater::StatusFn& status, const Updater::ProgressFn& progress) {
+		// 2. Quelle est la dernière version ? (quelques centaines de ms)
+		status("Recherche de la dernière version du launcher...");
+		fetched = FetchLatestWithRetries(latest, fetch_error, first_install ? 3 : 1);
+		if (!fetched || !NeedsUpdate(directory, latest))
+			return;
+
+		install_latest(status, progress);
+	};
+
 #ifdef _WIN32
-		ShowError(message);
+	auto status = [](const std::string& text) {
+		std::lock_guard<std::mutex> lock(g_state.mutex);
+		g_state.status = text;
+	};
+	auto progress = [](float value) { g_state.progress = value; };
+
+	if (first_install)
+	{
+		// Pas encore de launcher : la fenêtre s'affiche tout de suite (recherche + téléchargement).
+		RunWithWindow([&] { check_and_update(status, progress); });
+	}
+	else
+	{
+		// Launcher présent : recherche sans fenêtre, fenêtre seulement s'il faut télécharger.
+		fetched = FetchLatestWithRetries(latest, fetch_error, 1);
+		if (fetched && NeedsUpdate(directory, latest))
+		{
+			RunWithWindow([&] { install_latest(status, progress); });
+		}
+	}
+#else
+	check_and_update([](const std::string&) {}, [](float) {});
 #endif
-		return 1;
+
+	// 4. Lancement du launcher (même si la mise à jour a échoué : l'ancienne version reste utilisable)
+	fs::path launcher = directory / Updater::kLauncherExe;
+	if (!HasLauncher(directory))
+	{
+		// la mise à jour a échoué en voulant passer dans le profil : l'ancien launcher est peut-être à côté
+		if (HasLauncher(self_directory))
+			launcher = self_directory / Updater::kLauncherExe;
+		else
+		{
+			std::string message = "Impossible d'installer le launcher Lynx.";
+			if (!fetched)
+				message += "\n\nLe premier lancement a besoin d'Internet pour télécharger le launcher depuis GitHub."
+				           "\n" + fetch_error;
+			if (update_failed)
+				message += "\n\n" + update_error;
+#ifdef _WIN32
+			ShowError(message);
+#endif
+			return 1;
+		}
 	}
 
 #ifdef _WIN32
@@ -198,7 +296,7 @@ int main(int, char**)
 		ShowError("La mise à jour du launcher a échoué, l'ancienne version va être lancée.\n\n" + update_error);
 #endif
 
-	if (!Process::Launch(launcher, directory))
+	if (!Process::Launch(launcher, launcher.parent_path()))
 	{
 #ifdef _WIN32
 		ShowError("Impossible de lancer " + launcher.string());

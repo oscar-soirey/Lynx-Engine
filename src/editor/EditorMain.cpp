@@ -3017,6 +3017,115 @@ static void DrawContentBrowserHeader(const std::filesystem::path& relative_curre
 }
 
 // One cell of the Content Browser grid (drawn over its invisible button).
+// -----------------------------------------------------------------------------
+// Folder listing off the main thread. Listing a folder means one disk access
+// per file (type of the entry) : with hundreds of files it costs milliseconds,
+// a hitch every refresh. The content of a NEW folder is listed at once (the
+// grid must never show the files of the previous folder) ; the periodic
+// refreshes run on a worker thread and the result is swapped in when ready.
+// -----------------------------------------------------------------------------
+
+static std::vector<std::filesystem::directory_entry> ListFolderSorted(const std::filesystem::path& folder)
+{
+    std::vector<std::filesystem::directory_entry> entries;
+    std::error_code error;
+
+    if (!std::filesystem::is_directory(folder, error))
+        return entries;
+
+    for (const auto& entry :
+         std::filesystem::directory_iterator(
+             folder,
+             std::filesystem::directory_options::skip_permission_denied,
+             error))
+    {
+        if (error)
+            break;
+        entries.push_back(entry);
+    }
+
+    // Folders first, then by name. The type is read once per entry here.
+    std::vector<std::pair<bool, std::string>> keys;
+    keys.reserve(entries.size());
+    std::vector<size_t> order(entries.size());
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+        std::error_code dir_error;
+        keys.emplace_back(entries[i].is_directory(dir_error), entries[i].path().filename().string());
+        order[i] = i;
+    }
+    std::sort(order.begin(), order.end(), [&keys](size_t a, size_t b)
+    {
+        if (keys[a].first != keys[b].first)
+            return keys[a].first > keys[b].first;
+        return keys[a].second < keys[b].second;
+    });
+
+    std::vector<std::filesystem::directory_entry> sorted;
+    sorted.reserve(entries.size());
+    for (size_t i : order)
+        sorted.push_back(std::move(entries[i]));
+    return sorted;
+}
+
+class AsyncFolderList
+{
+public:
+    /**
+     * Entries of `folder` (folders first, then by name). Listed right away
+     * when the folder changes or `now` is true ; otherwise refreshed in the
+     * background every `refresh_seconds` (the previous list is shown
+     * meanwhile). `time` : ImGui::GetTime().
+     */
+    const std::vector<std::filesystem::directory_entry>& Get(
+        const std::filesystem::path& folder, double time, double refresh_seconds, bool now = false)
+    {
+        // A background listing finished : taken if it is still the right folder.
+        if (job_.IsValid() && job_.IsDone())
+        {
+            job_.Reset();
+            if (pending_ && pending_->folder == folder_)
+                entries_ = std::move(pending_->entries);
+            pending_.reset();
+        }
+
+        if (folder != folder_ || now || listed_time_ < 0.0)
+        {
+            folder_ = folder;
+            entries_ = ListFolderSorted(folder);
+            listed_time_ = time;
+            // A refresh still running lists the old state : ignored.
+            pending_.reset();
+            job_.Reset();
+        }
+        else if (time - listed_time_ > refresh_seconds && !job_.IsValid())
+        {
+            listed_time_ = time;
+            auto result = std::make_shared<Result>();
+            result->folder = folder_;
+            pending_ = result;
+            job_ = lynx::jobs::Submit([result]()
+            {
+                result->entries = ListFolderSorted(result->folder);
+            });
+        }
+        return entries_;
+    }
+
+private:
+    struct Result
+    {
+        std::filesystem::path folder;
+        std::vector<std::filesystem::directory_entry> entries;
+    };
+
+    std::filesystem::path folder_;
+    std::vector<std::filesystem::directory_entry> entries_;
+    double listed_time_ = -1.0;
+    lynx::jobs::Handle job_;
+    std::shared_ptr<Result> pending_;
+};
+
 static void DrawAssetTile(ImDrawList* draw_list, const ImVec2& cell_min, const ImVec2& cell_max,
                           const ImVec2& thumb_min, float image_size, float item_width,
                           bool hovered, bool active, bool selected,
@@ -3163,9 +3272,9 @@ static void DrawContentBrowser(lynx::Level* level)
     // The folder is listed (and sorted) only when it changes, or twice a
     // second : listing a big folder every frame (assets/ with hundreds of
     // files) made the editor drop from ~280 to ~60 fps.
-    static std::filesystem::path listed_path;
-    static double listed_time = -1.0;
-    static std::vector<std::filesystem::directory_entry> entries;
+    // Refreshed twice a second on a worker thread (see AsyncFolderList) ; the
+    // main thread lists only when the folder changes or after an action.
+    static AsyncFolderList folder_list;
 
     // An action of this window (rename, delete, paste, new file... : a click
     // or a key) : listed again at once instead of after half a second.
@@ -3178,59 +3287,8 @@ static void DrawContentBrowser(lynx::Level* level)
          ImGui::IsKeyReleased(ImGuiKey_V) ||
          ImGui::IsKeyReleased(ImGuiKey_D));
 
-    if (listed_path != content_browser_current_path ||
-        browser_action ||
-        ImGui::GetTime() - listed_time > 0.5)
-    {
-        listed_path = content_browser_current_path;
-        listed_time = ImGui::GetTime();
-        entries.clear();
-
-        std::error_code error;
-
-        if (std::filesystem::exists(
-                content_browser_current_path,
-                error))
-        {
-            for (const auto& entry :
-                 std::filesystem::directory_iterator(
-                     content_browser_current_path,
-                     std::filesystem::directory_options::skip_permission_denied,
-                     error))
-            {
-                if (error)
-                    break;
-
-                entries.push_back(entry);
-            }
-        }
-
-        std::vector<std::pair<bool, std::string>> keys;
-        std::vector<size_t> order(entries.size());
-        for (size_t i = 0; i < entries.size(); ++i)
-        {
-            std::error_code dir_error;
-            keys.emplace_back(entries[i].is_directory(dir_error), entries[i].path().filename().string());
-            order[i] = i;
-        }
-
-        std::sort(
-            order.begin(),
-            order.end(),
-            [&keys](size_t a, size_t b)
-            {
-                if (keys[a].first != keys[b].first)
-                    return keys[a].first > keys[b].first;
-                return keys[a].second < keys[b].second;
-            }
-        );
-
-        std::vector<std::filesystem::directory_entry> sorted;
-        sorted.reserve(entries.size());
-        for (size_t i : order)
-            sorted.push_back(entries[i]);
-        entries.swap(sorted);
-    }
+    const std::vector<std::filesystem::directory_entry>& entries =
+        folder_list.Get(content_browser_current_path, ImGui::GetTime(), 0.5, browser_action);
 
     // Search : the entries whose name contains the text (any case).
     std::vector<const std::filesystem::directory_entry*> shown;
@@ -3672,8 +3730,6 @@ static bool DrawAssetPathField(std::string& value)
 
     if (ImGui::BeginPopup("AssetPicker"))
     {
-        std::error_code error;
-
         // Header : current folder, always shown relative to assets/.
         std::string current_relative =
             picker_dir.lexically_relative(content_browser_root)
@@ -3719,38 +3775,11 @@ static bool DrawAssetPathField(std::string& value)
 
         ImGui::Separator();
 
-        std::vector<std::filesystem::directory_entry> entries;
-
-        if (std::filesystem::is_directory(picker_dir, error))
-        {
-            for (const auto& entry :
-                 std::filesystem::directory_iterator(
-                     picker_dir,
-                     std::filesystem::directory_options::skip_permission_denied,
-                     error))
-            {
-                if (error)
-                    break;
-
-                entries.push_back(entry);
-            }
-        }
-
-        std::sort(
-            entries.begin(),
-            entries.end(),
-            [](const auto& a, const auto& b)
-            {
-                const bool a_dir = a.is_directory();
-                const bool b_dir = b.is_directory();
-
-                if (a_dir != b_dir)
-                    return a_dir > b_dir;
-
-                return a.path().filename().string() <
-                       b.path().filename().string();
-            }
-        );
+        // Was listed and sorted every frame while open : now when the folder
+        // changes, then refreshed in the background (see AsyncFolderList).
+        static AsyncFolderList picker_list;
+        const std::vector<std::filesystem::directory_entry>& entries =
+            picker_list.Get(picker_dir, ImGui::GetTime(), 1.0, ImGui::IsWindowAppearing());
 
         auto to_lower = [](std::string text)
         {
@@ -4658,6 +4687,12 @@ static const char* const kPlayBackupVoxelName = "play_backup.vox";   // relative
 static bool play_snapshot_valid = false;
 static bool restore_after_play_requested = false;
 
+// The voxel world of the snapshot, in memory (compressed .hrlv) : Stop puts
+// it back from here, without reading the disk. The file is still written (on
+// a worker thread, Play does not wait for the disk).
+static std::shared_ptr<std::vector<uint8_t>> play_voxel_snapshot;
+static lynx::jobs::Handle play_voxel_snapshot_write;
+
 
 static void SavePlaySnapshot()
 {
@@ -4668,10 +4703,31 @@ static void SavePlaySnapshot()
     if (!editor_level)
         return;
 
-    const std::string voxel_path =
-        (std::filesystem::path("assets") / kPlayBackupVoxelName).string();
+    // Encoded by HRL here (main thread : HRL), written by a worker.
+    play_voxel_snapshot_write.Wait();   // the previous write (same file)
+    auto snapshot = std::make_shared<std::vector<uint8_t>>();
+    if (const size_t size = HRL_GetVoxelWorldSaveAllSize(scene); size > 0)
+    {
+        snapshot->resize(size);
+        snapshot->resize(HRL_SaveVoxelWorldAll(scene, snapshot->data(), snapshot->size()));
+    }
+    play_voxel_snapshot = snapshot;
 
-    HRL_SaveVoxelWorldAllFile(scene, voxel_path.c_str());
+    if (!snapshot->empty())
+    {
+        std::error_code error;
+        const std::filesystem::path voxel_path =
+            std::filesystem::absolute(std::filesystem::path("assets") / kPlayBackupVoxelName, error);
+        play_voxel_snapshot_write = lynx::jobs::Submit([snapshot, voxel_path]()
+        {
+            std::ofstream out(voxel_path, std::ios::binary | std::ios::trunc);
+            if (out)
+                out.write(reinterpret_cast<const char*>(snapshot->data()),
+                          static_cast<std::streamsize>(snapshot->size()));
+            if (!out)
+                std::cerr << "[PLAY] could not write " << voxel_path.string() << "\n";
+        });
+    }
 
     editor_level->SaveToFile(kPlayBackupLevelFile);
 
@@ -6064,6 +6120,21 @@ namespace editor
     // actors point to meshes that are gone (properties change, nothing moves).
     void RestoreVoxelsAfterPlay()
     {
+        // In memory (SavePlaySnapshot) : no disk access.
+        if (play_voxel_snapshot && !play_voxel_snapshot->empty())
+        {
+            HRL_LoadVoxelWorldBuffer(
+                scene,
+                play_voxel_snapshot->data(),
+                play_voxel_snapshot->size()
+            );
+            play_voxel_snapshot.reset();
+            return;
+        }
+
+        // The file (written by a worker : finished first).
+        play_voxel_snapshot_write.Wait();
+
         auto voxel_data =
             lynx::fs::ReadBinary(
                 kPlayBackupVoxelName
@@ -9334,6 +9405,38 @@ static LONG WINAPI EditorCrashFilter(EXCEPTION_POINTERS* info)
 #endif
 
 
+#ifdef _WIN32
+// find_package(Lynx) in the builds started by the editor (Build.bat, cmake, the
+// IDE opened from the editor) : the environment variable Lynx_DIR points to the
+// engine of THIS editor, so the game is compiled against the engine that loads it,
+// even on a computer without the engine sources (engine installed by the launcher).
+//   engine build folder : <build>/LynxConfig.cmake (headers of the source tree)
+//   installed version   : <version>/sdk/cmake/LynxConfig.cmake
+// A Lynx_DIR set by the user is kept.
+static void ExportEngineLocationForCMake()
+{
+    if (GetEnvironmentVariableW(L"Lynx_DIR", nullptr, 0) > 0)
+        return;
+
+    wchar_t buffer[MAX_PATH];
+    const DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+        return;
+
+    const std::filesystem::path directory = std::filesystem::path(buffer).parent_path();
+    for (const std::filesystem::path& candidate : { directory, directory / "sdk" / "cmake" })
+    {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(candidate / "LynxConfig.cmake", error))
+        {
+            SetEnvironmentVariableW(L"Lynx_DIR", candidate.wstring().c_str());
+            return;
+        }
+    }
+}
+#endif
+
+
 int main(int argc, char** argv)
 {
     // No Windows console (-mwindows) : stdout / stderr go to the Console window.
@@ -9341,6 +9444,7 @@ int main(int argc, char** argv)
 
 #ifdef _WIN32
     SetUnhandledExceptionFilter(EditorCrashFilter);
+    ExportEngineLocationForCMake();
 #endif
     // ------------------------------------------------------------
     // Project
@@ -10347,6 +10451,28 @@ int main(int argc, char** argv)
 
         engine->ProgressOneFrame(dt);
 
+        // Requests of the game : Quit stops Play (the editor stays open) ;
+        // a hidden cursor is hidden while playing only (EndGame shows it again).
+        if (isPlaying && lynx::IsQuitRequested())
+        {
+            lynx::ClearQuitRequest();
+            TogglePlayMode();
+        }
+        {
+            static bool cursor_hidden = false;
+            const bool hide = isPlaying && !lynx::IsMouseCursorVisible();
+            if (hide != cursor_hidden)
+            {
+                cursor_hidden = hide;
+                // Else the ImGui backend shows the cursor again every frame.
+                if (hide)
+                    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+                else
+                    ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+                glfwSetInputMode(win, GLFW_CURSOR, hide ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_NORMAL);
+            }
+        }
+
 
 
         // --------------------------------------------------------
@@ -10709,7 +10835,10 @@ static void DrawCameraShakeWindow(bool* open)
             {
                 const float t = shake.duration * static_cast<float>(i) / static_cast<float>(samples);
                 float v[3];
-                shake.Sample(std::min(t, shake.duration * 0.9999f), v[0], v[1], v[2]);
+                lynx::CameraShake settings = shake;   // the settings alone (not a scaled shake from the game)
+                settings.scale = 1.f;
+                settings.length_scale = 1.f;
+                settings.Sample(std::min(t, shake.duration * 0.9999f), v[0], v[1], v[2]);
                 const ImVec2 p(a.x + width * static_cast<float>(i) / static_cast<float>(samples),
                                mid - v[c.axis] / range * half);
                 if (i > 0)
@@ -10721,7 +10850,7 @@ static void DrawCameraShakeWindow(bool* open)
         // Play head.
         if (shake.active && shake.duration > 0.f)
         {
-            const float x = a.x + width * std::clamp(shake.elapsed / shake.duration, 0.f, 1.f);
+            const float x = a.x + width * std::clamp(shake.elapsed / shake.Duration(), 0.f, 1.f);
             dl->AddLine(ImVec2(x, a.y), ImVec2(x, b.y), IM_COL32(255, 220, 120, 255), 2.f);
         }
 
