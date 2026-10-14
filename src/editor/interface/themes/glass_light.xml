@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - "Lynx Glass Light" theme : the glass of Raven (GlassLight) with the warm accent
+  of Lynx. The panels let the wallpaper show through, frosted.
+-->
+<Theme Name="Lynx Glass Light" Base="GlassLight" Accent="#E0A030" CornerRadius="10" Material="FrostedGlass" Wallpaper="Light">
+	<Metrics ControlHeight="28" Spacing="6" RowHeight="24"/>
+	<Glass Frost="1" Refraction="1" Saturation="1.1" Rim="1" Shadow="1"/>
+
+	<Style Class="toolbar" Material="TintedGlass"/>
+	<Style Class="toolgroup" Panel="#FFFFFF40" CornerRadius="12"/>
+	<Style Widget="Button" Class="tool" CornerRadius="8"/>
+	<Style Widget="Button" Class="active" Control="#E0A03066" ControlHovered="#E0A03088"/>
+	<Style Widget="Button" Class="play" Text="#5CC86A"/>
+	<Style Widget="Button" Class="stop" Text="#F0645A"/>
+	<Style Widget="Button" Class="simulate" Text="#5E9CEB"/>
+	<Style Class="statusbar" Material="TintedGlass"/>
+	<Style Widget="Label" Class="dim" Text="#6C6C72"/>
+	<Style Widget="Label" Class="section" Text="#E0A030"/>
+	<Style Widget="Label" Class="dialog-title" FontSize="20"/>
+	<Style Widget="Label" Class="error" Text="#F0726B"/>
+	<Style Widget="Label" Class="warning" Text="#E8B840"/>
+	<Style Widget="Label" Class="success" Text="#5CC86A"/>
+	<Style Widget="Label" Class="axis-x" Text="#F0726B"/>
+	<Style Widget="Label" Class="axis-y" Text="#5CC86A"/>
+	<Style Widget="Label" Class="axis-z" Text="#5E9CEB"/>
+	<Style Widget="Label" Class="axis-w" Text="#6C6C72"/>
+	<Style Widget="Label" Class="dirty" Text="#F0A028"/>
+	<Style Widget="Button" Class="mode-on" Control="#E0A03066" ControlBorder="#F0A028" BorderWidth="2"/>
+	<Style Class="viewport-bar" Material="FrostedGlass" CornerRadius="10"/>
+</Theme>

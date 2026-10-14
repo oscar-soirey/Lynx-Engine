@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Rows of the Details panel, one tag per kind of property. The C++ builds them
+  with Rwidget_create_from_xml("<FloatProperty Label='speed'/>") and finds the
+  editors inside by their names (value, x, y, z, w, pick...).
+-->
+<Widgets>
+	<Widget Name="DetailsSection" Title="">
+		<Expander Title="{Title}" Expanded="true">
+			<VBox Name="rows" Spacing="3" Slot.Padding="4,4,0,6"/>
+		</Expander>
+	</Widget>
+
+	<Widget Name="ReadOnlyProperty" Label="" Value="">
+		<PropertyRow Label="{Label}">
+			<Label Name="value" Text="{Value}" Class="dim" Slot.Fill="1" Slot.VAlign="Center"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="IntProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<SpinBox Name="value" Min="-2147483648" Max="2147483647" Step="1" Decimals="0" Slot.Fill="1"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="FloatProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<SpinBox Name="value" Min="-1000000000" Max="1000000000" Step="0.05" Decimals="3" Slot.Fill="1"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="BoolProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<Checkbox Name="value"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="TextProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<TextInput Name="value" Slot.Fill="1"/>
+		</PropertyRow>
+	</Widget>
+
+	<!-- A path inside assets/ : typed, dropped from the Content Browser, or picked with "...". -->
+	<Widget Name="AssetProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<TextInput Name="value" Slot.Fill="1" Placeholder="drop an asset here"/>
+			<Button Name="pick" Text="..." Width="30" Tooltip="Choose a file of assets/"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="ChoiceProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<ComboBox Name="value" Slot.Fill="1"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="ColorProperty" Label="">
+		<PropertyRow Label="{Label}">
+			<ColorPicker Name="value" Popup="true" Alpha="true"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="Vector2Property" Label="" Step="0.05">
+		<PropertyRow Label="{Label}">
+			<AxisField Axis="X" Style="axis-x" Step="{Step}"/>
+			<AxisField Axis="Y" Style="axis-y" Step="{Step}"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="Vector3Property" Label="" Step="0.05">
+		<PropertyRow Label="{Label}">
+			<AxisField Axis="X" Style="axis-x" Step="{Step}"/>
+			<AxisField Axis="Y" Style="axis-y" Step="{Step}"/>
+			<AxisField Axis="Z" Style="axis-z" Step="{Step}"/>
+		</PropertyRow>
+	</Widget>
+
+	<Widget Name="Vector4Property" Label="" Step="0.05">
+		<PropertyRow Label="{Label}">
+			<AxisField Axis="X" Style="axis-x" Step="{Step}"/>
+			<AxisField Axis="Y" Style="axis-y" Step="{Step}"/>
+			<AxisField Axis="Z" Style="axis-z" Step="{Step}"/>
+			<AxisField Axis="W" Style="axis-w" Step="{Step}"/>
+		</PropertyRow>
+	</Widget>
+
+	<!-- Location / Rotation / Scale of a transform. -->
+	<Widget Name="TransformProperty">
+		<VBox Spacing="3">
+			<Vector3Property Name="location" Label="Location" Step="0.5"/>
+			<Vector3Property Name="rotation" Label="Rotation" Step="0.5"/>
+			<Vector3Property Name="scale" Label="Scale" Step="0.01"/>
+		</VBox>
+	</Widget>
+</Widgets>

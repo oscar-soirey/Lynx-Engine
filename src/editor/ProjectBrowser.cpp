@@ -1,26 +1,12 @@
 #include "ProjectBrowser.h"
 #include "ProjectTemplates.h"
-#include "EditorFonts.h"
 
-#include "WindowIcon.h"
+#include "raven/RavenUi.h"
 
-#include <imgui/imgui.h>
-#include <imgui/imgui_impl_glfw.h>
-#include <imgui/imgui_impl_opengl3.h>
-#include <glfw/glfw3.h>
-
-// Implementation compiled in EditorMain.cpp (STB_IMAGE_IMPLEMENTATION).
-#include "../../third-party/stb/stb_image.h"
-
-#include <fstream>
-#include <iterator>
-#include <unordered_map>
+#include <Raven.h>
 
 #include <algorithm>
-#include <cmath>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <system_error>
 #include <vector>
@@ -30,10 +16,11 @@
 #include <shobjidl.h>
 #endif
 
-// The OpenGL 1.1 header of Windows does not have it (OpenGL 1.2).
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
+// =============================================================================
+// Project browser in Raven (interface/windows/project_browser.xml and
+// new_project.xml). Runs its own loop of Rwait_frame until a project is
+// opened or the window is closed ; Raven stays initialized afterwards.
+// =============================================================================
 
 namespace fs = std::filesystem;
 
@@ -134,9 +121,6 @@ namespace lynx::editor
 		}
 
 
-		// ---------------------------------------------------------------------
-		// State
-		// ---------------------------------------------------------------------
 
 		struct RecentEntry
 		{
@@ -146,623 +130,291 @@ namespace lynx::editor
 			bool available = false;   // assets/ and build/ exist (cheap check)
 		};
 
-		struct BrowserState
+		struct Browser
 		{
+			Rid window = R_INVALID_ID;
+			Rid recent_view = R_INVALID_ID;
+			Rid path = R_INVALID_ID;
+			Rid status = R_INVALID_ID;
+			Rid module_label = R_INVALID_ID;
+			Rid module = R_INVALID_ID;
+			Rid open = R_INVALID_ID;
+			Rid message = R_INVALID_ID;
+
 			std::vector<RecentEntry> recent;
+			std::vector<std::string> recent_labels;   // texts given to the tiles
 
-			char path_buffer[1024] = {};
-
-			// Result of InspectProject() for the text in path_buffer.
-			std::string inspected_text;
+			std::string inspected_text = "\x01";   // never equal at the start
 			bool inspected_ok = false;
 			GameProject inspected;
 			std::string inspected_error;
 			int module_index = 0;
 
-			std::string message;
-
 			// "New project" dialog
-			bool new_project_open = false;
-			char new_title[128] = {};
-			char new_location[1024] = {};
-			std::vector<project_templates::Template> templates;
-			std::string templates_error;
+			std::string new_title = "My Game";
+			std::string new_location;
 			int template_index = 0;
-			std::string create_error;
 
 			bool open_requested = false;
 			bool quit_requested = false;
 		};
 
-		BrowserState* g_state = nullptr;
-
-
-		void SetPathText(BrowserState& state, const std::string& text)
+		std::string Relative(const fs::path& p, const fs::path& root)
 		{
-			std::snprintf(state.path_buffer, sizeof(state.path_buffer), "%s", text.c_str());
+			std::error_code error;
+			const fs::path r = fs::relative(p, root, error);
+			return (error || r.empty()) ? p.generic_string() : r.generic_string();
 		}
 
-
-		void RefreshRecent(BrowserState& state)
+		void RefreshRecent(Browser& b)
 		{
-			state.recent.clear();
-
+			b.recent.clear();
 			for (const fs::path& root : LoadRecentProjects())
 			{
 				RecentEntry entry;
 				entry.root = root;
 				entry.name = root.filename().string();
 				entry.path_text = root.string();
-
 				std::error_code error;
-				entry.available =
-					fs::is_directory(root / "assets", error) &&
-					fs::is_directory(root / "build", error);
-
-				state.recent.push_back(std::move(entry));
+				entry.available = fs::is_directory(root / "assets", error) && fs::is_directory(root / "build", error);
+				b.recent.push_back(std::move(entry));
 			}
+
+			b.recent_labels.clear();
+			for (const RecentEntry& e : b.recent)
+				b.recent_labels.push_back((e.name.empty() ? e.path_text : e.name) + (e.available ? "" : "   (not found)"));
+
+			ui::OnTileItem(b.recent_view, static_cast<int>(b.recent.size()), [&b](int i, RTileItem& item)
+			{
+				const RecentEntry& e = b.recent[static_cast<size_t>(i)];
+				item.text = b.recent_labels[static_cast<size_t>(i)].c_str();
+				item.detail = e.path_text.c_str();
+				item.icon = ui::FileIconTexture();
+				ui::FileIconRegion(file_icons::Kind::Folder, item.uv);
+				if (!e.available)
+				{
+					item.text_color[0] = 0.86f; item.text_color[1] = 0.43f; item.text_color[2] = 0.43f; item.text_color[3] = 1.f;
+				}
+			});
 		}
 
-
-		// Re-inspects the folder typed in the path field when it changed.
-		void UpdateInspection(BrowserState& state)
+		// Re-inspects the folder of the path field when it changed.
+		void UpdateInspection(Browser& b)
 		{
-			const std::string text = state.path_buffer;
-
-			if (text == state.inspected_text)
+			const std::string text = Rtext_input_get_text(b.path) ? Rtext_input_get_text(b.path) : "";
+			if (text == b.inspected_text)
 				return;
 
-			state.inspected_text = text;
-			state.module_index = 0;
+			b.inspected_text = text;
+			b.module_index = 0;
+			b.inspected_ok = !text.empty() && InspectProject(fs::path(text), b.inspected, b.inspected_error);
+
+			ui::SetClass(b.status, "error", false);
+			ui::SetClass(b.status, "warning", false);
+			ui::SetClass(b.status, "dim", false);
+			ui::SetVisible(b.module_label, false);
+			ui::SetVisible(b.module, false);
 
 			if (text.empty())
 			{
-				state.inspected_ok = false;
-				state.inspected_error.clear();
-				return;
+				ui::SetText(b.status, "Select a project folder.");
+				ui::SetClass(b.status, "dim", true);
+			}
+			else if (!b.inspected_ok)
+			{
+				ui::SetText(b.status, b.inspected_error);
+				ui::SetClass(b.status, "error", true);
+			}
+			else
+			{
+				const std::vector<fs::path>& modules = b.inspected.modules;
+				if (modules.empty())
+				{
+					ui::SetText(b.status, "Game DLL : not built yet. It will be compiled when the project opens.");
+					ui::SetClass(b.status, "warning", true);
+				}
+				else if (modules.size() == 1)
+				{
+					ui::SetText(b.status, "Game DLL : " + Relative(modules.front(), b.inspected.root));
+				}
+				else
+				{
+					ui::SetText(b.status, "");
+					Rcombo_box_clear_items(b.module);
+					for (const fs::path& m : modules)
+						Rcombo_box_add_item(b.module, Relative(m, b.inspected.root).c_str());
+					Rcombo_box_set_selected(b.module, 0);
+					ui::SetVisible(b.module_label, true);
+					ui::SetVisible(b.module, true);
+				}
 			}
 
-			state.inspected_ok = InspectProject(fs::path(text), state.inspected, state.inspected_error);
+			ui::SetEnabled(b.open, b.inspected_ok);
+
+			// The recent project of the field is the selected tile.
+			Rtile_view_clear_selection(b.recent_view);
+			for (size_t i = 0; i < b.recent.size(); ++i)
+				if (b.recent[i].path_text == text)
+					Rtile_view_set_selected(b.recent_view, static_cast<int>(i), R_TRUE);
 		}
 
-
-		void DropCallback(GLFWwindow*, int count, const char** paths)
+		void SetPath(Browser& b, const std::string& text)
 		{
-			if (!g_state || count <= 0 || !paths || !paths[0])
-				return;
-
-			fs::path dropped(paths[0]);
-			std::error_code error;
-
-			// A file dropped from the project (ex : the .dll) -> its folder.
-			if (!fs::is_directory(dropped, error))
-				dropped = dropped.parent_path();
-
-			// Dropped "build" or "assets" -> the project folder.
-			const std::string leaf = dropped.filename().string();
-
-			if (leaf == "build" || leaf == "assets")
-				dropped = dropped.parent_path();
-
-			SetPathText(*g_state, dropped.string());
+			Rtext_input_set_text(b.path, text.c_str());
+			UpdateInspection(b);
 		}
 
-
-		// Two-line row : project name, then its path (dimmed).
-		bool RecentRow(const RecentEntry& entry, bool selected, bool& double_clicked)
+		void TryOpen(Browser& b)
 		{
-			const float line = ImGui::GetTextLineHeight();
-			const ImGuiStyle& style = ImGui::GetStyle();
-
-			ImGui::PushID(entry.path_text.c_str());
-
-			const bool clicked = ImGui::Selectable(
-				"##recent",
-				selected,
-				ImGuiSelectableFlags_AllowDoubleClick,
-				ImVec2(0.f, line * 2.f + style.ItemSpacing.y));
-
-			double_clicked = clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-
-			const ImVec2 min = ImGui::GetItemRectMin();
-			ImDrawList* draw = ImGui::GetWindowDrawList();
-
-			const ImU32 name_color = entry.available
-				? ImGui::GetColorU32(ImGuiCol_Text)
-				: IM_COL32(220, 110, 110, 255);
-
-			std::string name = entry.name.empty() ? entry.path_text : entry.name;
-
-			if (!entry.available)
-				name += "   (not found)";
-
-			draw->AddText(ImVec2(min.x + style.FramePadding.x, min.y), name_color, name.c_str());
-			draw->AddText(
-				ImVec2(min.x + style.FramePadding.x, min.y + line + style.ItemSpacing.y * 0.5f),
-				ImGui::GetColorU32(ImGuiCol_TextDisabled),
-				entry.path_text.c_str());
-
-			ImGui::PopID();
-			return clicked;
+			UpdateInspection(b);
+			if (b.inspected_ok)
+				b.open_requested = true;
 		}
-
 
 		// Where new projects go by default : next to the last project, or
 		// Documents/Lynx Projects.
-		fs::path DefaultProjectsFolder(const BrowserState& state)
+		fs::path DefaultProjectsFolder(const Browser& b)
 		{
-			if (!state.recent.empty() && state.recent.front().root.has_parent_path())
-				return state.recent.front().root.parent_path();
-
+			if (!b.recent.empty() && b.recent.front().root.has_parent_path())
+				return b.recent.front().root.parent_path();
 			const char* home = std::getenv("USERPROFILE");
 			if (!home)
 				home = std::getenv("HOME");
 			return (home ? fs::path(home) / "Documents" : fs::current_path()) / "Lynx Projects";
 		}
 
-
-		void OpenNewProjectDialog(BrowserState& state)
+		void OpenNewProjectDialog(Browser& b)
 		{
-			state.new_project_open = true;
-			state.create_error.clear();
-			state.templates = project_templates::List(state.templates_error);
-			state.template_index = std::clamp(state.template_index, 0, std::max(0, static_cast<int>(state.templates.size()) - 1));
-
-			if (state.new_location[0] == '\0')
-				std::snprintf(state.new_location, sizeof(state.new_location), "%s", DefaultProjectsFolder(state).string().c_str());
-			if (state.new_title[0] == '\0')
-				std::snprintf(state.new_title, sizeof(state.new_title), "%s", "My Game");
-
-			ImGui::OpenPopup("New project");
-		}
-
-
-		// Icons of the templates (templates/<id>/icon.png), OpenGL textures of the
-		// browser window. 0 : no icon (or unreadable), never loaded twice.
-		std::unordered_map<std::string, GLuint> g_template_icons;
-
-		GLuint TemplateIcon(const project_templates::Template& t)
-		{
-			const auto it = g_template_icons.find(t.id);
-			if (it != g_template_icons.end())
-				return it->second;
-
-			GLuint texture = 0;
-			if (!t.icon.empty())
-			{
-				std::ifstream file(t.icon, std::ios::binary);
-				const std::vector<unsigned char> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-				int width = 0, height = 0;
-				stbi_uc* pixels = data.empty() ? nullptr
-					: stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, nullptr, 4);
-				if (pixels)
-				{
-					glGenTextures(1, &texture);
-					glBindTexture(GL_TEXTURE_2D, texture);
-					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);   // sharp pixels
-					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-					glBindTexture(GL_TEXTURE_2D, 0);
-					stbi_image_free(pixels);
-				}
-				else
-				{
-					std::cerr << "[Templates] Could not read " << t.icon.string() << "\n";
-				}
-			}
-			g_template_icons[t.id] = texture;
-			return texture;
-		}
-
-		void ReleaseTemplateIcons()
-		{
-			for (auto& [id, texture] : g_template_icons)
-				if (texture)
-					glDeleteTextures(1, &texture);
-			g_template_icons.clear();
-		}
-
-
-		// One template : its icon, its name, then its description (wrapped), as one selectable row.
-		bool TemplateRow(const project_templates::Template& t, bool selected)
-		{
-			const ImGuiStyle& style = ImGui::GetStyle();
-			const float width = ImGui::GetContentRegionAvail().x;
-			const float line = ImGui::GetTextLineHeight();
-
-			const GLuint icon = TemplateIcon(t);
-			const float icon_size = icon ? std::floor(line * 3.f) : 0.f;
-			const float text_x = style.FramePadding.x + (icon ? icon_size + style.ItemSpacing.x * 1.5f : 0.f);
-			const float wrap = width - text_x - style.FramePadding.x;
-
-			const ImVec2 description_size = ImGui::CalcTextSize(t.description.c_str(), nullptr, false, wrap);
-			const float text_height = line + style.ItemSpacing.y * 0.5f + description_size.y;
-			const float height = std::max(text_height, icon_size) + style.FramePadding.y * 2.f;
-
-			ImGui::PushID(t.id.c_str());
-			const bool clicked = ImGui::Selectable("##template", selected, 0, ImVec2(width, height));
-			const ImVec2 min = ImGui::GetItemRectMin();
-			ImDrawList* draw = ImGui::GetWindowDrawList();
-
-			if (icon)
-			{
-				const ImVec2 icon_min(min.x + style.FramePadding.x, min.y + (height - icon_size) * 0.5f);
-				draw->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(icon))),
-				               icon_min, ImVec2(icon_min.x + icon_size, icon_min.y + icon_size));
-			}
-
-			const ImVec2 text_pos(min.x + text_x, min.y + std::max(style.FramePadding.y, (height - text_height) * 0.5f));
-			draw->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), t.name.c_str());
-			draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
-			              ImVec2(text_pos.x, text_pos.y + line + style.ItemSpacing.y * 0.5f),
-			              // selected : normal text color, the grey would not read on the selection color
-			              ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled),
-			              t.description.c_str(), nullptr, wrap);
-			ImGui::PopID();
-			return clicked;
-		}
-
-
-		void DrawNewProjectDialog(BrowserState& state)
-		{
-			const ImGuiViewport* viewport = ImGui::GetMainViewport();
-			ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-			ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.82f, viewport->WorkSize.y * 0.86f), ImGuiCond_Appearing);
-
-			if (!ImGui::BeginPopupModal("New project", &state.new_project_open, ImGuiWindowFlags_NoSavedSettings))
+			Rid box = ui::Load("windows/new_project.xml");
+			if (box == R_INVALID_ID)
 				return;
 
-			const ImGuiStyle& style = ImGui::GetStyle();
-			const float label_width = ImGui::CalcTextSize("Location").x + style.ItemSpacing.x * 2.f;
-
-			// Name
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted("Name");
-			ImGui::SameLine(label_width);
-			ImGui::SetNextItemWidth(-1.f);
-			if (ImGui::IsWindowAppearing())
-				ImGui::SetKeyboardFocusHere();
-			bool create = ImGui::InputText("##NewTitle", state.new_title, sizeof(state.new_title),
-			                               ImGuiInputTextFlags_EnterReturnsTrue);
-
-			// Location
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted("Location");
-			ImGui::SameLine(label_width);
-			const float browse_width = ImGui::CalcTextSize("Browse...").x + style.FramePadding.x * 2.f;
-			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - browse_width - style.ItemSpacing.x);
-			ImGui::InputText("##NewLocation", state.new_location, sizeof(state.new_location));
-			ImGui::SameLine();
-			if (ImGui::Button("Browse...##NewLocation"))
+			struct Dialog
 			{
-				fs::path picked;
-				if (BrowseForFolder(picked))
-					std::snprintf(state.new_location, sizeof(state.new_location), "%s", picked.string().c_str());
+				std::vector<project_templates::Template> templates;
+				std::string templates_error;
+				std::vector<std::string> labels;
+			};
+			auto dialog = std::make_shared<Dialog>();
+			dialog->templates = project_templates::List(dialog->templates_error);
+			b.template_index = std::clamp(b.template_index, 0, std::max(0, static_cast<int>(dialog->templates.size()) - 1));
+			if (b.new_location.empty())
+				b.new_location = DefaultProjectsFolder(b).string();
+
+			Rid title = ui::Find(box, "np.title");
+			Rid location = ui::Find(box, "np.location");
+			Rid folder = ui::Find(box, "np.folder");
+			Rid dll = ui::Find(box, "np.dll");
+			Rid tiles = ui::Find(box, "np.templates");
+			Rid error = ui::Find(box, "np.error");
+			Rid create = ui::Find(box, "np.create");
+
+			Rtext_input_set_text(title, b.new_title.c_str());
+			Rtext_input_set_text(location, b.new_location.c_str());
+
+			auto update = [&b, dialog, folder, dll, create]()
+			{
+				const std::string identifier = project_templates::ToIdentifier(b.new_title);
+				const fs::path target = project_templates::ProjectFolder(fs::path(b.new_location), b.new_title);
+				const bool named = !identifier.empty() && !target.empty();
+				ui::SetText(folder, named ? "Folder : " + target.string() : "Type a name (letters or digits).");
+				ui::SetText(dll, named ? "Game DLL : " + identifier + ".dll" : "");
+				ui::SetEnabled(create, named && !dialog->templates.empty());
+			};
+
+			if (dialog->templates.empty())
+			{
+				ui::SetText(error, dialog->templates_error);
+				ui::SetVisible(error, true);
 			}
 
-			// What will be created
-			const std::string identifier = project_templates::ToIdentifier(state.new_title);
-			const fs::path folder = project_templates::ProjectFolder(fs::path(state.new_location), state.new_title);
-			if (identifier.empty() || folder.empty())
+			ui::OnTileItem(tiles, static_cast<int>(dialog->templates.size()), [dialog](int i, RTileItem& item)
 			{
-				ImGui::SetCursorPosX(label_width);
-				ImGui::TextDisabled("Type a name (letters or digits).");
-			}
-			else
+				const project_templates::Template& t = dialog->templates[static_cast<size_t>(i)];
+				item.text = t.name.c_str();
+				item.detail = t.description.c_str();
+				if (!t.icon.empty())
+					item.icon = ui::FileTexture(t.icon);
+			});
+			if (!dialog->templates.empty())
+				Rtile_view_set_selected(tiles, b.template_index, R_TRUE);
+
+			auto do_create = [&b, dialog, box, error, update]()
 			{
-				ImGui::SetCursorPosX(label_width);
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::Text("Folder : %s", folder.string().c_str());
-				ImGui::SetCursorPosX(label_width);
-				ImGui::Text("Game DLL : %s.dll", identifier.c_str());
-				ImGui::PopTextWrapPos();
-				ImGui::PopStyleColor();
-			}
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextUnformatted("Template");
-
-			// Room for the buttons (and the error, when there is one) under the list.
-			float bottom_height = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
-			if (!state.create_error.empty())
-				bottom_height += ImGui::CalcTextSize(state.create_error.c_str(), nullptr, false,
-				                                     ImGui::GetContentRegionAvail().x).y + style.ItemSpacing.y;
-			ImGui::BeginChild("##Templates", ImVec2(0.f, -bottom_height), ImGuiChildFlags_Borders);
-
-			if (state.templates.empty())
-			{
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.45f, 0.45f, 1.f));
-				ImGui::TextWrapped("%s", state.templates_error.c_str());
-				ImGui::PopStyleColor();
-			}
-
-			for (int i = 0; i < static_cast<int>(state.templates.size()); ++i)
-			{
-				if (TemplateRow(state.templates[static_cast<size_t>(i)], i == state.template_index))
-				{
-					state.template_index = i;
-					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-						create = true;
-				}
-			}
-
-			ImGui::EndChild();
-
-			if (!state.create_error.empty())
-			{
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.45f, 0.45f, 1.f));
-				ImGui::TextWrapped("%s", state.create_error.c_str());
-				ImGui::PopStyleColor();
-			}
-
-			// Buttons, on the right
-			const float create_width = ImGui::CalcTextSize("Create and open").x + style.FramePadding.x * 2.f;
-			const float cancel_width = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.f;
-			ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - create_width - cancel_width - style.ItemSpacing.x);
-
-			if (ImGui::Button("Cancel"))
-			{
-				state.new_project_open = false;
-				ImGui::CloseCurrentPopup();
-			}
-
-			ImGui::SameLine();
-			const bool can_create = !state.templates.empty() && !identifier.empty() && !folder.empty();
-			ImGui::BeginDisabled(!can_create);
-			if (ImGui::Button("Create and open"))
-				create = true;
-			ImGui::EndDisabled();
-
-			if (create && can_create)
-			{
+				update();
+				if (dialog->templates.empty())
+					return;
+				const auto& tmpl = dialog->templates[static_cast<size_t>(b.template_index)];
 				fs::path root;
-				const auto& tmpl = state.templates[static_cast<size_t>(state.template_index)];
-
-				if (project_templates::Create(tmpl, fs::path(state.new_location), state.new_title, root, state.create_error))
+				std::string create_error;
+				if (!project_templates::Create(tmpl, fs::path(b.new_location), b.new_title, root, create_error))
 				{
-					SetPathText(state, root.string());
-					UpdateInspection(state);
-
-					if (state.inspected_ok)
-						state.open_requested = true;
-					else
-						state.message = "The project was created, but cannot be opened : " + state.inspected_error;
-
-					state.new_project_open = false;
-					state.new_title[0] = '\0';
-					ImGui::CloseCurrentPopup();
+					ui::SetText(error, create_error);
+					ui::SetVisible(error, true);
+					return;
 				}
-			}
-
-			ImGui::EndPopup();
-		}
-
-
-		void DrawBrowser(BrowserState& state)
-		{
-			const ImGuiViewport* viewport = ImGui::GetMainViewport();
-
-			ImGui::SetNextWindowPos(viewport->WorkPos);
-			ImGui::SetNextWindowSize(viewport->WorkSize);
-
-			const ImGuiWindowFlags flags =
-				ImGuiWindowFlags_NoDecoration |
-				ImGuiWindowFlags_NoMove |
-				ImGuiWindowFlags_NoSavedSettings |
-				ImGuiWindowFlags_NoBringToFrontOnFocus;
-
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.f, 20.f));
-			ImGui::Begin("##ProjectBrowser", nullptr, flags);
-			ImGui::PopStyleVar();
-
-			ImGui::TextUnformatted("Lynx Engine");
-			ImGui::TextDisabled("Open a game project : a folder with \"assets\" and the game DLL in \"build\", or create a new one.");
-			ImGui::Spacing();
-
-			if (!state.message.empty())
-			{
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.65f, 0.35f, 1.f));
-				ImGui::TextWrapped("%s", state.message.c_str());
-				ImGui::PopStyleColor();
-				ImGui::Spacing();
-			}
-
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextUnformatted("Recent projects");
-
-			// Space left for the bottom part (path field, status, buttons).
-			const float bottom_height =
-				ImGui::GetFrameHeightWithSpacing() * 4.f +
-				ImGui::GetTextLineHeightWithSpacing() * 2.f;
-
-			ImGui::BeginChild("##RecentList", ImVec2(0.f, -bottom_height));
-
-			if (state.recent.empty())
-			{
-				ImGui::Spacing();
-				ImGui::TextDisabled("No recent project. Use \"New project...\", \"Browse...\", or drop a project folder on this window.");
-			}
-
-			const RecentEntry* to_open = nullptr;
-			const RecentEntry* to_remove = nullptr;
-
-			for (const RecentEntry& entry : state.recent)
-			{
-				const bool selected = (entry.path_text == state.path_buffer);
-				bool double_clicked = false;
-
-				if (RecentRow(entry, selected, double_clicked))
-				{
-					SetPathText(state, entry.path_text);
-
-					if (double_clicked)
-						to_open = &entry;
-				}
-
-				if (ImGui::BeginPopupContextItem(entry.path_text.c_str()))
-				{
-					if (ImGui::MenuItem("Open"))
-					{
-						SetPathText(state, entry.path_text);
-						to_open = &entry;
-					}
-
-					if (ImGui::MenuItem("Remove from list"))
-						to_remove = &entry;
-
-					ImGui::EndPopup();
-				}
-			}
-
-			ImGui::EndChild();
-
-			if (to_open)
-			{
-				UpdateInspection(state);
-
-				if (state.inspected_ok)
-					state.open_requested = true;
-			}
-
-			if (to_remove)
-			{
-				RemoveRecentProject(to_remove->root);
-				RefreshRecent(state);
-			}
-
-			// -----------------------------------------------------------------
-			// Path field
-			// -----------------------------------------------------------------
-
-			ImGui::Spacing();
-			ImGui::TextUnformatted("Project folder");
-
-			const float browse_width =
-				ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.f;
-
-			ImGui::SetNextItemWidth(
-				ImGui::GetContentRegionAvail().x - browse_width - ImGui::GetStyle().ItemSpacing.x);
-
-			const bool enter_pressed = ImGui::InputText(
-				"##ProjectPath",
-				state.path_buffer,
-				sizeof(state.path_buffer),
-				ImGuiInputTextFlags_EnterReturnsTrue);
-
-			ImGui::SameLine();
-
-			if (ImGui::Button("Browse..."))
-			{
-				fs::path picked;
-
-				if (BrowseForFolder(picked))
-					SetPathText(state, picked.string());
-			}
-
-			UpdateInspection(state);
-
-			// -----------------------------------------------------------------
-			// Status : game DLL found, or why the folder is not a project
-			// -----------------------------------------------------------------
-
-			if (state.inspected_text.empty())
-			{
-				ImGui::TextDisabled("Select a project folder.");
-			}
-			else if (!state.inspected_ok)
-			{
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.45f, 0.45f, 1.f));
-				ImGui::TextWrapped("%s", state.inspected_error.c_str());
-				ImGui::PopStyleColor();
-			}
-			else
-			{
-				const auto relative = [&](const fs::path& p)
-				{
-					std::error_code error;
-					const fs::path r = fs::relative(p, state.inspected.root, error);
-					return (error || r.empty()) ? p.generic_string() : r.generic_string();
-				};
-
-				const std::vector<fs::path>& modules = state.inspected.modules;
-
-				state.module_index =
-					modules.empty() ? 0 :
-					std::clamp(state.module_index, 0, static_cast<int>(modules.size()) - 1);
-
-				if (modules.empty())
-				{
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.35f, 1.f));
-					ImGui::TextWrapped("Game DLL : not built yet. It will be compiled when the project opens.");
-					ImGui::PopStyleColor();
-				}
-				else if (modules.size() == 1)
-				{
-					ImGui::Text("Game DLL : %s", relative(modules.front()).c_str());
-				}
+				SetPath(b, root.string());
+				if (b.inspected_ok)
+					b.open_requested = true;
 				else
 				{
-					ImGui::AlignTextToFramePadding();
-					ImGui::TextUnformatted("Game DLL :");
-					ImGui::SameLine();
-					ImGui::SetNextItemWidth(-1.f);
-
-					const std::string preview = relative(modules[state.module_index]);
-
-					if (ImGui::BeginCombo("##GameModule", preview.c_str()))
-					{
-						for (int i = 0; i < static_cast<int>(modules.size()); ++i)
-						{
-							const std::string label = relative(modules[i]);
-
-							if (ImGui::Selectable(label.c_str(), i == state.module_index))
-								state.module_index = i;
-						}
-
-						ImGui::EndCombo();
-					}
+					ui::SetText(b.message, "The project was created, but cannot be opened : " + b.inspected_error);
+					ui::SetVisible(b.message, true);
 				}
-			}
+				b.new_title = "My Game";
+				Rdialog_close(box, 1);
+			};
 
-			// -----------------------------------------------------------------
-			// Buttons
-			// -----------------------------------------------------------------
+			ui::OnText(title, [&b, update](const std::string& text) { b.new_title = text; update(); });
+			ui::OnCommit(title, [&b, update](const std::string& text) { b.new_title = text; update(); });
+			ui::OnText(location, [&b, update](const std::string& text) { b.new_location = text; update(); });
+			ui::OnClick(ui::Find(box, "np.browse"), [&b, location, update]()
+			{
+				fs::path picked;
+				if (BrowseForFolder(picked))
+				{
+					b.new_location = picked.string();
+					Rtext_input_set_text(location, b.new_location.c_str());
+					update();
+				}
+			});
+			ui::OnTileSelect(tiles, [&b](int index) { if (index >= 0) b.template_index = index; });
+			ui::OnTileActivate(tiles, [&b, do_create](int index) { b.template_index = index; do_create(); });
+			ui::OnClick(create, do_create);
+			ui::OnClick(ui::Find(box, "np.cancel"), [box]() { Rdialog_close(box, 0); });
 
-			ImGui::Spacing();
+			update();
+			Rdialog_open(b.window, box, nullptr, nullptr);
+			Rwidget_focus(title);
+			Rtext_input_select_all(title);
+		}
 
-			const ImGuiStyle& style = ImGui::GetStyle();
-			const float open_width = ImGui::CalcTextSize("Open project").x + style.FramePadding.x * 2.f;
-			const float quit_width = ImGui::CalcTextSize("Quit").x + style.FramePadding.x * 2.f;
+		int OnDropFiles(Rid, const RDropEvent* event, void* user)
+		{
+			Browser& b = *static_cast<Browser*>(user);
+			if (event->path_count <= 0 || !event->paths || !event->paths[0])
+				return R_FALSE;
+			if (event->phase != R_DROP_DROPPED)
+				return R_TRUE;
 
-			if (ImGui::Button("New project..."))
-				OpenNewProjectDialog(state);
+			fs::path dropped(event->paths[0]);
+			std::error_code error;
+			// A file dropped from the project (ex : the .dll) -> its folder.
+			if (!fs::is_directory(dropped, error))
+				dropped = dropped.parent_path();
+			// Dropped "build" or "assets" -> the project folder.
+			const std::string leaf = dropped.filename().string();
+			if (leaf == "build" || leaf == "assets")
+				dropped = dropped.parent_path();
 
-			ImGui::SameLine();
-			ImGui::SetCursorPosX(std::max(
-				ImGui::GetCursorPosX(),
-				ImGui::GetWindowContentRegionMax().x - open_width - quit_width - style.ItemSpacing.x));
+			SetPath(b, dropped.string());
+			return R_TRUE;
+		}
 
-			if (ImGui::Button("Quit"))
-				state.quit_requested = true;
-
-			ImGui::SameLine();
-
-			ImGui::BeginDisabled(!state.inspected_ok);
-
-			if (ImGui::Button("Open project") || (enter_pressed && state.inspected_ok))
-				state.open_requested = true;
-
-			ImGui::EndDisabled();
-
-			DrawNewProjectDialog(state);
-
-			ImGui::End();
+		int OnCloseRequest(Rid, void* user)
+		{
+			static_cast<Browser*>(user)->quit_requested = true;
+			return R_FALSE;   // destroyed by RunProjectBrowser
 		}
 	}
 
@@ -772,117 +424,108 @@ namespace lynx::editor
 		const std::string& message,
 		const fs::path& initial_path)
 	{
-		if (!glfwInit())
-		{
-			std::cerr << "[PROJECT] glfwInit failed\n";
-			return false;
-		}
-
-		glfwDefaultWindowHints();
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-		GLFWwindow* window = glfwCreateWindow(960, 600, "Lynx Engine - Projects", nullptr, nullptr);
-
-		if (!window)
+		Browser b;
+		b.window = ui::LoadWindow("windows/project_browser.xml");
+		if (b.window == R_INVALID_ID)
 		{
 			std::cerr << "[PROJECT] Could not create the project browser window\n";
 			return false;
 		}
 
-		lynx::editor::window_icon::Apply(window);
-		glfwMakeContextCurrent(window);
-		glfwSwapInterval(1);
+		b.recent_view = ui::Find(b.window, "pb.recent");
+		b.path = ui::Find(b.window, "pb.path");
+		b.status = ui::Find(b.window, "pb.status");
+		b.module_label = ui::Find(b.window, "pb.module.label");
+		b.module = ui::Find(b.window, "pb.module");
+		b.open = ui::Find(b.window, "pb.open");
+		b.message = ui::Find(b.window, "pb.message");
 
-		BrowserState state;
-		state.message = message;
-		g_state = &state;
+		Rimage_set_texture(ui::Find(b.window, "pb.logo"), ui::Texture("icons/lynxie.png"));
 
-		RefreshRecent(state);
-
-		if (!initial_path.empty())
-			SetPathText(state, initial_path.string());
-		else if (!state.recent.empty())
-			SetPathText(state, state.recent.front().path_text);
-
-		glfwSetDropCallback(window, DropCallback);
-
-		// ImGui : own context, destroyed before returning.
-		IMGUI_CHECKVERSION();
-		ImGuiContext* context = ImGui::CreateContext();
-		ImGui::SetCurrentContext(context);
-
-		ImGuiIO& io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-
-		// Same fonts as the editor (fonts/ next to the executable).
-		lynx::editor::fonts::Load(20.f);
-
-		ImGui::StyleColorsDark();
-		ImGui::GetStyle().FrameRounding = 4.f;
-		ImGui::GetStyle().FramePadding = ImVec2(8.f, 5.f);
-
-		ImGui_ImplGlfw_InitForOpenGL(window, true);
-		ImGui_ImplOpenGL3_Init("#version 330");
-
-		bool opened = false;
-
-		while (!glfwWindowShouldClose(window) && !state.quit_requested)
+		if (!message.empty())
 		{
-			glfwPollEvents();
-
-			ImGui_ImplOpenGL3_NewFrame();
-			ImGui_ImplGlfw_NewFrame();
-			ImGui::NewFrame();
-
-			DrawBrowser(state);
-
-			ImGui::Render();
-
-			int width = 0;
-			int height = 0;
-			glfwGetFramebufferSize(window, &width, &height);
-			glViewport(0, 0, width, height);
-			glClearColor(0.08f, 0.08f, 0.09f, 1.f);
-			glClear(GL_COLOR_BUFFER_BIT);
-
-			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-			glfwSwapBuffers(window);
-
-			if (state.open_requested)
-			{
-				state.open_requested = false;
-
-				if (state.inspected_ok)
-				{
-					project = state.inspected;
-
-					if (!project.modules.empty())
-					{
-						const int index = std::clamp(
-							state.module_index, 0, static_cast<int>(project.modules.size()) - 1);
-
-						project.module_path = project.modules[index];
-					}
-
-					opened = true;
-					break;
-				}
-			}
+			ui::SetText(b.message, message);
+			ui::SetVisible(b.message, true);
 		}
 
-		ReleaseTemplateIcons();   // GL textures of this window, before its context goes
-		ImGui_ImplOpenGL3_Shutdown();
-		ImGui_ImplGlfw_Shutdown();
-		ImGui::DestroyContext(context);
+		Rwindow_set_close_callback(b.window, OnCloseRequest, &b);
+		Rwindow_set_drop_callback(b.window, OnDropFiles, &b);
 
-		g_state = nullptr;
+		RefreshRecent(b);
 
-		glfwDestroyWindow(window);
-		glfwDefaultWindowHints();
+		ui::OnText(b.path, [&b](const std::string&) { UpdateInspection(b); });
+		ui::OnCommit(b.path, [&b](const std::string&) { TryOpen(b); });
+		ui::OnSelect(b.module, [&b](int index) { b.module_index = std::max(0, index); });
+		ui::OnClick(ui::Find(b.window, "pb.browse"), [&b]()
+		{
+			fs::path picked;
+			if (BrowseForFolder(picked))
+				SetPath(b, picked.string());
+		});
+		ui::OnClick(ui::Find(b.window, "pb.new"), [&b]() { OpenNewProjectDialog(b); });
+		ui::OnClick(ui::Find(b.window, "pb.quit"), [&b]() { b.quit_requested = true; });
+		ui::OnClick(b.open, [&b]() { TryOpen(b); });
 
+		ui::OnTileSelect(b.recent_view, [&b](int index)
+		{
+			if (index >= 0 && index < static_cast<int>(b.recent.size()))
+				SetPath(b, b.recent[static_cast<size_t>(index)].path_text);
+		});
+		ui::OnTileActivate(b.recent_view, [&b](int index)
+		{
+			if (index < 0 || index >= static_cast<int>(b.recent.size()))
+				return;
+			SetPath(b, b.recent[static_cast<size_t>(index)].path_text);
+			TryOpen(b);
+		});
+
+		ui::Menu menu(b.window);
+		ui::OnTileContext(b.recent_view, [&b, &menu](int index, float, float)
+		{
+			if (index < 0 || index >= static_cast<int>(b.recent.size()))
+				return;
+			const RecentEntry entry = b.recent[static_cast<size_t>(index)];
+			menu.Clear();
+			menu.Item("Open", [&b, entry]() { SetPath(b, entry.path_text); TryOpen(b); });
+			menu.Item("Remove from list", [&b, entry]()
+			{
+				ui::Later([&b, entry]() { RemoveRecentProject(entry.root); RefreshRecent(b); });
+			});
+			menu.Open();
+		});
+
+		if (!initial_path.empty())
+			SetPath(b, initial_path.string());
+		else if (!b.recent.empty())
+			SetPath(b, b.recent.front().path_text);
+		else
+			UpdateInspection(b);
+
+		Rwindow_show(b.window);
+		Rwidget_focus(b.path);
+
+		bool opened = false;
+		while (!b.quit_requested && Rwait_frame(0.25))
+		{
+			if (!b.open_requested)
+				continue;
+			b.open_requested = false;
+			if (!b.inspected_ok)
+				continue;
+
+			project = b.inspected;
+			if (!project.modules.empty())
+			{
+				const int index = std::clamp(b.module_index, 0, static_cast<int>(project.modules.size()) - 1);
+				project.module_path = project.modules[static_cast<size_t>(index)];
+			}
+			opened = true;
+			break;
+		}
+
+		Rwindow_set_close_callback(b.window, nullptr, nullptr);
+		Rwindow_set_drop_callback(b.window, nullptr, nullptr);
+		Rwindow_destroy(b.window);
 		return opened;
 	}
 }

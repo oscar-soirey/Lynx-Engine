@@ -1,43 +1,30 @@
 #include "SplashScreen.h"
 
-#include "EditorFonts.h"
+#include "raven/RavenUi.h"
 
-#include "WindowIcon.h"
-
-#include <imgui/imgui.h>
-#include <imgui/imgui_impl_glfw.h>
-#include <imgui/imgui_impl_opengl3.h>
-#include <glfw/glfw3.h>
-
-// Implementation compiled in EditorMain.cpp (STB_IMAGE_IMPLEMENTATION).
-#include "../../third-party/stb/stb_image.h"
+#include <Raven.h>
 
 #include <algorithm>
 #include <chrono>
-#include <cfloat>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <thread>
-#include <vector>
 
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F   // not in the Windows <GL/gl.h> (OpenGL 1.1)
-#endif
+// =============================================================================
+// Splash screen in Raven : a borderless window whose only widget is a Custom
+// painted by Draw(). Everything runs on the main (UI) thread ; every step
+// pumps Raven (Rpoll_events + Rdraw_frame) because the caller is about to block.
+// Raven must be initialized (Rinit + ui::Init) before Open().
+// =============================================================================
 
 namespace lynx::editor::splash
 {
 	namespace
 	{
-#include "resources/lynxie_png.inl"
-
-		// Size at 100 % scale (window pixels). Scaled with the monitor DPI.
-		constexpr float kWidth = 640.f;
-		constexpr float kHeight = 360.f;
+		constexpr int kWidth = 640;
+		constexpr int kHeight = 360;
 
 		constexpr double kMinVisibleSeconds = 1.0;   // no flash when loading is instant
 		constexpr double kFadeInSeconds = 0.15;
@@ -45,21 +32,22 @@ namespace lynx::editor::splash
 		constexpr double kFadeOutSeconds = 0.25;
 		constexpr int kEditorFramesBeforeFade = 2;   // the editor's first frames stay hidden
 
-		// Dark pixel palette of the editor (imgui_draw.cpp, IMGUI_PIXEL_THEME_DARK).
-		constexpr ImU32 Rgb(int r, int g, int b, int a = 255)
+		struct Color { float r, g, b, a; };
+
+		constexpr Color Rgb(int r, int g, int b, int a = 255)
 		{
-			return IM_COL32(r, g, b, a);
+			return { r / 255.f, g / 255.f, b / 255.f, a / 255.f };
 		}
 
-		constexpr ImU32 kOutline = Rgb(15, 15, 15);
-		constexpr ImU32 kDeep = Rgb(30, 30, 30);
-		constexpr ImU32 kBackground = Rgb(37, 37, 37);
-		constexpr ImU32 kBevel = Rgb(61, 61, 61);
-		constexpr ImU32 kText = Rgb(230, 230, 230);
-		constexpr ImU32 kTextDim = Rgb(128, 128, 128);
-		constexpr ImU32 kAccent = Rgb(217, 154, 43);
-		constexpr ImU32 kAccentHot = Rgb(240, 185, 74);
-		constexpr ImU32 kAccentDim = Rgb(120, 86, 26);
+		constexpr Color kOutline = Rgb(15, 15, 15);
+		constexpr Color kDeep = Rgb(30, 30, 30);
+		constexpr Color kBackground = Rgb(37, 37, 37);
+		constexpr Color kBevel = Rgb(61, 61, 61);
+		constexpr Color kText = Rgb(230, 230, 230);
+		constexpr Color kTextDim = Rgb(128, 128, 128);
+		constexpr Color kAccent = Rgb(217, 154, 43);
+		constexpr Color kAccentHot = Rgb(240, 185, 74);
+		constexpr Color kAccentDim = Rgb(120, 86, 26);
 
 		enum class Phase
 		{
@@ -70,11 +58,10 @@ namespace lynx::editor::splash
 
 		struct State
 		{
-			GLFWwindow* window = nullptr;
-			ImGuiContext* imgui = nullptr;
-			ImFont* font = nullptr;
-
-			unsigned int logo = 0;
+			Rid window = R_INVALID_ID;
+			Rid canvas = R_INVALID_ID;
+			Rid logo = R_INVALID_ID;
+			bool own_logo = false;
 			float logo_ratio = 32.f / 28.f;
 
 			std::string project_name;
@@ -84,7 +71,6 @@ namespace lynx::editor::splash
 			float progress = 0.f;   // last value given by SetStep
 			float shown = 0.f;      // value drawn (animated in Complete)
 
-			float scale = 1.f;
 			bool visible = false;
 			double opened_at = 0.0;
 
@@ -95,313 +81,208 @@ namespace lynx::editor::splash
 
 		State g;
 
-
-		// The splash draws in the middle of the editor startup : whatever GL
-		// context / ImGui context is current (HRL's, the editor's...) is
-		// restored afterwards.
-		struct ContextScope
+		double Now()
 		{
-			GLFWwindow* previous_gl = glfwGetCurrentContext();
-			ImGuiContext* previous_imgui = ImGui::GetCurrentContext();
-
-			ContextScope()
-			{
-				glfwMakeContextCurrent(g.window);
-				ImGui::SetCurrentContext(g.imgui);
-			}
-
-			~ContextScope()
-			{
-				ImGui::SetCurrentContext(previous_imgui);
-				glfwMakeContextCurrent(previous_gl);
-			}
-		};
-
+			using namespace std::chrono;
+			static const steady_clock::time_point start = steady_clock::now();
+			return duration<double>(steady_clock::now() - start).count();
+		}
 
 		void SleepMs(int ms)
 		{
 			std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 		}
 
-
-		std::vector<unsigned char> ReadFile(const std::filesystem::path& path)
+		float EaseOut(float t)
 		{
-			std::ifstream file(path, std::ios::binary);
-			if (!file)
-				return {};
-			return std::vector<unsigned char>(
-				std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			t = std::clamp(t, 0.f, 1.f);
+			return 1.f - (1.f - t) * (1.f - t) * (1.f - t);
 		}
 
+		// ---- drawing -------------------------------------------------------------
 
-		// Lynxie (white pixel art) : a lynxie.png next to the editor replaces
-		// the embedded one, like LynxieIcon. Needs the splash GL context.
-		void CreateLogo()
+		void Rect(RPainter* p, float x, float y, float w, float h, Color c)
 		{
-			std::vector<unsigned char> file =
-				ReadFile(host::GetEditorDirectory() / "lynxie.png");
-
-			const unsigned char* data = kLynxiePng;
-			size_t size = sizeof(kLynxiePng);
-
-			if (!file.empty())
-			{
-				data = file.data();
-				size = file.size();
-			}
-
-			int width = 0;
-			int height = 0;
-			stbi_uc* pixels = stbi_load_from_memory(
-				data, static_cast<int>(size), &width, &height, nullptr, 4);
-
-			if (!pixels)
-				return;
-
-			glGenTextures(1, &g.logo);
-			glBindTexture(GL_TEXTURE_2D, g.logo);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);   // sharp pixels
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-			glBindTexture(GL_TEXTURE_2D, 0);
-
-			stbi_image_free(pixels);
-
-			if (height > 0)
-				g.logo_ratio = static_cast<float>(width) / static_cast<float>(height);
+			if (w > 0.f && h > 0.f)
+				Rdraw_rect(p, x, y, w, h, 0.f, c.r, c.g, c.b, c.a);
 		}
 
-
-		ImVec2 TextSize(float size, const char* text)
+		void Text(RPainter* p, float size, float x, float y, const std::string& text, Color c)
 		{
-			return g.font->CalcTextSizeA(size, FLT_MAX, 0.f, text);
+			Rdraw_text(p, R_INVALID_ID, size, x, y, text.c_str(), c.r, c.g, c.b, c.a);
 		}
 
+		float TextWidth(float size, const std::string& text)
+		{
+			float w = 0.f, h = 0.f;
+			Rfont_measure_text(R_INVALID_ID, size, text.c_str(), &w, &h);
+			if (w <= 0.f)   // no font yet : a rough estimate (monospace pixel font)
+				w = size * 0.6f * static_cast<float>(text.size());
+			return w;
+		}
 
 		// Long paths : "...end/of/the/path" so the project folder stays visible.
 		std::string FitLeft(const std::string& text, float size, float max_width)
 		{
-			if (TextSize(size, text.c_str()).x <= max_width)
+			if (TextWidth(size, text) <= max_width)
 				return text;
-
 			for (size_t start = 1; start < text.size(); ++start)
 			{
 				const std::string candidate = "..." + text.substr(start);
-				if (TextSize(size, candidate.c_str()).x <= max_width)
+				if (TextWidth(size, candidate) <= max_width)
 					return candidate;
 			}
 			return "...";
 		}
-
 
 		std::string FitRight(const std::string& text, float size, float max_width)
 		{
-			if (TextSize(size, text.c_str()).x <= max_width)
+			if (TextWidth(size, text) <= max_width)
 				return text;
-
 			for (size_t length = text.size(); length > 0; --length)
 			{
 				const std::string candidate = text.substr(0, length - 1) + "...";
-				if (TextSize(size, candidate.c_str()).x <= max_width)
+				if (TextWidth(size, candidate) <= max_width)
 					return candidate;
 			}
 			return "...";
 		}
 
-
 		// Pixel spinner : 8 blocks on a circle, the bright one turns.
-		void DrawSpinner(ImDrawList* draw, ImVec2 center, float radius, float block, double time)
+		void DrawSpinner(RPainter* p, float cx, float cy, float radius, float block, double time)
 		{
 			const int head = static_cast<int>(time * 10.0) % 8;
-
 			for (int i = 0; i < 8; ++i)
 			{
 				const float angle = static_cast<float>(i) * 3.14159265f / 4.f - 3.14159265f / 2.f;
-				const ImVec2 p(
-					std::floor(center.x + std::cos(angle) * radius - block * 0.5f),
-					std::floor(center.y + std::sin(angle) * radius - block * 0.5f));
-
+				const float x = std::floor(cx + std::cos(angle) * radius - block * 0.5f);
+				const float y = std::floor(cy + std::sin(angle) * radius - block * 0.5f);
 				const int distance = (head - i + 8) % 8;
-				const int alpha = 255 - distance * 28;
-
-				draw->AddRectFilled(p, ImVec2(p.x + block, p.y + block),
-				                    distance == 0 ? kAccentHot : Rgb(217, 154, 43, std::max(alpha, 40)));
+				Color c = kAccent;
+				c.a = std::max(255 - distance * 28, 40) / 255.f;
+				Rect(p, x, y, block, block, distance == 0 ? kAccentHot : c);
 			}
 		}
 
-
-		void DrawProgressBar(ImDrawList* draw, ImVec2 min, ImVec2 max, float value, double time)
+		void DrawProgressBar(RPainter* p, float x, float y, float w, float h, float value, double time)
 		{
-			const float s = g.scale;
-			const float px = std::max(1.f, std::floor(s));
+			const float px = 1.f;
+			Rect(p, x, y, w, h, kOutline);
+			const float ix = x + px, iy = y + px, iw = w - 2 * px, ih = h - 2 * px;
+			Rect(p, ix, iy, iw, ih, kDeep);
 
-			// Frame : black outline, inset track.
-			draw->AddRectFilled(min, max, kOutline);
-			const ImVec2 in_min(min.x + px, min.y + px);
-			const ImVec2 in_max(max.x - px, max.y - px);
-			draw->AddRectFilled(in_min, in_max, kDeep);
-
-			const float fill_x = std::floor(in_min.x + (in_max.x - in_min.x) * std::clamp(value, 0.f, 1.f));
-
-			if (fill_x <= in_min.x)
+			const float fill = std::floor(iw * std::clamp(value, 0.f, 1.f));
+			if (fill <= 0.f)
 				return;
 
-			draw->AddRectFilled(in_min, ImVec2(fill_x, in_max.y), kAccent);
+			Rect(p, ix, iy, fill, ih, kAccent);
+			Rect(p, ix, iy, fill, px, kAccentHot);                // pixel bevel
+			Rect(p, ix, iy + ih - px, fill, px, kAccentDim);
 
-			// Top highlight / bottom shade : pixel bevel.
-			draw->AddRectFilled(in_min, ImVec2(fill_x, in_min.y + px), kAccentHot);
-			draw->AddRectFilled(ImVec2(in_min.x, in_max.y - px), ImVec2(fill_x, in_max.y), kAccentDim);
-
-			// Segments.
-			const float segment = std::floor(10.f * s);
-			for (float x = in_min.x + segment; x < fill_x; x += segment)
-				draw->AddRectFilled(ImVec2(x, in_min.y), ImVec2(x + px, in_max.y), kAccentDim);
+			for (float sx = ix + 10.f; sx < ix + fill; sx += 10.f)   // segments
+				Rect(p, sx, iy, px, ih, kAccentDim);
 
 			// Moving shine inside the filled part.
-			draw->PushClipRect(in_min, ImVec2(fill_x, in_max.y), true);
-			const float span = (in_max.x - in_min.x) * 1.4f;
-			const float shine_x = in_min.x - 0.2f * (in_max.x - in_min.x) +
-			                      static_cast<float>(std::fmod(time * 0.6, 1.0)) * span;
-			const float shine_w = std::floor(36.f * s);
-			draw->AddRectFilled(ImVec2(std::floor(shine_x), in_min.y),
-			                    ImVec2(std::floor(shine_x + shine_w), in_max.y),
-			                    Rgb(255, 230, 170, 70));
-			draw->PopClipRect();
+			Rdraw_push_clip_rect(p, ix, iy, fill, ih);
+			const float span = iw * 1.4f;
+			const float shine_x = ix - 0.2f * iw + static_cast<float>(std::fmod(time * 0.6, 1.0)) * span;
+			Rect(p, std::floor(shine_x), iy, 36.f, ih, Rgb(255, 230, 170, 70));
+			Rdraw_pop_clip_rect(p);
 		}
 
-
-		void Draw()
+		void Draw(Rid, RPainter* p, float width, float height, void*)
 		{
-			ImDrawList* draw = ImGui::GetBackgroundDrawList();
-			const ImVec2 size = ImGui::GetIO().DisplaySize;
-			const float s = g.scale;
-			const float px = std::max(1.f, std::floor(s));
-			const double time = glfwGetTime();
+			const double time = Now();
+			const float px = 1.f;
 
 			// Window : outline, bevel, background, accent stripe on top.
-			draw->AddRectFilled(ImVec2(0.f, 0.f), size, kOutline);
-			draw->AddRectFilled(ImVec2(px, px), ImVec2(size.x - px, size.y - px), kBevel);
-			draw->AddRectFilled(ImVec2(px * 2.f, px * 2.f), ImVec2(size.x - px, size.y - px), kBackground);
-			draw->AddRectFilled(ImVec2(px, px), ImVec2(size.x - px, px + std::floor(4.f * s)), kAccent);
+			Rect(p, 0, 0, width, height, kOutline);
+			Rect(p, px, px, width - 2 * px, height - 2 * px, kBevel);
+			Rect(p, 2 * px, 2 * px, width - 3 * px, height - 3 * px, kBackground);
+			Rect(p, px, px, width - 2 * px, 4.f, kAccent);
 
-			const float pad = std::floor(32.f * s);
-			const float content_w = size.x - pad * 2.f;
+			const float pad = 32.f;
+			const float content_w = width - pad * 2.f;
 
 			// Lynxie + title.
-			const float logo_h = std::floor(112.f * s);
+			const float logo_h = 112.f;
 			const float logo_w = std::floor(logo_h * g.logo_ratio);
-			const ImVec2 logo_min(pad, pad + std::floor(6.f * s));
+			const float logo_y = pad + 6.f;
+			if (g.logo != R_INVALID_ID)
+				Rdraw_image(p, g.logo, pad, logo_y, logo_w, logo_h, kText.r, kText.g, kText.b, 1.f);
 
-			if (g.logo)
-			{
-				draw->AddImage(
-					static_cast<ImTextureID>(static_cast<uintptr_t>(g.logo)),
-					logo_min, ImVec2(logo_min.x + logo_w, logo_min.y + logo_h),
-					ImVec2(0.f, 0.f), ImVec2(1.f, 1.f), kText);
-			}
+			const float title_x = pad + (g.logo != R_INVALID_ID ? logo_w + 24.f : 0.f);
+			const float title_size = 72.f;
+			Text(p, title_size, title_x, pad, "LYNX", kText);
 
-			const float title_x = pad + (g.logo ? logo_w + std::floor(24.f * s) : 0.f);
-			const float title_size = std::floor(72.f * s);
-			draw->AddText(g.font, title_size, ImVec2(title_x, pad), kText, "LYNX");
-
-			const float sub_size = std::floor(18.f * s);
-			const float sub_y = pad + title_size + std::floor(4.f * s);
-			draw->AddText(g.font, sub_size, ImVec2(title_x, sub_y), kTextDim, "ENGINE / EDITOR");
-
-			const float title_w = TextSize(title_size, "LYNX").x;
-			draw->AddRectFilled(
-				ImVec2(title_x, sub_y + sub_size + std::floor(8.f * s)),
-				ImVec2(title_x + title_w, sub_y + sub_size + std::floor(8.f * s) + px * 2.f),
-				kAccent);
+			const float sub_size = 18.f;
+			const float sub_y = pad + title_size + 4.f;
+			Text(p, sub_size, title_x, sub_y, "ENGINE / EDITOR", kTextDim);
+			Rect(p, title_x, sub_y + sub_size + 8.f, TextWidth(title_size, "LYNX"), 2 * px, kAccent);
 
 			// Busy indicator, top right.
-			DrawSpinner(draw,
-			            ImVec2(size.x - pad - std::floor(14.f * s), pad + std::floor(14.f * s)),
-			            std::floor(12.f * s), std::floor(5.f * s), time);
+			DrawSpinner(p, width - pad - 14.f, pad + 14.f, 12.f, 5.f, time);
 
 			// Project.
-			float y = logo_min.y + logo_h + std::floor(30.f * s);
-
-			const float label_size = std::floor(15.f * s);
-			draw->AddText(g.font, label_size, ImVec2(pad, y), kAccent, "OPENING PROJECT");
-			y += label_size + std::floor(6.f * s);
-
-			const float name_size = std::floor(30.f * s);
-			const std::string name = FitRight(g.project_name, name_size, content_w);
-			draw->AddText(g.font, name_size, ImVec2(pad, y), kText, name.c_str());
-			y += name_size + std::floor(4.f * s);
-
-			const float path_size = std::floor(15.f * s);
-			const std::string path = FitLeft(g.project_path, path_size, content_w);
-			draw->AddText(g.font, path_size, ImVec2(pad, y), kTextDim, path.c_str());
+			float y = logo_y + logo_h + 30.f;
+			Text(p, 15.f, pad, y, "OPENING PROJECT", kAccent);
+			y += 21.f;
+			Text(p, 30.f, pad, y, FitRight(g.project_name, 30.f, content_w), kText);
+			y += 34.f;
+			Text(p, 15.f, pad, y, FitLeft(g.project_path, 15.f, content_w), kTextDim);
 
 			// Step + progress bar, at the bottom.
-			const float bar_h = std::floor(14.f * s);
-			const float bar_y = size.y - pad - bar_h;
+			const float bar_h = 14.f;
+			const float bar_y = height - pad - bar_h;
 
 			char percent[16];
 			std::snprintf(percent, sizeof(percent), "%d%%",
 			              static_cast<int>(std::round(std::clamp(g.shown, 0.f, 1.f) * 100.f)));
 
-			const float step_size = std::floor(18.f * s);
-			const float step_y = bar_y - std::floor(8.f * s) - step_size;
-			const float percent_w = TextSize(step_size, percent).x;
+			const float step_size = 18.f;
+			const float step_y = bar_y - 8.f - step_size;
+			const float percent_w = TextWidth(step_size, percent);
 
-			const std::string step =
-				FitRight(g.step, step_size, content_w - percent_w - std::floor(16.f * s));
+			Text(p, step_size, pad, step_y, FitRight(g.step, step_size, content_w - percent_w - 16.f), kText);
+			Text(p, step_size, width - pad - percent_w, step_y, percent, kTextDim);
 
-			draw->AddText(g.font, step_size, ImVec2(pad, step_y), kText, step.c_str());
-			draw->AddText(g.font, step_size, ImVec2(size.x - pad - percent_w, step_y), kTextDim, percent);
-
-			DrawProgressBar(draw, ImVec2(pad, bar_y), ImVec2(size.x - pad, bar_y + bar_h), g.shown, time);
+			DrawProgressBar(p, pad, bar_y, content_w, bar_h, g.shown, time);
 		}
 
+		// A splash cannot be closed : Alt+F4 / close requests are refused.
+		int RefuseClose(Rid, void*) { return R_FALSE; }
 
-		void RenderFrame()
+		// Lynxie (white pixel art) : a lynxie.png next to the editor replaces
+		// the embedded one.
+		void CreateLogo()
 		{
-			if (!g.window)
+			const std::filesystem::path custom = host::GetEditorDirectory() / "lynxie.png";
+			std::error_code error;
+			if (std::filesystem::is_regular_file(custom, error))
+			{
+				g.logo = Rtexture_create_from_file(custom.string().c_str());
+				g.own_logo = g.logo != R_INVALID_ID;
+			}
+			if (g.logo == R_INVALID_ID)
+				g.logo = ui::Texture("icons/lynxie.png");
+			if (g.logo == R_INVALID_ID)
 				return;
 
-			// A splash cannot be closed : Alt+F4 / close requests are ignored.
-			glfwSetWindowShouldClose(g.window, GLFW_FALSE);
-
-			ContextScope scope;
-
-			ImGui_ImplOpenGL3_NewFrame();
-			ImGui_ImplGlfw_NewFrame();
-			ImGui::NewFrame();
-
-			Draw();
-
-			ImGui::Render();
-
-			int width = 0;
-			int height = 0;
-			glfwGetFramebufferSize(g.window, &width, &height);
-			glViewport(0, 0, width, height);
-			glClearColor(37.f / 255.f, 37.f / 255.f, 37.f / 255.f, 1.f);
-			glClear(GL_COLOR_BUFFER_BIT);
-
-			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-			glfwSwapBuffers(g.window);
+			Rtexture_set_filter(g.logo, R_FILTER_NEAREST);   // sharp pixels
+			int w = 0, h = 0;
+			Rtexture_get_size(g.logo, &w, &h);
+			if (w > 0 && h > 0)
+				g.logo_ratio = static_cast<float>(w) / static_cast<float>(h);
 		}
-
 
 		// Keeps the application responsive (no "Not responding") and redraws.
 		void Pump()
 		{
-			glfwPollEvents();
-			RenderFrame();
-		}
-
-
-		float EaseOut(float t)
-		{
-			t = std::clamp(t, 0.f, 1.f);
-			return 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+			if (g.window == R_INVALID_ID)
+				return;
+			Rwidget_invalidate(g.canvas);
+			Rpoll_events();
+			Rdraw_frame();
 		}
 	}
 
@@ -411,98 +292,32 @@ namespace lynx::editor::splash
 		g.project_name = project.name.empty() ? project.root.filename().string() : project.name;
 		g.project_path = project.root.string();
 
-		if (g.window)
+		if (g.window != R_INVALID_ID)
 		{
 			Show();
 			return;
 		}
 
-		if (!glfwInit())
-		{
-			std::cerr << "[SPLASH] glfwInit failed\n";
-			return;
-		}
-
-		// Size from the monitor DPI, centered in its work area (no taskbar).
-		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-
-		float scale_x = 1.f;
-		float scale_y = 1.f;
-		if (monitor)
-			glfwGetMonitorContentScale(monitor, &scale_x, &scale_y);
-
-		g.scale = std::clamp(std::round(scale_x * 4.f) / 4.f, 1.f, 3.f);
-
-		const int width = static_cast<int>(kWidth * g.scale);
-		const int height = static_cast<int>(kHeight * g.scale);
-
-		int area_x = 0;
-		int area_y = 0;
-		int area_w = width;
-		int area_h = height;
-		if (monitor)
-			glfwGetMonitorWorkarea(monitor, &area_x, &area_y, &area_w, &area_h);
-
-		const int x = area_x + (area_w - width) / 2;
-		const int y = area_y + (area_h - height) / 2;
-
-		glfwDefaultWindowHints();
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-		glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);      // shown once a frame is drawn
-		glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
-		glfwWindowHint(GLFW_POSITION_X, x);
-		glfwWindowHint(GLFW_POSITION_Y, y);
-
-		const std::string title = "Lynx - " + g.project_name;
-		g.window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
-
-		glfwDefaultWindowHints();
-
-		if (!g.window)
+		g.window = Rwindow_create(("Lynx - " + g.project_name).c_str(), kWidth, kHeight,
+		                          R_WINDOW_BORDERLESS | R_WINDOW_NO_RESIZE | R_WINDOW_HIDDEN);
+		if (g.window == R_INVALID_ID)
 		{
 			std::cerr << "[SPLASH] Could not create the splash window\n";
 			return;
 		}
 
-		lynx::editor::window_icon::Apply(g.window);
-		glfwSetWindowPos(g.window, x, y);
+		Rwindow_set_close_callback(g.window, RefuseClose, nullptr);
+		Rwindow_set_clear_color(g.window, kBackground.r, kBackground.g, kBackground.b, 1.f);
+		Rwindow_center(g.window);
 
-		// GL + ImGui contexts of the splash.
-		GLFWwindow* previous_gl = glfwGetCurrentContext();
-		ImGuiContext* previous_imgui = ImGui::GetCurrentContext();
-
-		glfwMakeContextCurrent(g.window);
-		glfwSwapInterval(0);   // a step must never wait for the vsync
-
-		IMGUI_CHECKVERSION();
-		g.imgui = ImGui::CreateContext();
-		ImGui::SetCurrentContext(g.imgui);
-
-		ImGuiIO& io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.LogFilename = nullptr;
-		io.ConfigFlags |= ImGuiConfigFlags_NoMouse |
-		                  ImGuiConfigFlags_NoKeyboard;
-
-		// Same font as the editor (the editor loads its own afterwards).
-		fonts::Load(20.f * g.scale);
-		g.font = fonts::Editor();   // never nullptr after Load (ImGui's font at worst)
-
-		ImGui::StyleColorsDark();
-
-		ImGui_ImplGlfw_InitForOpenGL(g.window, false);   // no input on a splash
-		ImGui_ImplOpenGL3_Init("#version 330");
+		g.canvas = Rwidget_create(R_WIDGET_CUSTOM);
+		Rcustom_set_paint_callback(g.canvas, Draw, nullptr);
+		Rwindow_set_content(g.window, g.canvas);
+		Rwindow_set_continuous_redraw(g.window, R_TRUE);   // spinner, shine
 
 		CreateLogo();
 
-		ImGui::SetCurrentContext(previous_imgui);
-		glfwMakeContextCurrent(previous_gl);
-
-		g.opened_at = glfwGetTime();
+		g.opened_at = Now();
 		g.phase = Phase::Loading;
 		g.progress = 0.f;
 		g.shown = 0.f;
@@ -517,7 +332,7 @@ namespace lynx::editor::splash
 
 	void SetStep(const std::string& text, float progress)
 	{
-		if (!g.window)
+		if (g.window == R_INVALID_ID)
 			return;
 
 		std::cout << "[LOADING] " << text << "\n";
@@ -533,47 +348,43 @@ namespace lynx::editor::splash
 
 	void Hide()
 	{
-		if (!g.window || !g.visible)
+		if (g.window == R_INVALID_ID || !g.visible)
 			return;
-
-		glfwHideWindow(g.window);
+		Rwindow_hide(g.window);
 		g.visible = false;
 	}
 
 
 	void Show()
 	{
-		if (!g.window || g.visible)
+		if (g.window == R_INVALID_ID || g.visible)
 			return;
 
-		// First frame drawn before the window appears : never an empty window.
-		glfwSetWindowOpacity(g.window, 0.f);
-		RenderFrame();
-
-		glfwShowWindow(g.window);
+		// Shown transparent, then faded in : never an empty frame.
+		Rwindow_set_opacity(g.window, 0.f);
+		Rwindow_show(g.window);
 		g.visible = true;
+		Pump();
 
-		const double start = glfwGetTime();
-
+		const double start = Now();
 		for (;;)
 		{
-			const double t = (glfwGetTime() - start) / kFadeInSeconds;
+			const double t = (Now() - start) / kFadeInSeconds;
 			if (t >= 1.0)
 				break;
-
-			glfwSetWindowOpacity(g.window, static_cast<float>(t));
+			Rwindow_set_opacity(g.window, static_cast<float>(t));
 			Pump();
 			SleepMs(8);
 		}
 
-		glfwSetWindowOpacity(g.window, 1.f);
+		Rwindow_set_opacity(g.window, 1.f);
 		Pump();
 	}
 
 
 	void Complete()
 	{
-		if (!g.window)
+		if (g.window == R_INVALID_ID)
 			return;
 
 		Show();
@@ -582,17 +393,16 @@ namespace lynx::editor::splash
 
 		// The bar fills up to 100 %, and the splash stays at least
 		// kMinVisibleSeconds on the screen.
-		const double now = glfwGetTime();
+		const double now = Now();
 		const double remaining = kMinVisibleSeconds - (now - g.opened_at);
 		const double duration = std::max(kFillSeconds, remaining);
 		const float from = g.shown;
 
 		for (;;)
 		{
-			const double t = (glfwGetTime() - now) / duration;
+			const double t = (Now() - now) / duration;
 			if (t >= 1.0)
 				break;
-
 			g.shown = from + (1.f - from) * EaseOut(static_cast<float>(t));
 			Pump();
 			SleepMs(15);
@@ -604,7 +414,7 @@ namespace lynx::editor::splash
 
 		// The editor window is shown next : the splash stays above it until
 		// it fades out.
-		glfwSetWindowAttrib(g.window, GLFW_FLOATING, GLFW_TRUE);
+		Rwindow_set_topmost(g.window, R_TRUE);
 
 		g.phase = Phase::Completed;
 		g.editor_frames = 0;
@@ -613,7 +423,7 @@ namespace lynx::editor::splash
 
 	void Tick()
 	{
-		if (!g.window || g.phase == Phase::Loading)
+		if (g.window == R_INVALID_ID || g.phase == Phase::Loading)
 			return;
 
 		if (g.phase == Phase::Completed)
@@ -621,41 +431,30 @@ namespace lynx::editor::splash
 			// The first editor frames (dock layout, fonts...) stay hidden.
 			if (++g.editor_frames < kEditorFramesBeforeFade)
 				return;
-
 			g.phase = Phase::FadingOut;
-			g.fade_start = glfwGetTime();
+			g.fade_start = Now();
 		}
 
-		const double t = (glfwGetTime() - g.fade_start) / kFadeOutSeconds;
-
+		const double t = (Now() - g.fade_start) / kFadeOutSeconds;
 		if (t >= 1.0)
 		{
 			Close();
 			return;
 		}
 
-		glfwSetWindowOpacity(g.window, 1.f - EaseOut(static_cast<float>(t)));
-		RenderFrame();
+		// The editor loop draws the frames (Rdraw_frame) : only the opacity changes here.
+		Rwindow_set_opacity(g.window, 1.f - EaseOut(static_cast<float>(t)));
 	}
 
 
 	void Close()
 	{
-		if (!g.window)
+		if (g.window == R_INVALID_ID)
 			return;
 
-		{
-			ContextScope scope;
-
-			if (g.logo)
-				glDeleteTextures(1, &g.logo);
-
-			ImGui_ImplOpenGL3_Shutdown();
-			ImGui_ImplGlfw_Shutdown();
-			ImGui::DestroyContext(g.imgui);
-		}
-
-		glfwDestroyWindow(g.window);
+		if (g.own_logo)
+			Rtexture_destroy(g.logo);
+		Rwindow_destroy(g.window);
 
 		g = State{};
 	}
@@ -663,6 +462,6 @@ namespace lynx::editor::splash
 
 	bool IsOpen()
 	{
-		return g.window != nullptr;
+		return g.window != R_INVALID_ID;
 	}
 }

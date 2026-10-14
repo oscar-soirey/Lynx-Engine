@@ -11,7 +11,9 @@
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
 
-#include <imgui/imgui.h>
+#include "raven/RavenUi.h"
+#include <Raven.h>
+#include <memory>
 
 #include <stb/stb_image.h>   // the implementation is in EditorMain.cpp
 
@@ -544,31 +546,21 @@ namespace lynx::editor::sprite_voxels
 			return out;
 		}
 
-		ImU32 Col(const std::array<float, 3>& c)
+		// The voxels of the result : a checkerboard for the empty cells.
+		void PaintPreview(const Result& r, RPainter* p, float w, float h)
 		{
-			return ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], 1.f));
-		}
-
-		void DrawPreview(const Result& r, float max_size)
-		{
-			const ImVec2 origin = ImGui::GetCursorScreenPos();
 			if (r.cols <= 0 || r.rows <= 0)
-			{
-				ImGui::Dummy(ImVec2(max_size, max_size));
 				return;
-			}
-			const float cell = std::max(0.25f, std::min(max_size / r.cols, max_size / r.rows));
-			const ImVec2 size(cell * r.cols, cell * r.rows);
-			ImDrawList* dl = ImGui::GetWindowDrawList();
-			// checkerboard : empty cells
+			const float cell = std::max(0.25f, std::min(w / r.cols, h / r.rows));
+			const float sw = cell * r.cols, sh = cell * r.rows;
+			const float ox = (w - sw) * 0.5f, oy = (h - sh) * 0.5f;
 			const float check = std::max(4.f, cell);
-			for (float y = 0; y < size.y; y += check)
-				for (float x = 0; x < size.x; x += check)
+			for (float y = 0; y < sh; y += check)
+				for (float x = 0; x < sw; x += check)
 				{
 					const bool odd = (static_cast<int>(x / check) + static_cast<int>(y / check)) & 1;
-					dl->AddRectFilled(ImVec2(origin.x + x, origin.y + y),
-					                  ImVec2(origin.x + std::min(size.x, x + check), origin.y + std::min(size.y, y + check)),
-					                  odd ? IM_COL32(200, 200, 200, 255) : IM_COL32(235, 235, 235, 255));
+					const float c = odd ? 200.f / 255.f : 235.f / 255.f;
+					Rdraw_rect(p, ox + x, oy + y, std::min(check, sw - x), std::min(check, sh - y), 0.f, c, c, c, 1.f);
 				}
 			for (int row = 0; row < r.rows; ++row)
 				for (int col = 0; col < r.cols; ++col)
@@ -576,40 +568,17 @@ namespace lynx::editor::sprite_voxels
 					const int i = r.cells[static_cast<size_t>(row) * r.cols + col];
 					if (i < 0)
 						continue;
-					const ImVec2 a(origin.x + col * cell, origin.y + row * cell);
-					dl->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell), Col(r.palette[static_cast<size_t>(i)].rgb));
+					const auto& rgb = r.palette[static_cast<size_t>(i)].rgb;
+					Rdraw_rect(p, ox + col * cell, oy + row * cell, cell, cell, 0.f, rgb[0], rgb[1], rgb[2], 1.f);
 				}
 			if (cell >= 6.f)   // the voxel grid, when it is readable
 			{
 				for (int col = 0; col <= r.cols; ++col)
-					dl->AddLine(ImVec2(origin.x + col * cell, origin.y), ImVec2(origin.x + col * cell, origin.y + size.y), IM_COL32(0, 0, 0, 30));
+					Rdraw_line(p, ox + col * cell, oy, ox + col * cell, oy + sh, 1.f, 0.f, 0.f, 0.f, 0.12f);
 				for (int row = 0; row <= r.rows; ++row)
-					dl->AddLine(ImVec2(origin.x, origin.y + row * cell), ImVec2(origin.x + size.x, origin.y + row * cell), IM_COL32(0, 0, 0, 30));
+					Rdraw_line(p, ox, oy + row * cell, ox + sw, oy + row * cell, 1.f, 0.f, 0.f, 0.f, 0.12f);
 			}
-			dl->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), ImGui::GetColorU32(ImGuiCol_Border));
-			ImGui::Dummy(ImVec2(std::max(size.x, 1.f), std::max(size.y, 1.f)));
-		}
-
-		void DrawSourceImage(float max_size)
-		{
-			const HRL_id tex = lynx::RessourceTex(g.source.texture.c_str());
-			const unsigned int gl = tex != HRL_INVALID_ID ? HRL_GL_GetTextureGL_ID(tex) : 0u;
-			const float pw = std::fabs(g.source.u1 - g.source.u0) * g.image.width;
-			const float ph = std::fabs(g.source.v1 - g.source.v0) * g.image.height;
-			const float scale = std::min(max_size / std::max(1.f, pw), max_size / std::max(1.f, ph));
-			const ImVec2 size(std::max(1.f, pw * scale), std::max(1.f, ph * scale));
-			if (gl == 0)
-			{
-				ImGui::Dummy(size);
-				return;
-			}
-			// HRL textures are bottom-up : v flipped. The sprite flips too.
-			float u0 = g.source.u0, u1 = g.source.u1, v0 = 1.f - g.source.v0, v1 = 1.f - g.source.v1;
-			if (g.source.flip_x)
-				std::swap(u0, u1);
-			if (g.source.flip_y)
-				std::swap(v0, v1);
-			ImGui::Image(static_cast<ImTextureID>(static_cast<intptr_t>(gl)), size, ImVec2(u0, v0), ImVec2(u1, v1));
+			Rdraw_rect_outline(p, ox, oy, sw, sh, 0.f, 1.f, 0.5f, 0.5f, 0.5f, 1.f);
 		}
 
 		void Apply(const Host& host)
@@ -786,197 +755,179 @@ namespace lynx::editor::sprite_voxels
 		g.request_open = true;
 	}
 
-	void MenuItem(lynx::Actor* actor)
+	void MenuItem(lynx::Actor*)
 	{
-		std::string reason;
-		const bool ok = CanConvert(actor, &reason);
-		if (ImGui::MenuItem("Convert to voxels...", nullptr, false, ok))
-			Open(actor);
-		if (!ok && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("%s", reason.c_str());
+		// The menus of the Raven editor call CanConvert / Open (raven/EditorUi.inl).
+	}
+
+	namespace
+	{
+		Host g_host;
+		Rid g_box = R_INVALID_ID;
+		Rid g_image_texture = R_INVALID_ID;
+
+		struct Fields
+		{
+			Rid size, width_row, width, sampling, alpha, alpha_value, palette, tolerance_row, tolerance, tolerance_value;
+			Rid new_types, max_new, max_new_value, solid, only_empty, after, sprite, voxels, voxels_label, summary, error;
+			Rid swatches, convert;
+		};
+		Fields f;
+
+		void Recompute()
+		{
+			const Options& o = g.options;
+			ui::SetVisible(f.width_row, o.size_mode == SizeMode::CustomWidth);
+			ui::SetVisible(f.tolerance_row, o.palette == PaletteMode::ExistingAndNew);
+			ui::SetVisible(f.new_types, o.palette != PaletteMode::ExistingOnly);
+			ui::SetText(f.alpha_value, std::to_string(static_cast<int>(std::lround(o.alpha_threshold * 100))) + " %");
+			ui::SetText(f.tolerance_value, std::to_string(static_cast<int>(std::lround(o.tolerance))));
+			ui::SetText(f.max_new_value, std::to_string(o.max_new_types));
+
+			g.result = Convert(g.image, g.source, ExistingPalette(), o);
+			const Result& r = g.result;
+			char text[200];
+			std::snprintf(text, sizeof(text), "Voxels  (%d x %d)", r.cols, r.rows);
+			ui::SetText(f.voxels_label, text);
+			Rwidget_invalidate(f.voxels);
+			ui::SetText(f.error, r.error);
+			ui::SetVisible(f.error, !r.error.empty());
+			std::snprintf(text, sizeof(text), "%d voxels at (%d, %d)   %d existing type%s, %d new   color error %.1f",
+			              r.voxel_count, r.origin_x, r.origin_y, r.existing_used, r.existing_used == 1 ? "" : "s",
+			              r.new_types, r.mean_error);
+			ui::SetText(f.summary, r.error.empty() ? text : "");
+			ui::SetEnabled(f.convert, r.error.empty() && r.voxel_count > 0);
+
+			// The types used (new ones marked).
+			Rwidget_clear_children(f.swatches);
+			for (const PaletteType& pt : r.palette)
+			{
+				Rid sw = Rwidget_create(R_WIDGET_CUSTOM);
+				Rwidget_set_size(sw, 20.f, 20.f);
+				const voxels::VoxelType* t = pt.type > 0 ? voxels::GetType(static_cast<uint8_t>(pt.type)) : nullptr;
+				Rwidget_set_tooltip(sw, t ? t->name.c_str() : "new type (dot)");
+				const auto rgb = pt.rgb;
+				const bool is_new = pt.type == 0;
+				ui::OnPaint(sw, [rgb, is_new](RPainter* p, float w, float h)
+				{
+					Rdraw_rect(p, 0.f, 0.f, w, h, 3.f, rgb[0], rgb[1], rgb[2], 1.f);
+					Rdraw_rect_outline(p, 0.f, 0.f, w, h, 3.f, 1.f, 0.f, 0.f, 0.f, 0.4f);
+					if (is_new)
+						Rdraw_circle(p, w - 5.f, 5.f, 3.f, 1.f, 1.f, 1.f, 1.f);
+				});
+				Rwidget_add_child(f.swatches, sw);
+			}
+		}
+
+		void OnDialogClosed(Rid, int, void*)
+		{
+			g_box = R_INVALID_ID;
+			if (g_image_texture != R_INVALID_ID)
+			{
+				Rtexture_destroy(g_image_texture);
+				g_image_texture = R_INVALID_ID;
+			}
+		}
+
 	}
 
 	void Draw(const Host& host)
 	{
-		const char* title = "Convert to voxels";
-		if (g.request_open)
-		{
-			ImGui::OpenPopup(title);
-			g.request_open = false;
-		}
-
-		ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 44.f, 0.f), ImGuiCond_Appearing);
-		if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		g_host = host;
+		if (!g.request_open)
 			return;
+		g.request_open = false;
 
-		// The actor may have been deleted meanwhile (undo...).
-		if (!Resolve(host, g.actor_id, g.actor_ptr))
-			g.load_error = "The actor does not exist any more";
+		const Rid window = input::Window();
+		if (window == R_INVALID_ID || g_box != R_INVALID_ID)
+			return;
 
 		if (!g.load_error.empty())
 		{
-			ImGui::TextWrapped("%s", g.load_error.c_str());
-			if (ImGui::Button("Close"))
-				ImGui::CloseCurrentPopup();
-			ImGui::EndPopup();
+			ui::Message(window, "Convert to voxels", g.load_error);
 			return;
 		}
 
+		g_box = ui::Load("dialogs/sprite_voxels.xml");
+		if (g_box == R_INVALID_ID)
+			return;
+		auto find = [](const char* n) { return ui::Find(g_box, n); };
+		f.size = find("sv.size");
+		f.width_row = find("sv.width.row");
+		f.width = find("sv.width");
+		f.sampling = find("sv.sampling");
+		f.alpha = find("sv.alpha");
+		f.alpha_value = find("sv.alpha.value");
+		f.palette = find("sv.palette");
+		f.tolerance_row = find("sv.tolerance.row");
+		f.tolerance = find("sv.tolerance");
+		f.tolerance_value = find("sv.tolerance.value");
+		f.new_types = find("sv.new_types");
+		f.max_new = find("sv.max_new");
+		f.max_new_value = find("sv.max_new.value");
+		f.solid = find("sv.solid");
+		f.only_empty = find("sv.only_empty");
+		f.after = find("sv.after");
+		f.sprite = find("sv.sprite");
+		f.voxels = find("sv.voxels");
+		f.voxels_label = find("sv.voxels.label");
+		f.summary = find("sv.summary");
+		f.error = find("sv.error");
+		f.swatches = find("sv.swatches");
+		f.convert = find("sv.convert");
+
+		char title[256];
+		std::snprintf(title, sizeof(title), "%s   (%s, %d x %d px)", g.source.name.c_str(), g.source.texture.c_str(),
+		              g.image.width, g.image.height);
+		ui::SetText(find("sv.title"), title);
+
+		// The sprite : its part of the image, as it is drawn (flips included).
+		if (!g.image.rgba.empty())
+		{
+			g_image_texture = Rtexture_create_from_pixels(g.image.rgba.data(), g.image.width, g.image.height);
+			Rtexture_set_filter(g_image_texture, R_FILTER_NEAREST);
+			float u0 = g.source.u0, u1 = g.source.u1, v0 = g.source.v0, v1 = g.source.v1;
+			if (g.source.flip_x)
+				std::swap(u0, u1);
+			if (g.source.flip_y)
+				std::swap(v0, v1);
+			Rimage_set_texture(f.sprite, g_image_texture);
+			Rimage_set_region(f.sprite, u0, v0, u1, v1);
+		}
+		ui::OnPaint(f.voxels, [](RPainter* p, float w, float h) { PaintPreview(g.result, p, w, h); });
+
 		Options& o = g.options;
-		bool changed = false;
-		const float label_w = ImGui::GetFontSize() * 9.f;
-		auto label = [&](const char* text)
+		Rcombo_box_set_selected(f.size, static_cast<int>(o.size_mode));
+		Rspin_box_set_value(f.width, o.custom_width);
+		Rcombo_box_set_selected(f.sampling, static_cast<int>(o.sampling));
+		Rslider_set_value(f.alpha, o.alpha_threshold);
+		Rcombo_box_set_selected(f.palette, static_cast<int>(o.palette));
+		Rslider_set_value(f.tolerance, o.tolerance);
+		Rslider_set_value(f.max_new, static_cast<float>(o.max_new_types));
+		Rcheckbox_set_checked(f.solid, o.new_types_solid);
+		Rcheckbox_set_checked(f.only_empty, o.only_empty_cells);
+		Rcombo_box_set_selected(f.after, static_cast<int>(o.after));
+
+		ui::OnSelect(f.size, [](int i) { if (i >= 0) { g.options.size_mode = static_cast<SizeMode>(i); Recompute(); } });
+		ui::OnValue(f.width, [](double v) { g.options.custom_width = std::clamp(static_cast<int>(v), 1, 256); Recompute(); });
+		ui::OnSelect(f.sampling, [](int i) { if (i >= 0) { g.options.sampling = static_cast<Sampling>(i); Recompute(); } });
+		ui::OnValue(f.alpha, [](double v) { g.options.alpha_threshold = static_cast<float>(v); Recompute(); });
+		ui::OnSelect(f.palette, [](int i) { if (i >= 0) { g.options.palette = static_cast<PaletteMode>(i); Recompute(); } });
+		ui::OnValue(f.tolerance, [](double v) { g.options.tolerance = static_cast<float>(v); Recompute(); });
+		ui::OnValue(f.max_new, [](double v) { g.options.max_new_types = static_cast<int>(std::lround(v)); Recompute(); });
+		ui::OnToggle(f.solid, [](bool on) { g.options.new_types_solid = on; });
+		ui::OnToggle(f.only_empty, [](bool on) { g.options.only_empty_cells = on; });
+		ui::OnSelect(f.after, [](int i) { if (i >= 0) g.options.after = static_cast<After>(i); });
+		ui::OnClick(f.convert, []()
 		{
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(text);
-			ImGui::SameLine(label_w);
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.f);
-		};
+			// The actor may have been deleted meanwhile (undo...).
+			if (Resolve(g_host, g.actor_id, g.actor_ptr))
+				Apply(g_host);
+			Rdialog_close(g_box, 1);
+		});
+		ui::OnClick(find("sv.cancel"), []() { Rdialog_close(g_box, 0); });
 
-		ImGui::Text("%s   (%s, %d x %d px)", g.source.name.c_str(), g.source.texture.c_str(), g.image.width, g.image.height);
-		ImGui::Separator();
-
-		// Two columns : the options, the previews.
-		const float preview = ImGui::GetFontSize() * 13.f;
-		const bool table = ImGui::BeginTable("##layout", 2, ImGuiTableFlags_SizingFixedFit);
-		if (table)
-		{
-			ImGui::TableSetupColumn("options", ImGuiTableColumnFlags_WidthFixed, label_w + ImGui::GetFontSize() * 14.5f);
-			ImGui::TableSetupColumn("previews", ImGuiTableColumnFlags_WidthFixed, preview + ImGui::GetFontSize());
-			ImGui::TableNextRow();
-			ImGui::TableSetColumnIndex(0);
-		}
-		{
-			// Size
-			const char* sizes[] = { "Same size as the sprite", "1 voxel = 1 pixel", "Custom width" };
-			int size_mode = static_cast<int>(o.size_mode);
-			label("Size");
-			if (ImGui::Combo("##size", &size_mode, sizes, 3))
-			{
-				o.size_mode = static_cast<SizeMode>(size_mode);
-				changed = true;
-			}
-			if (o.size_mode == SizeMode::CustomWidth)
-			{
-				label("Width (voxels)");
-				changed |= ImGui::SliderInt("##width", &o.custom_width, 1, 256);
-			}
-
-			const char* samplings[] = { "Nearest pixel", "Dominant color" };
-			int sampling = static_cast<int>(o.sampling);
-			label("Sampling");
-			if (ImGui::Combo("##sampling", &sampling, samplings, 2))
-			{
-				o.sampling = static_cast<Sampling>(sampling);
-				changed = true;
-			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Nearest : the pixel at the center of each voxel (pixel art).\n"
-				                  "Dominant : the most frequent color of the pixels of each voxel\n"
-				                  "(better when the image is reduced a lot).");
-
-			label("Alpha threshold");
-			changed |= ImGui::SliderFloat("##alpha", &o.alpha_threshold, 0.01f, 1.f, "%.2f");
-
-			ImGui::SeparatorText("Colors");
-			const char* palettes[] = { "Palette + new types", "Palette only", "New types only" };
-			int palette = static_cast<int>(o.palette);
-			label("Voxel types");
-			if (ImGui::Combo("##palette", &palette, palettes, 3))
-			{
-				o.palette = static_cast<PaletteMode>(palette);
-				changed = true;
-			}
-			if (o.palette == PaletteMode::ExistingAndNew)
-			{
-				label("Tolerance");
-				changed |= ImGui::SliderFloat("##tolerance", &o.tolerance, 1.f, 50.f, "%.0f");
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("A color takes an existing type when it is this close (CIELAB distance).\n"
-					                  "Lower : more new types, closer to the image.");
-			}
-			if (o.palette != PaletteMode::ExistingOnly)
-			{
-				label("Max new types");
-				changed |= ImGui::SliderInt("##maxnew", &o.max_new_types, 1, 64);
-				ImGui::Checkbox("New types are solid", &o.new_types_solid);
-			}
-
-			ImGui::SeparatorText("Placement");
-			ImGui::Checkbox("Only fill empty voxels", &o.only_empty_cells);
-			const char* afters[] = { "Keep the sprite", "Hide the sprite", "Delete the sprite" };
-			int after = static_cast<int>(o.after);
-			label("Then");
-			if (ImGui::Combo("##after", &after, afters, 3))
-				o.after = static_cast<After>(after);
-		}
-
-		if (changed)
-			g.dirty = true;
-		if (g.dirty)
-		{
-			g.result = Convert(g.image, g.source, ExistingPalette(), o);
-			g.dirty = false;
-		}
-		const Result& r = g.result;
-
-		// Previews : the sprite, the voxels
-		if (table)
-			ImGui::TableSetColumnIndex(1);
-		{
-			ImGui::TextDisabled("Sprite");
-			DrawSourceImage(preview * 0.7f);
-			ImGui::TextDisabled("Voxels  (%d x %d)", r.cols, r.rows);
-			DrawPreview(r, preview);
-		}
-		if (table)
-			ImGui::EndTable();
-
-		ImGui::Separator();
-		if (!r.error.empty())
-		{
-			ImGui::TextColored(ImVec4(0.80f, 0.38f, 0.f, 1.f), "%s", r.error.c_str());
-		}
-		else
-		{
-			ImGui::Text("%d voxels at (%d, %d)   %d existing type%s, %d new   color error %.1f",
-			            r.voxel_count, r.origin_x, r.origin_y, r.existing_used, r.existing_used == 1 ? "" : "s",
-			            r.new_types, r.mean_error);
-			// The types used (new ones marked)
-			const float sw = ImGui::GetFrameHeight();
-			int shown = 0;
-			for (const PaletteType& p : r.palette)
-			{
-				if (shown++ > 0)
-				{
-					if (ImGui::GetItemRectMax().x + sw * 1.2f < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
-						ImGui::SameLine(0.f, 3.f);
-				}
-				ImGui::ColorButton("##t", ImVec4(p.rgb[0], p.rgb[1], p.rgb[2], 1.f), ImGuiColorEditFlags_NoTooltip, ImVec2(sw, sw));
-				if (p.type == 0)
-					ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(ImGui::GetItemRectMax().x - 4.f, ImGui::GetItemRectMin().y + 4.f), 3.f,
-					                                             ImGui::GetColorU32(ImGuiCol_Text));
-				if (ImGui::IsItemHovered())
-				{
-					const voxels::VoxelType* t = p.type > 0 ? voxels::GetType(static_cast<uint8_t>(p.type)) : nullptr;
-					ImGui::SetTooltip("%s", t ? t->name.c_str() : "new type (dot)");
-				}
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::BeginDisabled(!r.error.empty() || r.voxel_count == 0);
-		if (ImGui::Button("Convert"))
-		{
-			Apply(host);
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndDisabled();
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
-			ImGui::CloseCurrentPopup();
-		ImGui::SameLine();
-		ImGui::TextDisabled("Ctrl+Z undoes it");
-		ImGui::EndPopup();
+		Recompute();
+		Rdialog_open(window, g_box, OnDialogClosed, nullptr);
 	}
 }

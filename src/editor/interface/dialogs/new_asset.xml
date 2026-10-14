@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- "+ New" of the Content Browser : the kinds of assets, by section (raven/PanelContentBrowser.inl). -->
+<VBox Name="new" Spacing="6" Width="460" Height="560">
+	<Label Name="new.title" Text="Add to this folder" Class="dialog-title"/>
+	<TextInput Name="new.search" Placeholder="Search a type of asset..."/>
+	<ScrollBox Slot.Fill="1">
+		<VBox Name="new.list" Spacing="2"/>
+	</ScrollBox>
+	<HBox Spacing="6">
+		<Button Name="new.paste" Text="Paste here" Tooltip="Paste the files copied or cut in the Content Browser"/>
+		<Spacer Slot.Fill="1"/>
+		<Button Name="new.cancel" Text="Cancel"/>
+	</HBox>
+</VBox>

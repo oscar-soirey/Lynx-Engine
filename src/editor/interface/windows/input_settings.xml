@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Input Settings : the project's input.json (InputSettingsEditor.cpp). -->
+<Window Title="Lynx - Input Settings" Width="640" Height="680" MinWidth="420" MinHeight="300" Hidden="true">
+	<VBox Spacing="6" Slot.Padding="10">
+		<HBox Spacing="8">
+			<Label Name="is.file" Text="input.json" Class="dim" Slot.VAlign="Center"/>
+			<Button Name="is.reload" Text="Reload" Tooltip="Read input.json again (after editing it by hand)."/>
+			<Label Name="is.status" Text="" Class="success" Slot.VAlign="Center"/>
+		</HBox>
+		<Label Text="Changes are saved and applied immediately." Class="dim"/>
+		<Label Name="is.error" Text="" Class="error" Wrap="true" Visibility="Collapsed"/>
+		<Label Name="is.capture" Text="" Class="warning" Wrap="true" Visibility="Collapsed"/>
+		<ScrollBox Slot.Fill="1">
+			<VBox Spacing="6" Slot.Padding="0,0,10,0">
+				<Section Text="Action Mappings"/>
+				<Label Text="Buttons : pressed / held / released (lynx::InputAction)." Class="dim"/>
+				<VBox Name="is.actions" Spacing="4"/>
+				<Button Name="is.add_action" Text="+ Add action" Slot.HAlign="Left"/>
+				<Section Text="Axis Mappings"/>
+				<Label Text="Values between -1 and 1 (lynx::InputAxis1D) : sum of input x scale." Class="dim"/>
+				<VBox Name="is.axes" Spacing="4"/>
+				<Button Name="is.add_axis" Text="+ Add axis" Slot.HAlign="Left"/>
+			</VBox>
+		</ScrollBox>
+	</VBox>
+</Window>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A window of its own (not docked) : opened by the editor, closing it hides it. -->
+<Window Title="Lynx - Camera Shake" Width="460" Height="700" MinWidth="320" MinHeight="240" Hidden="true">
+<!-- Camera shake (lynx::CameraShake) : live settings, curves, Test. Saved in assets/camera_shake.json. -->
+<ScrollBox Name="camera_shake">
+	<VBox Spacing="6" Slot.Padding="8">
+		<HBox Spacing="8">
+			<Button Name="cs.test" Text="Test" Style="Primary" Slot.Fill="1" Height="34"/>
+			<VBox Spacing="2">
+				<Checkbox Name="cs.loop" Text="Loop" Tooltip="Triggers it again and again (0.4 s pause) : tweak the sliders while it plays"/>
+				<Button Name="cs.stop" Text="Stop"/>
+			</VBox>
+		</HBox>
+		<Section Text="Settings"/>
+		<Checkbox Name="cs.enabled" Text="Enabled"/>
+		<VBox Name="cs.settings" Spacing="4">
+			<PropertyRow Label="Duration">
+				<Slider Name="cs.duration" Min="0.01" Max="3" Step="0.01" Slot.Fill="1"/>
+				<Label Name="cs.duration.value" Width="70" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Label="Position">
+				<Slider Name="cs.position" Min="0" Max="20" Step="0.01" Slot.Fill="1"/>
+				<Label Name="cs.position.value" Width="70" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Label="Rotation">
+				<Slider Name="cs.rotation" Min="0" Max="20" Step="0.01" Slot.Fill="1"/>
+				<Label Name="cs.rotation.value" Width="70" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Label="Frequency">
+				<Slider Name="cs.frequency" Min="1" Max="80" Step="0.1" Slot.Fill="1"/>
+				<Label Name="cs.frequency.value" Width="70" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Label="Falloff" Tip="How fast it calms down : 1 = linear, higher = a strong hit that stops quickly">
+				<Slider Name="cs.falloff" Min="0.1" Max="6" Step="0.01" Slot.Fill="1"/>
+				<Label Name="cs.falloff.value" Width="70" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<HBox Spacing="10">
+				<Checkbox Name="cs.x" Text="Horizontal (X)"/>
+				<Checkbox Name="cs.y" Text="Vertical (Y)"/>
+				<Checkbox Name="cs.roll" Text="Roll"/>
+			</HBox>
+			<HBox Spacing="4">
+				<Label Text="Presets" Class="dim" Slot.VAlign="Center"/>
+				<Button Name="cs.hit" Text="Hit"/>
+				<Button Name="cs.explosion" Text="Explosion"/>
+				<Button Name="cs.earthquake" Text="Earthquake"/>
+				<Button Name="cs.rumble" Text="Rumble"/>
+			</HBox>
+		</VBox>
+		<Section Text="Preview"/>
+		<Custom Name="cs.curves" Height="150"/>
+		<HBox Spacing="6">
+			<Button Name="cs.save" Text="Save"/>
+			<Button Name="cs.revert" Text="Revert"/>
+			<Label Name="cs.file" Text="assets/camera_shake.json" Class="dim" Slot.VAlign="Center"/>
+		</HBox>
+	</VBox>
+</ScrollBox>
+</Window>

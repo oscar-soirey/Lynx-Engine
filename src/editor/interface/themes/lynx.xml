@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - "Lynx" theme : warm dark (brown greys, orange accents),
+  slightly rounded, the default font of Raven.
+-->
+<Theme Name="Lynx Warm" Base="Dark" Dark="true" Accent="#F0A028" CornerRadius="4">
+	<Colors
+		Window="#1C1A18" Panel="#211F1C" Border="#4D453B"
+		Text="#EDE6D9" TextDisabled="#948A7D" TextPlaceholder="#7A7166"
+		Accent="#F0A028" AccentHovered="#F5B24A" AccentPressed="#8C6126" AccentText="#1C1A18"
+		Control="#423A30" ControlHovered="#614F38" ControlPressed="#8C6126" ControlBorder="#4D453B"
+		Input="#1C1A17" Focus="#F0A028" Selection="#52422E" RowHovered="#3A322A"
+		Separator="#4D453B" Header="#2E2A25" HeaderHovered="#3A332B" TabActive="#33291C"
+		Popup="#262420" PopupBorder="#4D453B" Tooltip="#262420" TooltipText="#EDE6D9" Switch="#F0A028"/>
+
+	<Style Class="toolbar" Panel="#1C1A18"/>
+	<Style Class="toolgroup" Panel="#26231F" Border="#3A342C"/>
+	<Style Widget="Button" Class="tool" Control="#26231F" ControlHovered="#3D3529" ControlPressed="#52422E"/>
+	<Style Widget="Button" Class="active" Control="#52422E" ControlHovered="#614F38"/>
+	<Style Widget="Button" Class="play" Text="#78D184"/>
+	<Style Widget="Button" Class="stop" Text="#F0726B"/>
+	<Style Widget="Button" Class="simulate" Text="#7AB0F0"/>
+	<Style Class="statusbar" Panel="#1C1A18"/>
+	<Style Widget="Label" Class="dim" Text="#948A7D"/>
+	<Style Widget="Label" Class="section" Text="#F0A028"/>
+	<Style Widget="Label" Class="dialog-title" FontSize="18"/>
+	<Style Widget="Label" Class="error" Text="#F0726B"/>
+	<Style Widget="Label" Class="warning" Text="#F0CC59"/>
+	<Style Widget="Label" Class="success" Text="#78D184"/>
+	<Style Widget="Label" Class="axis-x" Text="#F0726B"/>
+	<Style Widget="Label" Class="axis-y" Text="#78D184"/>
+	<Style Widget="Label" Class="axis-z" Text="#7AB0F0"/>
+	<Style Widget="Label" Class="axis-w" Text="#A89F92"/>
+	<Style Widget="Label" Class="dirty" Text="#F0A028"/>
+	<Style Widget="Button" Class="mode-on" Control="#52422E" ControlBorder="#F0A028" BorderWidth="2"/>
+	<Style Class="viewport-bar" Panel="#1C1A18DD"/>
+</Theme>

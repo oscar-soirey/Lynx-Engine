@@ -693,16 +693,23 @@ static void CmdCaptureScreenshot(PendingScreenshot& request)
     }
     else
     {
-        GLFWwindow* window = glfwGetCurrentContext();
-
-        if (window)
-            glfwGetFramebufferSize(window, &width, &height);
-
-        if (width > 0 && height > 0)
+        // The editor window (Raven) : its last frame, top row first.
+        if (uint8_t* rgba = Rwindow_capture(lynx::editor::input::Window(), &width, &height))
         {
-            pixels.resize(static_cast<size_t>(width) * height * 3);
-            glReadBuffer(GL_BACK);
-            glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+            if (width > 0 && height > 0)
+            {
+                pixels.resize(static_cast<size_t>(width) * height * 3);
+                for (size_t i = 0, n = static_cast<size_t>(width) * height; i < n; ++i)
+                {
+                    // Bottom row first, as glReadPixels : turned upright below.
+                    const size_t y = i / static_cast<size_t>(width), x = i % static_cast<size_t>(width);
+                    const size_t from = ((static_cast<size_t>(height) - 1 - y) * width + x) * 4;
+                    pixels[i * 3 + 0] = rgba[from + 0];
+                    pixels[i * 3 + 1] = rgba[from + 1];
+                    pixels[i * 3 + 2] = rgba[from + 2];
+                }
+            }
+            Rpixels_free(rgba);
         }
     }
 
@@ -766,7 +773,7 @@ static void CmdCaptureScreenshot(PendingScreenshot& request)
     request.respond(true, std::move(result));
 }
 
-// main() : after the frame is drawn, before glfwSwapBuffers.
+// main() : after the frame is drawn (Rdraw_frame).
 static void ProcessFrameEndCommands()
 {
     if (!pendingScreenshots.empty())

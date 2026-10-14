@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ctrl+P : one field to run anything (CommandPalette.cpp). -->
+<VBox Name="palette" Spacing="6" Width="640">
+	<TextInput Name="palette.query" Placeholder="Search : commands, windows, @actors, #files"/>
+	<Label Name="palette.count" Text="" Class="dim"/>
+	<TreeView Name="palette.results" Height="340"/>
+</VBox>

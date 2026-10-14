@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The scene (HRL renders it off-screen ; raven/GlBridge copies it into Raven). -->
+<Overlay Name="viewport.panel" Slot.Title="Viewport" Slot.Closable="false">
+	<Viewport Name="viewport" Realtime="true" Stretch="Fill" Focusable="true"/>
+
+	<!-- Camera mode, at the top right (hidden while playing) -->
+	<Border Name="viewport.modes" Class="viewport-bar" Padding="3" Slot.HAlign="Right" Slot.VAlign="Top" Slot.Padding="0,8,8,0">
+		<HBox Spacing="2">
+			<Button Name="viewport.2d" Class="tool" Text="2D" Focusable="false" Tooltip="2D camera : WASD to move, the wheel for the height"/>
+			<Button Name="viewport.3d" Class="tool" Text="3D" Focusable="false" Tooltip="3D camera : hold the right mouse button to look around, WASD to fly, Q / E down / up, Shift faster, wheel forward"/>
+		</HBox>
+	</Border>
+
+	<!-- What is happening : painting, placing an actor... -->
+	<Border Name="viewport.badge" Class="viewport-bar" Padding="8,3" Slot.HAlign="Left" Slot.VAlign="Top" Slot.Padding="8,8,0,0" HitTestable="false">
+		<Label Name="viewport.badge.text" Text=""/>
+	</Border>
+</Overlay>

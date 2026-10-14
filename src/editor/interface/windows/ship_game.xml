@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ship Game (ShipGame.cpp) : the game without the editor, in a folder. -->
+<Window Title="Lynx - Ship Game" Width="600" Height="560" MinWidth="420" MinHeight="360" Hidden="true">
+	<VBox Spacing="6" Slot.Padding="12">
+		<VBox Name="sg.form" Spacing="6">
+			<Label Text="Makes a game that runs without the editor : one executable (the assets packed inside) and its DLLs, in the folder below." Wrap="true" Class="dim"/>
+			<PropertyRow Label="Game name">
+				<TextInput Name="sg.name" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Label="Folder">
+				<TextInput Name="sg.folder" Slot.Fill="1"/>
+				<Button Name="sg.folder.browse" Text="Browse..."/>
+			</PropertyRow>
+			<PropertyRow Label="Icon" Tip=".ico (used as it is) or an image : png, jpg, bmp, tga (converted to 16 - 256 px, centered on a square).">
+				<TextInput Name="sg.icon" Placeholder="(icon of LynxRuntime.exe)" Slot.Fill="1"/>
+				<Button Name="sg.icon.browse" Text="Browse..."/>
+				<Button Name="sg.icon.clear" Text="Clear"/>
+			</PropertyRow>
+			<Label Name="sg.icon.error" Text="Icon file not found" Class="error" Visibility="Collapsed"/>
+			<PropertyRow Label="Engine">
+				<Label Name="sg.engine.none" Text="editor build (no build-release : run build-release.bat for an optimized game)" Class="dim" Wrap="true" Slot.Fill="1"/>
+				<HBox Name="sg.engine.choice" Spacing="12">
+					<Checkbox Name="sg.release" Text="Release" Style="Radio"/>
+					<Checkbox Name="sg.editor_build" Text="Editor build" Style="Radio"/>
+				</HBox>
+			</PropertyRow>
+			<Label Name="sg.outdated" Text="The Release engine is older than the editor's : the editor build will be shipped. Run build-release.bat again for an optimized game." Class="warning" Wrap="true" Visibility="Collapsed"/>
+			<HBox Spacing="14">
+				<Checkbox Name="sg.compile" Text="Compile the game first"/>
+				<Checkbox Name="sg.console" Text="No console window"/>
+			</HBox>
+		</VBox>
+		<Button Name="sg.ship" Text="Ship" Style="Primary"/>
+		<VBox Name="sg.state" Spacing="6" Slot.Fill="1" Visibility="Collapsed">
+			<Separator/>
+			<ProgressBar Name="sg.progress"/>
+			<Label Name="sg.status" Text=""/>
+			<TreeView Name="sg.log" Slot.Fill="1"/>
+			<Button Name="sg.open_folder" Text="Open the folder" Slot.HAlign="Left" Visibility="Collapsed"/>
+		</VBox>
+	</VBox>
+</Window>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - pieces of interface shared by the windows (Raven <Widget>
+  declarations). Registered once at startup (raven/RavenUi.cpp), before any
+  window is built.
+
+  <Icon Glyph="Play" Size="16"/>      an icon of the editor atlas (resources/editor_icons.png)
+  <FileIcon Kind="Folder" Size="32"/> an icon of the Content Browser atlas
+  are tags made by the editor (RavenUi.cpp), usable everywhere.
+-->
+<Widgets>
+
+	<!-- A button of the toolbar : an icon, optionally a text. -->
+	<Widget Name="ToolButton" Glyph="File" Text="" Tip="">
+		<Button Class="tool" Tooltip="{Tip}" Focusable="false">
+			<HBox Spacing="6">
+				<Icon Name="icon" Glyph="{Glyph}" Size="16" Slot.VAlign="Center"/>
+				<Label Name="label" Text="{Text}" Slot.VAlign="Center" If="{!empty(Text)}"/>
+			</HBox>
+		</Button>
+	</Widget>
+
+	<!-- The small "v" glued to a button : opens its menu. -->
+	<Widget Name="ToolArrow" Tip="">
+		<Button Class="tool" Tooltip="{Tip}" Focusable="false" Width="18" Metric.PaddingX="2">
+			<Label Text="v" TextAlign="Center" Slot.VAlign="Center"/>
+		</Button>
+	</Widget>
+
+	<!-- Buttons that belong together, on one pill. -->
+	<Widget Name="ToolGroup">
+		<Border Class="toolgroup" BorderWidth="1" Padding="3,2">
+			<HBox Spacing="2">
+				<Children/>
+			</HBox>
+		</Border>
+	</Widget>
+
+	<!-- Title of a part of a panel : "BRUSH", "VOXEL TYPE"... -->
+	<Widget Name="Section" Text="">
+		<VBox Spacing="2" Slot.Padding="0,8,0,2">
+			<Label Text="{upper(Text)}" Class="section"/>
+			<Separator/>
+		</VBox>
+	</Widget>
+
+	<!-- A line of a property list : the name on the left, the editor on the right. -->
+	<Widget Name="PropertyRow" Label="" Tip="">
+		<HBox Spacing="6" Slot.Padding="0,1">
+			<Label Name="label" Text="{Label}" Tooltip="{Tip}" Width="128" Slot.VAlign="Center"/>
+			<HBox Spacing="4" Slot.Fill="1">
+				<Children/>
+			</HBox>
+		</HBox>
+	</Widget>
+
+	<!-- One component of a vector : a colored letter and a number to drag. -->
+	<Widget Name="AxisField" Axis="X" Style="axis-x" Step="0.05">
+		<HBox Spacing="2" Slot.Fill="1">
+			<Label Text="{Axis}" Class="{Style}" Slot.VAlign="Center"/>
+			<SpinBox Name="{lower(Axis)}" Min="-1000000000" Max="1000000000" Step="{Step}" Decimals="3" Slot.Fill="1"/>
+		</HBox>
+	</Widget>
+
+	<!-- A label and a value, side by side (Project menu, tooltips). -->
+	<Widget Name="InfoRow" Label="" Value="">
+		<HBox Spacing="8">
+			<Label Text="{Label}" Class="dim" Width="96"/>
+			<Label Name="value" Text="{Value}" Slot.Fill="1" Wrap="true"/>
+		</HBox>
+	</Widget>
+
+	<!-- A row of the "New" dialog : big icon, name, description. -->
+	<Widget Name="NewAssetRow" Kind="File" Text="" Detail="">
+		<Button Class="tool" Focusable="false">
+			<HBox Spacing="10" Slot.Padding="2">
+				<FileIcon Kind="{Kind}" Size="32" Slot.VAlign="Center"/>
+				<VBox Slot.VAlign="Center">
+					<Label Text="{Text}"/>
+					<Label Text="{Detail}" Class="dim"/>
+				</VBox>
+			</HBox>
+		</Button>
+	</Widget>
+
+	<!-- Title of a group of rows in a list ("SCRIPTING"...). -->
+	<Widget Name="ListHeading" Text="">
+		<Label Text="{upper(Text)}" Class="section" Slot.Padding="0,8,0,2"/>
+	</Widget>
+</Widgets>

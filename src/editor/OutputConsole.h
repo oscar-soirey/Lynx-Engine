@@ -12,6 +12,7 @@
 // Not the Commands > Console tab : that one runs editor commands.
 // =============================================================================
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -30,12 +31,34 @@ namespace lynx::editor::output_console
 	// editor_console.txt in the project).
 	void FlushToScreen(unsigned int scene);
 
-	void Draw(bool* open);
+	// The lines, for the Console panel. kind : 0 log, 1 warning, 2 error.
+	struct ConsoleLine
+	{
+		std::string text;
+		int kind = 0;
+		uint64_t sequence = 0;
+	};
+
+	// Number of the last line written (lines are numbered 1, 2, 3...).
+	uint64_t LastSequence();
+	// The lines written after `after` (at most the last `max_lines` of them).
+	void GetSince(uint64_t after, std::vector<ConsoleLine>& out, size_t max_lines = 20000);
+	// Every line kept (Copy, Fix with Lynxie).
+	std::vector<std::string> AllText();
+	void Clear();
+
+	// "On screen" (the new lines over the scene) and "errors only" (saved in editor_console.txt).
+	bool OnScreen();
+	bool OnScreenErrorsOnly();
+	void SetOnScreen(bool on, bool errors_only);
 
 	// "Fix with Lynxie" on the error lines : the editor gives what to do with the
 	// request (prompt for the AI, short text for the chat). Not set : no button.
 	using FixHandler = std::function<void(const std::string& prompt, const std::string& display)>;
 	void SetFixHandler(FixHandler handler);
+	bool CanFix();
+	// Sends the error at `error_index` of `lines` to the fix handler. false : no handler / no error there.
+	bool AskFix(const std::vector<std::string>& lines, size_t error_index);
 
 	// Request for Lynxie about the error at this line of the Console (error +
 	// stack + file / line) ; "" if there is no error there. Exposed for the tests.

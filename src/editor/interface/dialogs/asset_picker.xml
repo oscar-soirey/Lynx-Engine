@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Choose a file of assets/ for a property of the Details panel (raven/PanelDetails.inl). -->
+<VBox Name="picker" Spacing="6" Width="620" Height="560">
+	<Label Text="Choose an asset" Class="dialog-title"/>
+	<HBox Spacing="6">
+		<Button Name="picker.up" Text="^" Width="28" Tooltip="Parent folder"/>
+		<Label Name="picker.folder" Text="assets/" Class="dim" Slot.Fill="1" Slot.VAlign="Center"/>
+		<TextInput Name="picker.search" Placeholder="Search..." Width="200"/>
+	</HBox>
+	<TreeView Name="picker.list" Slot.Fill="1"/>
+	<HBox Spacing="6">
+		<Button Name="picker.none" Text="None" Tooltip="Clear the value"/>
+		<Spacer Slot.Fill="1"/>
+		<Button Name="picker.ok" Text="Choose" Style="Primary"/>
+		<Button Name="picker.cancel" Text="Cancel"/>
+	</HBox>
+</VBox>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A window of its own (not docked) : opened by the editor, closing it hides it. -->
+<Window Title="Lynx - Voxel World" Width="440" Height="460" MinWidth="320" MinHeight="240" Hidden="true">
+<!-- Size of the voxel world of the level (its .hrlv). Undo : Ctrl+Z. -->
+<ScrollBox Name="voxel_world">
+	<VBox Spacing="6" Slot.Padding="8">
+		<InfoRow Name="vw.level" Label="Level"/>
+		<InfoRow Name="vw.file" Label="File"/>
+		<Label Name="vw.size" Text=""/>
+		<Section Text="New size"/>
+		<PropertyRow Label="Width">
+			<SpinBox Name="vw.width" Min="16" Max="1073741824" Step="256" Decimals="0" Slot.Fill="1"/>
+		</PropertyRow>
+		<PropertyRow Label="Height">
+			<SpinBox Name="vw.height" Min="16" Max="1073741824" Step="256" Decimals="0" Slot.Fill="1"/>
+		</PropertyRow>
+		<HBox Spacing="4">
+			<Label Text="Presets" Class="dim" Slot.VAlign="Center"/>
+			<Button Name="vw.p1024" Text="1k"/>
+			<Button Name="vw.p4096" Text="4k"/>
+			<Button Name="vw.p16384" Text="16k"/>
+			<Button Name="vw.p65536" Text="64k"/>
+			<Button Name="vw.p131072" Text="128k"/>
+			<Button Name="vw.p262144" Text="256k"/>
+		</HBox>
+		<Label Name="vw.error" Text="Too large for the .hrlv format (too many chunks)." Class="error" Visibility="Collapsed"/>
+		<Label Text="The origin (0, 0) stays : the world grows / shrinks to the right and the top." Class="dim" Wrap="true"/>
+		<HBox Spacing="6">
+			<Button Name="vw.apply" Text="Apply" Style="Primary" Width="100"/>
+			<Button Name="vw.reset" Text="Reset"/>
+		</HBox>
+		<Label Name="vw.playing" Text="Stop the game to resize the world." Class="dim" Visibility="Collapsed"/>
+	</VBox>
+</ScrollBox>
+</Window>

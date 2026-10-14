@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The voxel type of the brush : color, collision, flags, physics (raven/PanelVoxelTypes.inl). -->
+<ScrollBox Name="color_picking" Slot.Title="Color Picking" Slot.Dock="Tab" Slot.DockTo="details">
+	<VBox Name="vt.body" Spacing="6" Slot.Padding="8">
+		<Label Name="vt.empty" Text="No voxel type selected. Pick a type in the Paint window (&quot;+&quot; adds one), or press C over a voxel of the viewport." Wrap="true" Class="dim"/>
+		<VBox Name="vt.editor" Spacing="6">
+			<HBox Spacing="8">
+				<Label Name="vt.id" Text="Type 1" Slot.VAlign="Center"/>
+				<TextInput Name="vt.name" Slot.Fill="1"/>
+			</HBox>
+
+			<Section Text="Color"/>
+			<ColorPicker Name="vt.color" Alpha="false" Compact="false"/>
+			<Label Text="Other types" Class="dim"/>
+			<WrapBox Name="vt.others" Spacing="3"/>
+
+			<Section Text="Collision"/>
+			<ComboBox Name="vt.collision" Items="Solid (4 sides)|None|Custom"/>
+			<WrapBox Name="vt.sides" Spacing="8">
+				<Checkbox Name="vt.side.LEFT" Text="LEFT"/>
+				<Checkbox Name="vt.side.RIGHT" Text="RIGHT"/>
+				<Checkbox Name="vt.side.TOP" Text="TOP"/>
+				<Checkbox Name="vt.side.BOTTOM" Text="BOTTOM"/>
+				<Checkbox Name="vt.side.INSIDE" Text="INSIDE"/>
+			</WrapBox>
+			<Label Name="vt.sides.hint" Text="TOP only : a platform you can jump through from below." Class="dim" Wrap="true"/>
+
+			<Section Text="Flags"/>
+			<WrapBox Name="vt.flags" Spacing="8"/>
+			<HBox Spacing="6">
+				<TextInput Name="vt.new_flag" Placeholder="NEW_FLAG" Width="140"/>
+				<Button Name="vt.add_flag" Text="Add flag"/>
+			</HBox>
+			<Label Text="Game code : lynx::voxels::GetFlagMask(&quot;NAME&quot;)." Class="dim" Wrap="true"/>
+
+			<Section Text="Properties"/>
+			<HBox Spacing="8">
+				<Checkbox Name="vt.emissive" Text="Emissive" Slot.VAlign="Center"/>
+				<ColorPicker Name="vt.emissive_color" Popup="true" Alpha="false"/>
+			</HBox>
+			<PropertyRow Label="Texture" Tip="Image of assets/ (drag it from the Content Browser). Multiplied by the color : white shows the raw texture.">
+				<TextInput Name="vt.texture" Placeholder="drop a .png here" Slot.Fill="1"/>
+				<Button Name="vt.texture.clear" Text="x" Width="26"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.tile.row" Label="Tile (voxels)" Tip="Voxels covered by one copy of the texture (1 : the whole image on each voxel).">
+				<SpinBox Name="vt.tile" Min="0.25" Max="256" Step="0.1" Decimals="2" Slot.Fill="1"/>
+			</PropertyRow>
+			<Checkbox Name="vt.indestructible" Text="Indestructible"/>
+			<PropertyRow Label="On destroyed" Tip="Event of the game : lynx::voxels::RegisterDestroyedEvent(name, fn).">
+				<TextInput Name="vt.on_destroyed" Placeholder="event name" Slot.Fill="1"/>
+			</PropertyRow>
+
+			<Section Text="Physics"/>
+			<PropertyRow Label="Preset" Tip="Fills every value below (and the collision : liquids and gases do not block).">
+				<ComboBox Name="vt.preset" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Label="Behavior">
+				<ComboBox Name="vt.behavior" Items="Static|Powder (falls, piles up)|Liquid (falls, spreads)|Gas (rises)" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.density.row" Label="Density" Tip="Heavier sinks in lighter liquids / gases (sand 1.6, water 1, oil 0.8).">
+				<Slider Name="vt.density" Min="0.05" Max="5" Step="0.01" Slot.Fill="1"/>
+				<Label Name="vt.density.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.dispersion.row" Label="Dispersion" Tip="Cells it can move sideways per step : how fast it spreads.">
+				<Slider Name="vt.dispersion" Min="1" Max="16" Step="1" Slot.Fill="1"/>
+				<Label Name="vt.dispersion.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.drag.row" Label="Drag" Tip="Slows down the actors inside (0 nothing, 1 very thick).">
+				<Slider Name="vt.drag" Min="0" Max="1" Step="0.01" Slot.Fill="1"/>
+				<Label Name="vt.drag.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.buoyancy.row" Label="Buoyancy" Tip="Pushes the actors inside up (1 cancels gravity, more floats).">
+				<Slider Name="vt.buoyancy" Min="0" Max="2" Step="0.01" Slot.Fill="1"/>
+				<Label Name="vt.buoyancy.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.friction.row" Label="Friction" Tip="Grip of the characters on it : 1 normal, 0.1 ice, 2.5 mud.">
+				<Slider Name="vt.friction" Min="0" Max="3" Step="0.01" Slot.Fill="1"/>
+				<Label Name="vt.friction.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Name="vt.bounciness.row" Label="Bounciness" Tip="Bounce when landing on it (rubber 0.8).">
+				<Slider Name="vt.bounciness" Min="0" Max="1" Step="0.01" Slot.Fill="1"/>
+				<Label Name="vt.bounciness.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<PropertyRow Label="Damage / s" Tip="Damageable.TakeDamage(amount, null) to the actors touching it (lava, spikes).">
+				<Slider Name="vt.damage" Min="0" Max="100" Step="0.1" Slot.Fill="1"/>
+				<Label Name="vt.damage.value" Width="40" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<Checkbox Name="vt.contact" Text="Contact events" Tooltip="VoxelEvents.OnVoxelContact(name, type) / OnVoxelContactEnd to the actors that implement it."/>
+			<Label Text="Simulated while the game runs, around the cameras. The voxel world comes back after Play." Class="dim" Wrap="true"/>
+
+			<Separator/>
+			<HBox Spacing="6">
+				<Button Name="vt.duplicate" Text="Duplicate"/>
+				<Button Name="vt.delete" Text="Delete" Tooltip="Only the last type can be deleted : the levels store the number of the types."/>
+				<Button Name="vt.reload" Text="Reload file"/>
+			</HBox>
+			<Label Name="vt.message" Text="" Class="dim"/>
+		</VBox>
+	</VBox>
+</ScrollBox>

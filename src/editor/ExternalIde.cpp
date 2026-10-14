@@ -557,6 +557,19 @@ namespace lynx::editor::external_ide
 		return g_detected[static_cast<int>(ide)].installed;
 	}
 
+	bool IconPixels(Ide ide, std::vector<uint8_t>& rgba, int& size)
+	{
+		const int i = static_cast<int>(ide);
+		rgba.clear();
+		size = 0;
+		if (i < 0 || i >= kCount || !DetectionDone())
+			return false;
+		std::lock_guard<std::mutex> lock(g_mutex);
+		rgba = g_detected[i].rgba;
+		size = rgba.empty() ? 0 : kIconSize;
+		return !rgba.empty();
+	}
+
 	unsigned int IconTexture(Ide ide)
 	{
 		const int i = static_cast<int>(ide);

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Git (GitWindow.inl) : a window of its own, closing it hides it. -->
+<Window Title="Lynx - Git" Width="900" Height="640" MinWidth="520" MinHeight="360" Hidden="true">
+<VBox Spacing="6" Slot.Padding="10">
+	<Label Name="git.loading" Text="Reading the repository..." Class="dim"/>
+	<VBox Name="git.not_found" Spacing="6" Visibility="Collapsed">
+		<Label Text="git was not found : install Git for Windows (git-scm.com) and make sure git.exe is in the PATH." Wrap="true" Class="warning"/>
+		<Button Name="git.retry" Text="Retry"/>
+	</VBox>
+	<VBox Name="git.not_repo" Spacing="6" Visibility="Collapsed">
+		<Label Text="The project folder is not a git repository." Wrap="true"/>
+		<Label Name="git.path" Text="" Class="dim"/>
+		<Button Name="git.init" Text="Create a repository here (git init)"/>
+	</VBox>
+	<VBox Name="git.main" Spacing="6" Slot.Fill="1" Visibility="Collapsed">
+		<HBox Spacing="6">
+			<Label Text="Branch" Slot.VAlign="Center"/>
+			<ComboBox Name="git.branch" Width="200"/>
+			<Button Name="git.new_branch" Text="New branch..."/>
+			<Button Name="git.fetch" Text="Fetch"/>
+			<Button Name="git.pull" Text="Pull"/>
+			<Button Name="git.push" Text="Push"/>
+			<Label Name="git.sync" Text="" Class="dim" Slot.VAlign="Center"/>
+			<Label Name="git.busy" Text="" Class="dim" Slot.VAlign="Center" Slot.Fill="1"/>
+		</HBox>
+		<TabView Name="git.tabs" Slot.Fill="1">
+			<HBox Slot.Title="Changes" Spacing="8">
+				<VBox Spacing="6" Slot.Fill="1">
+					<HBox Spacing="6">
+						<Label Name="git.files.count" Text="" Class="dim" Slot.Fill="1" Slot.VAlign="Center"/>
+						<Button Name="git.stage_all" Text="Stage all"/>
+						<Button Name="git.unstage_all" Text="Unstage all"/>
+					</HBox>
+					<HBox Name="git.unsaved" Spacing="6" Visibility="Collapsed">
+						<Label Text="The level has unsaved changes." Class="warning" Slot.Fill="1" Slot.VAlign="Center"/>
+						<Button Name="git.save_level" Text="Save level"/>
+					</HBox>
+					<TreeView Name="git.files" Slot.Fill="1"/>
+					<TextEditor Name="git.message" Height="80"/>
+					<HBox Spacing="6">
+						<Button Name="git.commit" Text="Commit"/>
+						<Checkbox Name="git.amend" Text="Amend"/>
+						<Button Name="git.commit_all" Text="Stage all and commit"/>
+					</HBox>
+				</VBox>
+				<VBox Spacing="6" Width="320">
+					<Label Name="git.details.title" Text="" Class="dim"/>
+					<TreeView Name="git.details" Slot.Fill="1"/>
+				</VBox>
+			</HBox>
+			<HBox Slot.Title="History" Spacing="8">
+				<TreeView Name="git.history" Slot.Fill="1"/>
+				<VBox Spacing="6" Width="320">
+					<Label Name="git.history.title" Text="" Class="dim"/>
+					<TreeView Name="git.history.details" Slot.Fill="1"/>
+				</VBox>
+			</HBox>
+			<ScrollBox Slot.Title="Settings">
+				<VBox Spacing="6" Slot.Padding="6">
+					<PropertyRow Label="Remote (origin)">
+						<TextInput Name="git.remote" Slot.Fill="1"/>
+						<Button Name="git.remote.set" Text="Set"/>
+					</PropertyRow>
+					<PropertyRow Label="User name">
+						<TextInput Name="git.user_name" Slot.Fill="1"/>
+					</PropertyRow>
+					<PropertyRow Label="User email">
+						<TextInput Name="git.user_email" Slot.Fill="1"/>
+						<Button Name="git.user.set" Text="Set"/>
+					</PropertyRow>
+					<Label Name="git.version" Text="" Class="dim"/>
+					<HBox Spacing="6">
+						<Label Name="git.gitignore" Text="" Slot.Fill="1" Slot.VAlign="Center"/>
+						<Button Name="git.gitignore.create" Text="Create .gitignore"/>
+					</HBox>
+				</VBox>
+			</ScrollBox>
+			<VBox Slot.Title="Log">
+				<TreeView Name="git.log" Slot.Fill="1"/>
+			</VBox>
+		</TabView>
+	</VBox>
+</VBox>
+</Window>

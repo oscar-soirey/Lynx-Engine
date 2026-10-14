@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Build before opening (StartupBuild.cpp) : the game DLL is missing or older
+  than the engine / its sources, it is compiled before being loaded.
+-->
+<Window Title="Lynx Engine - Compiling" Width="1000" Height="600" MinWidth="640" MinHeight="400" Hidden="true">
+	<VBox Spacing="6" Slot.Padding="20,16">
+		<Label Name="sb.project" Text="" Class="dialog-title"/>
+		<Label Name="sb.path" Text="" Class="dim"/>
+		<Label Name="sb.reason" Text="" Class="warning" Wrap="true"/>
+		<Label Name="sb.status" Text="Building..." Wrap="true"/>
+		<TreeView Name="sb.lines" Slot.Fill="1"/>
+		<HBox Spacing="6">
+			<Button Name="sb.retry" Text="Retry" Visibility="Collapsed"/>
+			<Button Name="sb.anyway" Text="Open with the previous build" Visibility="Collapsed"/>
+			<Spacer Slot.Fill="1"/>
+			<Button Name="sb.other" Text="Other project..." Visibility="Collapsed"/>
+			<Button Name="sb.quit" Text="Quit" Visibility="Collapsed"/>
+			<Button Name="sb.cancel" Text="Cancel"/>
+		</HBox>
+	</VBox>
+</Window>

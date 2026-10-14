@@ -1,7 +1,7 @@
 // =============================================================================
 // Lynx Editor
 // -----------------------------------------------------------------------------
-// Standalone executable of the engine (ImGui panels, gizmo, brush, undo,
+// Standalone executable of the engine (Raven panels, gizmo, brush, undo,
 // content browser...). It edits a GAME PROJECT chosen at startup :
 //
 //   LynxEditor.exe                     -> project browser
@@ -19,12 +19,12 @@
 
 #include "../Lynx.h"
 #include "../core/GameModuleAPI.h"
-#include <imgui/imgui.h>
-#include <imgui/imgui_internal.h>   // BeginViewportSideBar (toolbar)
-#include <imgui/imgui_impl_glfw.h>
-#include <imgui/imgui_impl_opengl3.h>
-#include <imgui_textedit/TextEditor.h>
+// The interface is Raven (src/editor/raven, interface/*.xml embedded in the
+// executable). GLFW stays for the gamepads and its key codes (no window).
 #include <glfw/glfw3.h>
+#include <Raven.h>
+#include "raven/RavenUi.h"
+#include "raven/GlBridge.h"
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
 #define STB_IMAGE_IMPLEMENTATION
@@ -80,9 +80,7 @@
 #include "ShellIntegration.h"
 #include "EditorPlugins.h"
 #include "ProjectTemplates.h"
-#include "LynxieIcon.h"
 #include "EditorIcons.h"
-#include "PropertyWidgets.h"
 #include "ProfilerWindow.h"
 #include "CommandPalette.h"
 #include "ParticleEditor.h"
@@ -90,12 +88,9 @@
 #include "WidgetEditor.h"
 #include "GraphEditors.h"
 #include "VoxelTypeEditor.h"
-#include "TitleBar.h"
 #include "FileIcons.h"
 #include "SpriteVoxelizer.h"
-#include "WindowIcon.h"
 #include "ProjectInfo.h"
-#include "EditorFonts.h"
 #include "ShipGame.h"
 #include "commands/ScriptRunner.h"
 #include <array>
@@ -227,31 +222,12 @@ static void SaveEditorWindowVisibility()
          << (editorWindows.lighting2D ? 1 : 0) << '\n';
 }
 
-// Post Process window : the settings of the current post process
-// (lynx::postprocess, HRL default shader), saved in assets/postprocess.json.
-static void DrawPostProcessWindow();
-
-// 2D Lighting window : settings of lynx::lighting2d, saved in assets/lighting2d.json.
-static void DrawLighting2DWindow();
-
 // Command palette (Ctrl+P) : commands, windows, actors and files (CommandPalette.h).
 static void OpenCommandPalette(const std::string& prefix = "");
 
-// Camera Shake window : live settings, curves, Test (shakes the editor
-// camera), saved in assets/camera_shake.json.
-static void DrawCameraShakeWindow(bool* open);
+// Camera Shake : "Test" shakes the editor camera (panel : raven/PanelTools.inl).
 static void ApplyCameraShakePreview(HRL_id camera, float dt);
 
-// Voxel World window : size of the voxel world of the level (kept voxels).
-static void DrawVoxelWorldWindow(bool* open);
-
-static bool EditorWindowCheckbox(const char* label, bool* value,
-                                 lynx::editor::icons::Icon icon = lynx::editor::icons::Icon::Windows)
-{
-    const bool changed = lynx::editor::icons::Checkbox(label, icon, value);
-    if (changed) SaveEditorWindowVisibility();
-    return changed;
-}
 
 
 
@@ -280,6 +256,31 @@ struct SceneViewportState
 };
 
 static SceneViewportState sceneViewport;
+
+// What the editor code reads of the keyboard / mouse (it was ImGuiIO) : the
+// state of the editor window (raven/RavenUi.h, lynx::editor::input).
+struct EditorIO
+{
+    bool KeyCtrl = false;
+    bool KeyShift = false;
+    bool KeyAlt = false;
+    bool WantTextInput = false;
+    // The scene viewport is a Raven widget : outside it the mouse belongs to the interface.
+    bool WantCaptureMouse = true;
+    struct { float x = 0.f, y = 0.f; } MouseDelta;
+
+    static EditorIO Now()
+    {
+        namespace in = lynx::editor::input;
+        EditorIO io;
+        io.KeyCtrl = in::Ctrl();
+        io.KeyShift = in::Shift();
+        io.KeyAlt = in::Alt();
+        io.WantTextInput = in::WantTextInput();
+        in::MouseDelta(io.MouseDelta.x, io.MouseDelta.y);
+        return io;
+    }
+};
 
 // Replaces "!ImGui::GetIO().WantCaptureMouse" for every scene interaction.
 static bool SceneAcceptsMouse(bool imgui_wants_mouse)
@@ -454,198 +455,17 @@ static std::string MigrateLegacyLevel(const std::string& legacy_level, const std
 // =============================================================================
 
 
-// Set by InitImGui : BeginImGuiFrame checks imgui.ini before its first frame.
-static bool default_dock_layout_check = false;
-
-static void DrawProjectSettingsPage();
-
-void InitImGui(GLFWwindow* window)
-{
-    IMGUI_CHECKVERSION();
-
-    ImGui::CreateContext();
-    default_dock_layout_check = true;
-
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Tab is reserved by the Lynx editor (Painting / No Painting).
-    // Do not let ImGui use Tab for keyboard navigation between widgets.
-    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
 
-    // Fonts : fonts/VCR-OSD-MONO.ttf for the editor and Lynxie (see EditorFonts.h).
-    lynx::editor::fonts::Load(24.0f);
-
-    // Theme and UI scale : the user's options (Options window).
-    lynx::editor::options::Init();
-    lynx::editor::options::SetProjectPage(DrawProjectSettingsPage);
-    lynx::editor::options::SetPluginsPage([] { lynx::editor::plugins::DrawManagerContent(); });
-
-    ImGui_ImplGlfw_InitForOpenGL(
-        window,
-        true
-    );
-
-    ImGui_ImplOpenGL3_Init(
-        "#version 330"
-    );
-}
 
 
-// -----------------------------------------------------------------------------
-// Default dock layout
-// -----------------------------------------------------------------------------
-// A project opened for the first time (no imgui.ini, or one without docking
-// data) gets the windows docked like this, instead of floating everywhere :
-//
-//   +-----------------+--------------------------+-------------------------+
-//   | Outliner, Paint |                          | Details, Commands,      |
-//   |                 |  Viewport (central node, | Color Picking,          |
-//   |-----------------|  scripts, Git, Input...) | Camera Shake            |
-//   | Content Browser |--------------------------|-------------------------|
-//   |                 |  Console, Profiler       | Place Actors            |
-//   +-----------------+--------------------------+-------------------------+
-//
-// The windows that are not visible yet are docked there when they first open.
-static bool default_dock_layout_pending = false;
-
-// Central node of the dockspace (Viewport) : the script editors open there.
-static ImGuiID central_dock_id = 0;
-
-static bool ImGuiIniHasDockLayout(const char* ini_file)
-{
-    if (!ini_file)
-        return true;   // no ini at all : nothing to restore, nothing to build
-
-    std::ifstream file(ini_file);
-    if (!file)
-        return false;
-
-    std::string line;
-    while (std::getline(file, line))
-    {
-        if (line.rfind("[Docking][Data]", 0) == 0)
-            return true;
-    }
-    return false;
-}
-
-static void BuildDefaultDockLayout(ImGuiID dockspace_id)
-{
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-
-    ImGui::DockBuilderRemoveNode(dockspace_id);
-    ImGui::DockBuilderAddNode(
-        dockspace_id,
-        static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
-            ImGuiDockNodeFlags_PassthruCentralNode
-    );
-    ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
-
-    // Proportions of the Blocky layout (3309 x 1360 work area).
-    ImGuiID center = dockspace_id;
-    const ImGuiID right =
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.257f, nullptr, &center);
-    const ImGuiID left =
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.235f, nullptr, &center);
-
-    ImGuiID left_top = left;
-    const ImGuiID left_bottom =
-        ImGui::DockBuilderSplitNode(left_top, ImGuiDir_Down, 0.476f, nullptr, &left_top);
-
-    ImGuiID right_top = right;
-    const ImGuiID right_bottom =
-        ImGui::DockBuilderSplitNode(right_top, ImGuiDir_Down, 0.30f, nullptr, &right_top);
-
-    ImGuiID center_top = center;
-    const ImGuiID center_bottom =
-        ImGui::DockBuilderSplitNode(center_top, ImGuiDir_Down, 0.345f, nullptr, &center_top);
-
-    // Order = order of the tabs ; the first one is the visible tab.
-    ImGui::DockBuilderDockWindow("Outliner", left_top);
-    ImGui::DockBuilderDockWindow("Paint", left_top);
-    ImGui::DockBuilderDockWindow("Content Browser", left_bottom);
-
-    ImGui::DockBuilderDockWindow("Viewport", center_top);
-    ImGui::DockBuilderDockWindow("Input Settings", center_top);
-    ImGui::DockBuilderDockWindow("Git", center_top);
-
-    ImGui::DockBuilderDockWindow("Console", center_bottom);
-    ImGui::DockBuilderDockWindow("Profiler", center_bottom);
-
-    ImGui::DockBuilderDockWindow("Details", right_top);
-    ImGui::DockBuilderDockWindow("Commands", right_top);
-    ImGui::DockBuilderDockWindow("Color Picking", right_top);
-    ImGui::DockBuilderDockWindow("Camera Shake", right_top);
-    ImGui::DockBuilderDockWindow("Place Actors", right_bottom);
-
-    ImGui::DockBuilderFinish(dockspace_id);
-}
 
 
-void BeginImGuiFrame()
-{
-    // Before the first NewFrame (which reads imgui.ini) : no saved layout ->
-    // the default one is built.
-    if (default_dock_layout_check)
-    {
-        default_dock_layout_check = false;
-        default_dock_layout_pending =
-            !ImGuiIniHasDockLayout(ImGui::GetIO().IniFilename);
-    }
-
-    lynx::editor::options::ApplyPending();   // theme / scale changed last frame
-
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
-    // Tab is the Paint / Select shortcut : no widget is a tab stop, so ImGui
-    // never moves the focus to a slider (which turned it into a text field and
-    // blocked the shortcut). Text editors that type Tab still get it.
-    // Popped in EndImGuiFrame.
-    ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
-
-    // Main dockspace: every editor panel can be docked/rearranged by ImGui.
-    const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
-        0,
-        ImGui::GetMainViewport(),
-        ImGuiDockNodeFlags_PassthruCentralNode
-    );
-
-    if (default_dock_layout_pending)
-    {
-        default_dock_layout_pending = false;
-        BuildDefaultDockLayout(dockspace_id);
-    }
-
-    ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace_id);
-    central_dock_id = central ? central->ID : 0;
-}
 
 
-void EndImGuiFrame()
-{
-    LYNX_PROFILE_SCOPE("ImGui render");
-
-    ImGui::PopItemFlag();   // NoTabStop (BeginImGuiFrame)
-
-    ImGui::Render();
-
-    ImGui_ImplOpenGL3_RenderDrawData(
-        ImGui::GetDrawData()
-    );
-}
 
 
-void ShutdownImGui()
-{
-    lynx::editor::graph_editors::Shutdown();     // Anim Graph / Behavior Tree editors (ImNodes)
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-}
+
 
 
 float camX;
@@ -850,80 +670,6 @@ static bool IsActorAlive(lynx::Actor* actor)
     return std::find(actors.begin(), actors.end(), actor) != actors.end();
 }
 
-// Rows of the Outliner drawn this frame (order on screen, rectangles) :
-// Shift + click ranges and the rubber band.
-struct OutlinerRow
-{
-    lynx::Actor* actor;
-    ImVec2 min;
-    ImVec2 max;
-};
-static std::vector<OutlinerRow> outliner_rows;        // last frame (complete)
-static std::vector<OutlinerRow> outliner_rows_next;   // being drawn
-
-// Rubber band (shared code : Outliner and Content Browser). Call right after
-// the item that starts it (the empty area). `rects` : the items of this
-// frame ; `apply` gets the indices inside the band (with Ctrl : added to
-// what was selected when the drag started, kept by the caller).
-struct RubberBand
-{
-    bool active = false;
-    ImVec2 start_local{ 0.f, 0.f };   // window space + scroll (survives scrolling)
-    bool additive = false;
-    bool moved = false;
-};
-
-static bool RubberBandUpdate(RubberBand& band, bool start, const std::vector<std::pair<ImVec2, ImVec2>>& rects,
-                             std::vector<int>& inside)
-{
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    const ImVec2 mouse = ImGui::GetMousePos();
-    const ImVec2 offset(window->Pos.x - window->Scroll.x, window->Pos.y - window->Scroll.y);
-
-    if (start)
-    {
-        band.active = true;
-        band.moved = false;
-        band.additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
-        band.start_local = ImVec2(mouse.x - offset.x, mouse.y - offset.y);
-    }
-    if (!band.active)
-        return false;
-
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
-    {
-        band.active = false;
-        return false;
-    }
-
-    // Scroll when the mouse goes past the top / bottom.
-    if (mouse.y < window->InnerRect.Min.y)
-        ImGui::SetScrollY(window, window->Scroll.y - (window->InnerRect.Min.y - mouse.y) * 0.3f);
-    else if (mouse.y > window->InnerRect.Max.y)
-        ImGui::SetScrollY(window, window->Scroll.y + (mouse.y - window->InnerRect.Max.y) * 0.3f);
-
-    const ImVec2 a(band.start_local.x + offset.x, band.start_local.y + offset.y);
-    const ImVec2 min(std::min(a.x, mouse.x), std::min(a.y, mouse.y));
-    const ImVec2 max(std::max(a.x, mouse.x), std::max(a.y, mouse.y));
-    if (max.x - min.x > 3.f || max.y - min.y > 3.f)
-        band.moved = true;
-    if (!band.moved)
-        return false;
-
-    inside.clear();
-    for (int i = 0; i < static_cast<int>(rects.size()); ++i)
-    {
-        const auto& [rmin, rmax] = rects[i];
-        if (rmin.x <= max.x && rmax.x >= min.x && rmin.y <= max.y && rmax.y >= min.y)
-            inside.push_back(i);
-    }
-
-    ImDrawList* dl = ImGui::GetForegroundDrawList(window);
-    const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive);
-    dl->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(accent.x, accent.y, accent.z, 0.18f)));
-    dl->AddRect(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(accent.x, accent.y, accent.z, 0.9f)));
-    return true;
-}
 static lynx::Actor* outliner_anchor = nullptr;   // Shift + click range start
 static std::vector<std::function<void()>> editorUndoHistory;
 
@@ -1304,145 +1050,7 @@ static bool IsPreviewImageExtension(
            ext == ".webp";
 }
 
-static HRL_id GetActorTypePreviewTexture(
-    const std::string& type_name)
-{
-    if (auto it = actorPreviewTextures.find(type_name);
-        it != actorPreviewTextures.end())
-    {
-        return it->second;
-    }
 
-    if (actorPreviewSearchDone.find(type_name) !=
-        actorPreviewSearchDone.end())
-    {
-        return HRL_INVALID_ID;
-    }
-
-    actorPreviewSearchDone.insert(type_name);
-
-    const std::filesystem::path root =
-        std::filesystem::current_path() / "assets";
-
-    std::error_code error;
-
-    if (!std::filesystem::exists(root, error))
-        return HRL_INVALID_ID;
-
-    std::string wanted = type_name;
-
-    std::transform(
-        wanted.begin(),
-        wanted.end(),
-        wanted.begin(),
-        [](unsigned char c)
-        {
-            return static_cast<char>(std::tolower(c));
-        }
-    );
-
-    for (const auto& entry :
-         std::filesystem::recursive_directory_iterator(
-             root,
-             std::filesystem::directory_options::skip_permission_denied,
-             error))
-    {
-        if (error)
-            break;
-
-        if (!entry.is_regular_file(error) ||
-            !IsPreviewImageExtension(entry.path()))
-        {
-            continue;
-        }
-
-        std::string stem =
-            entry.path().stem().string();
-
-        std::transform(
-            stem.begin(),
-            stem.end(),
-            stem.begin(),
-            [](unsigned char c)
-            {
-                return static_cast<char>(std::tolower(c));
-            }
-        );
-
-        if (stem != wanted)
-            continue;
-
-        const auto data =
-            lynx::fs::ReadBinary(
-                entry.path().string()
-            );
-
-        if (data.empty())
-            continue;
-
-        const HRL_id texture =
-            HRL_CreateTexture(
-                reinterpret_cast<const char*>(data.data()),
-                data.size()
-            );
-
-        if (texture != HRL_INVALID_ID)
-        {
-            actorPreviewTextures[type_name] =
-                texture;
-
-            return texture;
-        }
-    }
-
-    return HRL_INVALID_ID;
-}
-
-// "color", "light_color", "tintColor"... : drawn as a color picker in Details.
-// Actor::auto_possess_player : "Disabled" (-1), "Player 0".."Player 7",
-// like AutoPossessPlayer in Unreal.
-static bool DrawAutoPossessCombo(int& value)
-{
-    constexpr int kMaxPlayers = 8;
-
-    char preview[32];
-    if (value < 0)
-        std::snprintf(preview, sizeof(preview), "Disabled");
-    else
-        std::snprintf(preview, sizeof(preview), "Player %d", value);
-
-    bool changed = false;
-
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::BeginCombo("##value", preview))
-    {
-        if (ImGui::Selectable("Disabled", value < 0))
-        {
-            changed = value != -1;
-            value = -1;
-        }
-
-        for (int i = 0; i < std::max(kMaxPlayers, value + 1); ++i)
-        {
-            char label[32];
-            std::snprintf(label, sizeof(label), "Player %d", i);
-
-            if (ImGui::Selectable(label, value == i))
-            {
-                changed = value != i;
-                value = i;
-            }
-        }
-
-        ImGui::EndCombo();
-    }
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Player that possesses this actor when the game starts\n"
-                          "(player 0 = default player, others : Engine::CreatePlayer).");
-
-    return changed;
-}
 
 static bool IsColorPropertyName(const std::string& name)
 {
@@ -1453,101 +1061,6 @@ static bool IsColorPropertyName(const std::string& name)
            lower.find("tint") != std::string::npos;
 }
 
-static void DrawActorTypePreview(
-    const std::string& type_name,
-    float size)
-{
-    // Engine classes (lights, SpriteActor...) : their icon.
-    {
-        uint32_t texture = HRL_INVALID_ID;
-        float uv[4] = {};
-        if (lynx::GetEngineActorIcon(type_name, texture, uv))
-        {
-            const unsigned int gl_texture = HRL_GL_GetTextureGL_ID(texture);
-            if (gl_texture != 0)
-            {
-                // HRL textures are bottom-up : v swapped.
-                ImGui::Image((ImTextureID)(intptr_t)gl_texture, ImVec2(size, size),
-                             ImVec2(uv[0], uv[3]), ImVec2(uv[2], uv[1]));
-                return;
-            }
-        }
-    }
-
-    const HRL_id texture =
-        GetActorTypePreviewTexture(
-            type_name
-        );
-
-    if (texture != HRL_INVALID_ID)
-    {
-        const unsigned int gl_texture =
-            HRL_GL_GetTextureGL_ID(texture);
-
-        if (gl_texture != 0)
-        {
-            ImGui::Image(
-                (ImTextureID)(intptr_t)gl_texture,
-                ImVec2(size, size),
-                ImVec2(0.f, 1.f),
-                ImVec2(1.f, 0.f)
-            );
-
-            return;
-        }
-    }
-
-    // Fallback icon when the actor has no image named after its class.
-    uint32_t hash = 2166136261u;
-
-    for (unsigned char c : type_name)
-    {
-        hash ^= c;
-        hash *= 16777619u;
-    }
-
-    const ImVec2 min =
-        ImGui::GetCursorScreenPos();
-
-    const ImVec2 max(
-        min.x + size,
-        min.y + size
-    );
-
-    ImGui::GetWindowDrawList()->AddRectFilled(
-        min,
-        max,
-        IM_COL32(
-            static_cast<int>(80u + (hash & 0x7Fu)),
-            static_cast<int>(80u + ((hash >> 8) & 0x7Fu)),
-            static_cast<int>(80u + ((hash >> 16) & 0x7Fu)),
-            255
-        ),
-        5.f
-    );
-
-    char letter[2] =
-    {
-        type_name.empty() ? '?' : type_name.front(),
-        '\0'
-    };
-
-    const ImVec2 text_size =
-        ImGui::CalcTextSize(letter);
-
-    ImGui::GetWindowDrawList()->AddText(
-        ImVec2(
-            min.x + (size - text_size.x) * 0.5f,
-            min.y + (size - text_size.y) * 0.5f
-        ),
-        IM_COL32(255, 255, 255, 255),
-        letter
-    );
-
-    ImGui::Dummy(
-        ImVec2(size, size)
-    );
-}
 
 // -----------------------------------------------------------------------------
 // Place Actors drag/drop
@@ -1567,11 +1080,7 @@ static bool UpdateActorLocationFromMouse(lynx::Actor* actor)
     double mouse_x = 0.0;
     double mouse_y = 0.0;
 
-    glfwGetCursorPos(
-        glfwGetCurrentContext(),
-        &mouse_x,
-        &mouse_y
-    );
+    lynx::editor::input::MousePosition(mouse_x, mouse_y);
 
     MouseToScene(
         mouse_x,
@@ -1721,228 +1230,7 @@ static void CommitActorPlacementDrag()
     actor_drag_active = false;
 }
 
-static void HandleActorPlacementDrag(
-    lynx::Level* level)
-{
-    if (!level || !actor_drag_active)
-        return;
 
-    // Keep the actual actor under the cursor, including while the cursor is
-    // moving across the scene. MouseToScene() falls back to raw window
-    // coordinates because the optional ImGui Viewport window is disabled.
-    UpdateActorLocationFromMouse(
-        actor_drag_preview
-    );
-
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
-    {
-        // A release over the scene commits the actor. The scene viewport is
-        // itself an ImGui window, so WantCaptureMouse alone would cancel drops
-        // there just like drops over an editor panel.
-        // WantCaptureMouse can remain true because the Place Actors row is
-        // still the active drag source, even after the cursor has left that
-        // window. Determine the release target from the current hovered item
-        // or window instead.
-        const bool released_over_scene = sceneViewport.visible
-            ? sceneViewport.hovered
-            : !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow);
-
-        if (released_over_scene)
-            CommitActorPlacementDrag();
-        else
-            CancelActorPlacementDrag();
-    }
-}
-
-void PlaceActorsWindow(lynx::Level* level)
-{
-    if (!level)
-        return;
-
-    ImGui::Begin("Place Actors");
-
-    static char search_buffer[256] = {};
-
-    ImGui::InputTextWithHint(
-        "##PlaceActorSearch",
-        "Search actors...",
-        search_buffer,
-        sizeof(search_buffer)
-    );
-
-    ImGui::Separator();
-
-    auto* factory =
-        lynx::Engine::Get()
-            ->GetFactory()
-            .GetInternalFactory();
-
-    if (!factory)
-    {
-        ImGui::TextDisabled("Factory unavailable");
-        ImGui::End();
-        return;
-    }
-
-    std::vector<std::string> actor_types;
-    actor_types.reserve(factory->size());
-
-    for (const auto& [type_name, constructor] : *factory)
-    {
-        (void)constructor;
-
-        if (type_name.find(search_buffer) == std::string::npos)
-            continue;
-
-        actor_types.push_back(type_name);
-    }
-
-    std::sort(
-        actor_types.begin(),
-        actor_types.end()
-    );
-
-    // Classes of the engine (Actor, lights...) first, then the game's.
-    std::stable_partition(
-        actor_types.begin(),
-        actor_types.end(),
-        [](const std::string& name) { return lynx::IsEngineActorClass(name); }
-    );
-
-    if (actor_types.empty())
-    {
-        ImGui::TextDisabled("No matching actors");
-    }
-    else
-    {
-        int section = -1;   // 0 : engine, 1 : game
-
-        for (const std::string& type_name : actor_types)
-        {
-            const int type_section = lynx::IsEngineActorClass(type_name) ? 0 : 1;
-            if (type_section != section)
-            {
-                section = type_section;
-                ImGui::SeparatorText(section == 0 ? "Engine" : "Game");
-            }
-
-            ImGui::PushID(type_name.c_str());
-
-            const float preview_size = 42.f;
-
-            ImGui::BeginGroup();
-
-            DrawActorTypePreview(
-                type_name,
-                preview_size
-            );
-
-            ImGui::SameLine();
-
-            if (ImGui::Button(
-                    type_name.c_str(),
-                    ImVec2(
-                        std::max(
-                            1.f,
-                            ImGui::GetContentRegionAvail().x
-                        ),
-                        preview_size
-                    )
-                ))
-            {
-                // Keep the existing click-to-place behaviour.
-                lynx::Actor* actor =
-                    level->SpawnActor(
-                        type_name.c_str()
-                    );
-
-                if (actor)
-                {
-                    AssignDefaultActorName(
-                        level,
-                        actor,
-                        type_name
-                    );
-
-                    const std::string actor_id =
-                        actor->object_id_;
-
-                    UpdateActorLocationFromMouse(
-                        actor
-                    );
-
-                    PushEditorUndo([actor_id]()
-                    {
-                        if (lynx::Actor* created =
-                                FindEditorActor(actor_id))
-                        {
-                            if (editing_actor == created)
-                            {
-                                editing_actor = nullptr;
-                                editing_object = HRL_INVALID_ID;
-
-                                HRL_SetGizmoVisible(
-                                    gizmo,
-                                    HRL_FALSE
-                                );
-                            }
-
-                            editor_level->DestroyActor(
-                                created
-                            );
-                        }
-                    });
-
-                    SetActorSelected(actor);
-                    MarkEditorDirty();
-                }
-            }
-
-            // Dragging the row creates a real temporary actor immediately.
-            // The instance then follows the mouse until it is released.
-            if (ImGui::BeginDragDropSource(
-                    ImGuiDragDropFlags_SourceAllowNullID
-                ))
-            {
-                ImGui::SetDragDropPayload(
-                    "LYNX_ACTOR_TYPE",
-                    type_name.c_str(),
-                    type_name.size() + 1
-                );
-
-                if (!actor_drag_active)
-                {
-                    BeginActorPlacementDrag(
-                        level,
-                        type_name
-                    );
-                }
-
-                ImGui::BeginGroup();
-
-                ImGui::Text(
-                    "Placing %s",
-                    type_name.c_str()
-                );
-
-                ImGui::TextDisabled(
-                    "Release in the scene"
-                );
-
-                ImGui::EndGroup();
-
-                ImGui::EndDragDropSource();
-            }
-
-            ImGui::EndGroup();
-
-            ImGui::Separator();
-            ImGui::PopID();
-        }
-    }
-
-    ImGui::End();
-}
 
 
 
@@ -2306,11 +1594,7 @@ static void CreateActorFromAsset(
     double mouse_x = 0.0;
     double mouse_y = 0.0;
 
-    glfwGetCursorPos(
-        glfwGetCurrentContext(),
-        &mouse_x,
-        &mouse_y
-    );
+    lynx::editor::input::MousePosition(mouse_x, mouse_y);
 
     MouseToScene(mouse_x, mouse_y, mouse_x, mouse_y);
 
@@ -2352,28 +1636,6 @@ static void CreateActorFromAsset(
 }
 
 
-static void DropCallback(
-    GLFWwindow* window,
-    int count,
-    const char** paths)
-{
-    if (!window)
-        return;
-
-    pending_explorer_drop.paths.clear();
-
-    glfwGetCursorPos(
-        window,
-        &pending_explorer_drop.mouse_x,
-        &pending_explorer_drop.mouse_y
-    );
-
-    for (int i = 0; i < count; ++i)
-    {
-        if (paths[i])
-            pending_explorer_drop.paths.emplace_back(paths[i]);
-    }
-}
 
 
 
@@ -2383,7 +1645,7 @@ static void DropCallback(
 // Right click menus, rename / duplicate / delete / new file... of the browser.
 #include "ContentBrowserActions.inl"
 
-// Git window (status, commit, pull / push, history).
+// Git window (status, commit, pull / push, history) : Raven window windows/git.xml.
 #include "GitWindow.inl"
 
 // -----------------------------------------------------------------------------
@@ -2533,216 +1795,7 @@ static void OutlinerMoveActor(lynx::Level* level, lynx::Actor* actor, const std:
     MarkEditorDirty();
 }
 
-// Actor menu : "Move to" > folders.
-static void OutlinerMoveToMenu(lynx::Level* level, lynx::Actor* actor)
-{
-    if (!ImGui::BeginMenu("Move to folder"))
-        return;
-    if (ImGui::MenuItem("(root)", nullptr, actor->outliner_folder.empty()))
-        OutlinerMoveActor(level, actor, "");
-    for (const std::string& f : OutlinerAllFolders(level))
-        if (ImGui::MenuItem(f.c_str(), nullptr, actor->outliner_folder == f))
-            OutlinerMoveActor(level, actor, f);
-    ImGui::Separator();
-    if (ImGui::MenuItem("New folder"))
-    {
-        PushOutlinerUndo(level);
-        const std::string folder = OutlinerUniqueChild(level, actor->outliner_folder, "New Folder");
-        OutlinerDeclare(level, folder);
-        actor->outliner_folder = folder;
-        MarkEditorDirty();
-        OutlinerStartRename(folder);
-    }
-    ImGui::EndMenu();
-}
 
-// Drop target of a folder ("" = root) : actors and folders.
-static void OutlinerDropTarget(lynx::Level* level, const std::string& folder)
-{
-    if (!ImGui::BeginDragDropTarget())
-        return;
-    if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("LYNX_OUTLINER_ACTOR"))
-    {
-        lynx::Actor* actor = *static_cast<lynx::Actor* const*>(p->Data);
-        const auto& alive = level->GetActors();
-        if (std::find(alive.begin(), alive.end(), actor) != alive.end())
-            OutlinerMoveActor(level, actor, folder);
-    }
-    if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("LYNX_OUTLINER_FOLDER"))
-    {
-        const std::string dragged(static_cast<const char*>(p->Data));
-        if (!OutlinerInside(folder, dragged) && OutlinerParent(dragged) != folder)
-        {
-            PushOutlinerUndo(level);
-            OutlinerRenameFolder(level, dragged, OutlinerUniqueChild(level, folder, OutlinerName(dragged)));
-            MarkEditorDirty();
-        }
-    }
-    ImGui::EndDragDropTarget();
-}
-
-// The tree : "+ Folder", then the folders (open / closed) and the actors.
-template <class DrawActor>
-static void DrawOutlinerTree(lynx::Level* level, DrawActor& draw_actor)
-{
-    const auto& actors = level->GetActors();
-    const std::set<std::string> folders = OutlinerAllFolders(level);
-
-    if (ImGui::SmallButton("+ Folder"))
-        OutlinerNewFolder(level, "");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("New folder (drag actors onto a folder to put them in)");
-    ImGui::SameLine();
-    ImGui::TextDisabled("%d actor%s", static_cast<int>(actors.size()), actors.size() == 1 ? "" : "s");
-    ImGui::Separator();
-
-    // Children of each folder (sorted by std::set), actors of each folder.
-    std::map<std::string, std::vector<std::string>> children;
-    for (const std::string& f : folders)
-        children[OutlinerParent(f)].push_back(f);
-    std::map<std::string, std::vector<size_t>> by_folder;
-    for (size_t i = 0; i < actors.size(); ++i)
-        if (actors[i])
-            by_folder[actors[i]->outliner_folder].push_back(i);
-
-    const float icon = ImGui::GetTextLineHeight();
-    std::function<void(const std::string&)> draw = [&](const std::string& folder)
-    {
-        for (const std::string& child : children[folder])
-        {
-            ImGui::PushID(child.c_str());
-            const std::string label = std::string(static_cast<size_t>(icon / ImGui::CalcTextSize(" ").x) + 1, ' ') +
-                                      OutlinerName(child);
-            const bool open = ImGui::TreeNodeEx("##folder", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen |
-                                                ImGuiTreeNodeFlags_OpenOnDoubleClick, "%s", label.c_str());
-            // Folder icon after the arrow
-            {
-                const ImVec2 min = ImGui::GetItemRectMin();
-                lynx::editor::file_icons::DrawAt(ImGui::GetWindowDrawList(), lynx::editor::file_icons::Kind::Folder,
-                                                 ImVec2(min.x + ImGui::GetTreeNodeToLabelSpacing(), min.y +
-                                                        (ImGui::GetItemRectSize().y - icon) * 0.5f), icon);
-            }
-            if (ImGui::BeginDragDropSource())
-            {
-                ImGui::SetDragDropPayload("LYNX_OUTLINER_FOLDER", child.c_str(), child.size() + 1);
-                ImGui::TextUnformatted(child.c_str());
-                ImGui::EndDragDropSource();
-            }
-            OutlinerDropTarget(level, child);
-            if (ImGui::BeginPopupContextItem("##folder_menu"))
-            {
-                if (ImGui::MenuItem("New subfolder"))
-                    OutlinerNewFolder(level, child);
-                if (ImGui::MenuItem("Rename", "F2"))
-                    OutlinerStartRename(child);
-                if (ImGui::MenuItem("Delete folder"))
-                {
-                    PushOutlinerUndo(level);
-                    OutlinerDeleteFolder(level, child);
-                    MarkEditorDirty();
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("The actors inside go to the parent folder.");
-                ImGui::EndPopup();
-            }
-            if (ImGui::IsItemHovered() && ImGui::IsKeyPressed(ImGuiKey_F2, false))
-                OutlinerStartRename(child);
-            if (open)
-            {
-                draw(child);
-                ImGui::TreePop();
-            }
-            ImGui::PopID();
-        }
-        for (size_t i : by_folder[folder])
-        {
-            ImGui::PushID(static_cast<int>(i));
-            draw_actor(actors[i], i);
-            ImGui::PopID();
-        }
-    };
-
-    if (actors.empty() && folders.empty())
-        ImGui::TextDisabled("No actors");
-    draw("");
-
-    // The free space below : drop here = back to the root.
-    const ImVec2 rest = ImGui::GetContentRegionAvail();
-    ImGui::InvisibleButton("##outliner_root", ImVec2(std::max(1.f, rest.x), std::max(ImGui::GetTextLineHeight(), rest.y)));
-    OutlinerDropTarget(level, "");
-
-    // Click in the empty space : nothing selected ; drag : rubber band
-    // (Ctrl / Shift : added to the selection).
-    {
-        static RubberBand band;
-        static std::vector<lynx::Actor*> base;
-        const bool start = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-        if (start)
-        {
-            base = (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) ? selected_actors : std::vector<lynx::Actor*>{};
-            if (base.empty())
-                SetActorSelected(nullptr);
-        }
-        std::vector<std::pair<ImVec2, ImVec2>> rects;
-        for (const OutlinerRow& row : outliner_rows_next)
-            rects.emplace_back(row.min, row.max);
-        std::vector<int> inside;
-        if (RubberBandUpdate(band, start, rects, inside))
-        {
-            std::vector<lynx::Actor*> actors = base;
-            for (int i : inside)
-                if (std::find(actors.begin(), actors.end(), outliner_rows_next[i].actor) == actors.end())
-                    actors.push_back(outliner_rows_next[i].actor);
-            lynx::Actor* primary = inside.empty() ? (actors.empty() ? nullptr : actors.back())
-                                                  : outliner_rows_next[inside.back()].actor;
-            SetActorSelection(actors, primary);
-        }
-    }
-    if (ImGui::BeginPopupContextItem("##outliner_root_menu"))
-    {
-        if (ImGui::MenuItem("New folder"))
-            OutlinerNewFolder(level, "");
-        ImGui::EndPopup();
-    }
-
-    // Rename popup
-    if (outliner_rename_open)
-    {
-        ImGui::OpenPopup("Rename folder");
-        outliner_rename_open = false;
-    }
-    if (ImGui::BeginPopupModal("Rename folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        if (ImGui::IsWindowAppearing())
-            ImGui::SetKeyboardFocusHere();
-        const bool enter = ImGui::InputText("##name", outliner_rename_buffer, sizeof(outliner_rename_buffer),
-                                            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-        std::string name = outliner_rename_buffer;
-        name.erase(std::remove(name.begin(), name.end(), '/'), name.end());
-        name.erase(std::remove(name.begin(), name.end(), '|'), name.end());
-        const std::string parent = OutlinerParent(outliner_rename_path);
-        const std::string target = parent.empty() ? name : parent + "/" + name;
-        const bool taken = target != outliner_rename_path && OutlinerAllFolders(level).count(target) > 0;
-        if (taken)
-            ImGui::TextDisabled("A folder \"%s\" already exists", name.c_str());
-        ImGui::BeginDisabled(name.empty() || taken);
-        if (ImGui::Button("OK") || (enter && !name.empty() && !taken))
-        {
-            if (target != outliner_rename_path)
-            {
-                PushOutlinerUndo(level);
-                OutlinerRenameFolder(level, outliner_rename_path, target);
-                MarkEditorDirty();
-            }
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-}
 
 // What the "Convert to voxels" dialog needs from the editor (undo, actors...).
 static lynx::editor::sprite_voxels::Host SpriteVoxelHost()
@@ -2849,172 +1902,6 @@ static void ContentBrowserGo(int direction)
     }
 }
 
-// Header of the Content Browser :
-//
-//    (Lynxie)  [Assets] / maps / caves                       12 items
-//     /\_/\    [^] [search............................] [x]  [+ New]
-//  ---(   )---------------------------------------------------------- folders
-//
-// Lynxie stands on the line above the folders (click : opens her chat).
-static void DrawContentBrowserHeader(const std::filesystem::path& relative_current)
-{
-    namespace cba = content_browser_actions;
-    namespace icons = lynx::editor::icons;
-
-    ImGui::SetWindowFontScale(0.8f);
-
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float row_h = ImGui::GetFrameHeight();
-    const float header_h = row_h * 2.f + style.ItemSpacing.y;
-    // Lynxie is taller than the two rows : the rows sit at her feet, on the line.
-    const float lynxie_h = std::floor((header_h + style.ItemSpacing.y) * 1.45f);
-    const float lynxie_w = lynx::editor::lynxie_icon::WidthFor(lynxie_h);
-    const ImVec2 top = ImGui::GetCursorScreenPos();
-    const float line_y = top.y + lynxie_h;
-    const ImVec2 start(top.x, line_y - header_h - style.ItemSpacing.y * 0.5f - 1.f);
-
-    // Lynxie (her feet on the line)
-    ImGui::SetCursorScreenPos(ImVec2(start.x, line_y - lynxie_h));
-    if (ImGui::InvisibleButton("##BrowserLynxie", ImVec2(lynxie_w, lynxie_h)))
-    {
-        editorWindows.commands = true;
-        SaveEditorWindowVisibility();
-        lynx::editor::commands_window::ShowLynxie();
-    }
-    {
-        const bool hovered = ImGui::IsItemHovered();
-        ImVec4 tint = style.Colors[ImGuiCol_Text];
-        if (!hovered)
-            tint.w *= 0.85f;
-        const float hop = hovered ? -2.f : 0.f;   // a little jump when hovered
-        lynx::editor::lynxie_icon::DrawAt(ImGui::GetWindowDrawList(),
-                                         ImVec2(start.x, line_y - lynxie_h + hop), lynxie_h,
-                                         ImGui::ColorConvertFloat4ToU32(tint));
-        if (hovered)
-            ImGui::SetTooltip("Lynxie : ask about your assets, the engine, the level...");
-    }
-
-    const float left = start.x + lynxie_w + style.ItemSpacing.x * 2.f;
-
-    // Row 1 : path
-    ImGui::SetCursorScreenPos(ImVec2(left, start.y));
-    if (icons::ButtonWithLabel("Assets##BrowserRoot", icons::Icon::Folder))
-        content_browser_current_path = content_browser_root;
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", content_browser_root.generic_string().c_str());
-
-    std::filesystem::path breadcrumb_path;
-    int breadcrumb_index = 0;
-    for (const auto& part : relative_current)
-    {
-        if (part.empty() || part == ".")
-            continue;
-        breadcrumb_path /= part;
-        ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("/");
-        ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
-
-        const std::string label = part.string() + "##Breadcrumb" + std::to_string(breadcrumb_index++);
-        if (ImGui::Button(label.c_str()))
-            content_browser_current_path = content_browser_root / breadcrumb_path;
-    }
-
-    // Number of items, on the right
-    {
-        char count[32];
-        std::snprintf(count, sizeof(count), "%d item%s", content_browser_item_count,
-                      content_browser_item_count == 1 ? "" : "s");
-        const float w = ImGui::CalcTextSize(count).x;
-        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-        if (ImGui::GetItemRectMax().x + style.ItemSpacing.x * 2.f + w < right)
-        {
-            ImGui::SameLine(right - w - ImGui::GetWindowPos().x);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextDisabled("%s", count);
-        }
-    }
-
-    // Row 2 : up, search, new
-    ImGui::SetCursorScreenPos(ImVec2(left, start.y + row_h + style.ItemSpacing.y));
-    ImGui::BeginDisabled(content_browser_back.empty());
-    if (ImGui::ArrowButton("##BrowserBack", ImGuiDir_Left))
-        ContentBrowserGo(-1);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Back (mouse back button)");
-    ImGui::SameLine(0.f, 2.f);
-    ImGui::BeginDisabled(content_browser_forward.empty());
-    if (ImGui::ArrowButton("##BrowserForward", ImGuiDir_Right))
-        ContentBrowserGo(+1);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Forward (mouse forward button)");
-    ImGui::SameLine(0.f, 2.f);
-
-    const bool at_root = content_browser_current_path == content_browser_root;
-    ImGui::BeginDisabled(at_root);
-    if (ImGui::ArrowButton("##BrowserUp", ImGuiDir_Up))
-    {
-        const std::filesystem::path parent = content_browser_current_path.parent_path();
-        if (IsPathInside(parent, content_browser_root))
-            content_browser_current_path = parent;
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Parent folder");
-
-    ImGui::SameLine();
-    const float new_w = ImGui::CalcTextSize("+ New").x + style.FramePadding.x * 2.f;
-    const float clear_w = content_browser_search[0] ? row_h + style.ItemSpacing.x : 0.f;
-    const float size_w = ImGui::GetFontSize() * 5.f + style.ItemSpacing.x;
-    const float search_w = std::max(60.f, ImGui::GetContentRegionAvail().x - new_w - clear_w - size_w - style.ItemSpacing.x);
-    ImGui::AlignTextToFramePadding();
-    icons::Draw(icons::Icon::Search);
-    ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
-    ImGui::SetNextItemWidth(search_w - ImGui::GetFontSize() - style.ItemSpacing.x * 0.5f);
-    ImGui::InputTextWithHint("##BrowserSearch", "Search in this folder", content_browser_search,
-                             sizeof(content_browser_search));
-    if (content_browser_search[0])
-    {
-        ImGui::SameLine();
-        if (icons::Button("##BrowserClearSearch", icons::Icon::Clear))
-            content_browser_search[0] = 0;
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Clear the search");
-    }
-    // Tile size.
-    if (!content_browser_thumb_loaded)
-        LoadContentBrowserThumbScale();
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5.f);
-    int thumb_percent = static_cast<int>(std::lround(content_browser_thumb_scale * 100.f));
-    if (ImGui::SliderInt("##BrowserThumbSize", &thumb_percent, 50, 250, "%d %%"))
-        content_browser_thumb_scale = std::clamp(thumb_percent / 100.f, 0.5f, 2.5f);
-    if (ImGui::IsItemDeactivatedAfterEdit())
-        SaveContentBrowserThumbScale();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Size of the thumbnails (Ctrl + mouse wheel in the grid)");
-
-    ImGui::SameLine();
-    if (ImGui::Button("+ New"))
-        ImGui::OpenPopup("##BrowserNew");
-    if (ImGui::BeginPopup("##BrowserNew"))
-    {
-        cba::NewFileMenu(content_browser_current_path);
-        ImGui::EndPopup();
-    }
-
-    // The line Lynxie stands on
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float x0 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
-    const float x1 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    dl->AddLine(ImVec2(x0, line_y), ImVec2(x1, line_y), ImGui::GetColorU32(ImGuiCol_Separator), 2.f);
-
-    ImGui::SetCursorScreenPos(ImVec2(start.x, line_y + style.ItemSpacing.y));
-    ImGui::Dummy(ImVec2(1.f, 0.f));
-    ImGui::SetWindowFontScale(0.62f);
-}
 
 // One cell of the Content Browser grid (drawn over its invisible button).
 // -----------------------------------------------------------------------------
@@ -3126,750 +2013,14 @@ private:
     std::shared_ptr<Result> pending_;
 };
 
-static void DrawAssetTile(ImDrawList* draw_list, const ImVec2& cell_min, const ImVec2& cell_max,
-                          const ImVec2& thumb_min, float image_size, float item_width,
-                          bool hovered, bool active, bool selected,
-                          const std::filesystem::path& path, bool is_directory, const std::string& filename)
-{
-        // Tile : nothing at rest (the window background shows through), a
-        // soft highlight when hovered / pressed, the selection color when selected.
-        if (hovered || active || selected)
-        {
-            ImVec4 color = ImGui::GetStyleColorVec4(
-                active   ? ImGuiCol_HeaderActive :
-                selected ? ImGuiCol_Header :
-                           ImGuiCol_HeaderHovered);
-            if (!selected && !active)
-                color.w *= 0.55f;
 
-            draw_list->AddRectFilled(cell_min, cell_max, ImGui::ColorConvertFloat4ToU32(color),
-                                     ImGui::GetStyle().FrameRounding);
-            if (selected)
-                draw_list->AddRect(cell_min, cell_max, ImGui::GetColorU32(ImGuiCol_HeaderActive),
-                                   ImGui::GetStyle().FrameRounding, 0, 2.f);
-        }
 
-        // Icon of the asset type (colored pixel art, 32 px : drawn at x2).
-        {
-            const lynx::editor::file_icons::Kind kind =
-                lynx::editor::file_icons::ForFile(path, is_directory);
 
-            const float icon_size =
-                std::max(32.f, std::floor(image_size * 0.8f / 32.f) * 32.f);
 
-            // A small hop when hovered.
-            const float hop = hovered && !active ? -2.f : 0.f;
 
-            lynx::editor::file_icons::DrawAt(
-                draw_list,
-                kind,
-                ImVec2(
-                    std::floor(thumb_min.x + (image_size - icon_size) * 0.5f),
-                    std::floor(thumb_min.y + (image_size - icon_size) * 0.5f + hop)
-                ),
-                icon_size
-            );
 
-            if (hovered && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-                ImGui::SetItemTooltip("%s\n%s", filename.c_str(), lynx::editor::file_icons::Describe(kind));
-        }
 
-        // Asset name under the image, clipped/wrapped to the cell width.
-        const ImVec2 text_size =
-            ImGui::CalcTextSize(filename.c_str(), nullptr, false, item_width - 8.f);
 
-        const float text_x =
-            cell_min.x + (item_width - std::min(text_size.x, item_width - 8.f)) * 0.5f;
-
-        draw_list->AddText(
-            ImGui::GetFont(),
-            ImGui::GetFontSize(),
-            ImVec2(text_x, cell_min.y + image_size + 9.f),
-            ImGui::GetColorU32(ImGuiCol_Text),
-            filename.c_str(),
-            nullptr,
-            item_width - 8.f
-        );
-
-}
-
-// Back / forward buttons of the mouse over the Content Browser (call inside it).
-static void ContentBrowserMouseHistory()
-{
-    ContentBrowserTrackHistory();
-    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
-    {
-        if (ImGui::IsMouseClicked(3))
-            ContentBrowserGo(-1);
-        if (ImGui::IsMouseClicked(4))
-            ContentBrowserGo(+1);
-    }
-}
-
-static void DrawContentBrowser(lynx::Level* level)
-{
-    namespace cba = content_browser_actions;
-
-    content_browser_focused = false;
-
-    if (!level)
-        return;
-
-    ImGui::Begin("Content Browser");
-
-    content_browser_focused =
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-
-    // History : folder changes of the last frame, then the side buttons of the
-    // mouse (back = button 4, forward = button 5) over the window.
-    ContentBrowserMouseHistory();
-    ImGui::SetWindowFontScale(0.62f);
-
-    const ImVec2 window_pos =
-        ImGui::GetWindowPos();
-
-    const ImVec2 window_size =
-        ImGui::GetWindowSize();
-
-    const bool native_drop_inside =
-        !pending_explorer_drop.paths.empty() &&
-        pending_explorer_drop.mouse_x >= window_pos.x &&
-        pending_explorer_drop.mouse_x <= window_pos.x + window_size.x &&
-        pending_explorer_drop.mouse_y >= window_pos.y &&
-        pending_explorer_drop.mouse_y <= window_pos.y + window_size.y;
-
-    if (native_drop_inside)
-    {
-        CopyExplorerFilesToContentBrowser();
-    }
-    else if (!pending_explorer_drop.paths.empty())
-    {
-        pending_explorer_drop.paths.clear();
-    }
-
-    std::filesystem::path relative_current;
-
-    if (IsPathInside(
-            content_browser_current_path,
-            content_browser_root))
-    {
-        std::error_code error;
-
-        relative_current =
-            std::filesystem::relative(
-                content_browser_current_path,
-                content_browser_root,
-                error
-            );
-
-        if (error)
-            relative_current.clear();
-    }
-
-    // Header : Lynxie on the line above the folders, path, search, New.
-    DrawContentBrowserHeader(relative_current);
-
-    // The folder is listed (and sorted) only when it changes, or twice a
-    // second : listing a big folder every frame (assets/ with hundreds of
-    // files) made the editor drop from ~280 to ~60 fps.
-    // Refreshed twice a second on a worker thread (see AsyncFolderList) ; the
-    // main thread lists only when the folder changes or after an action.
-    static AsyncFolderList folder_list;
-
-    // An action of this window (rename, delete, paste, new file... : a click
-    // or a key) : listed again at once instead of after half a second.
-    const bool browser_action =
-        content_browser_focused &&
-        (ImGui::IsMouseReleased(ImGuiMouseButton_Left) ||
-         ImGui::IsMouseReleased(ImGuiMouseButton_Right) ||
-         ImGui::IsKeyReleased(ImGuiKey_Enter) ||
-         ImGui::IsKeyReleased(ImGuiKey_Delete) ||
-         ImGui::IsKeyReleased(ImGuiKey_V) ||
-         ImGui::IsKeyReleased(ImGuiKey_D));
-
-    const std::vector<std::filesystem::directory_entry>& entries =
-        folder_list.Get(content_browser_current_path, ImGui::GetTime(), 0.5, browser_action);
-
-    // Search : the entries whose name contains the text (any case).
-    std::vector<const std::filesystem::directory_entry*> shown;
-    shown.reserve(entries.size());
-    {
-        std::string needle = content_browser_search;
-        std::transform(needle.begin(), needle.end(), needle.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        for (const auto& entry : entries)
-        {
-            if (!needle.empty())
-            {
-                std::string name = entry.path().filename().string();
-                std::transform(name.begin(), name.end(), name.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (name.find(needle) == std::string::npos)
-                    continue;
-            }
-            shown.push_back(&entry);
-        }
-    }
-    content_browser_item_count = static_cast<int>(shown.size());
-
-    // The grid scrolls under the header.
-    // Ctrl held : the wheel resizes the tiles instead of scrolling.
-    ImGui::BeginChild("##ContentGrid", ImVec2(0.f, 0.f), ImGuiChildFlags_None,
-                      ImGui::GetIO().KeyCtrl ? ImGuiWindowFlags_NoScrollWithMouse : 0);
-    ImGui::SetWindowFontScale(0.62f);
-    content_browser_focused = content_browser_focused ||
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-
-    // --------------------------------------------------------
-    // Asset grid
-    // --------------------------------------------------------
-
-    // Ctrl + wheel over the grid : tile size.
-    if (ImGui::IsWindowHovered() && ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.f)
-    {
-        content_browser_thumb_scale = std::clamp(
-            content_browser_thumb_scale * (ImGui::GetIO().MouseWheel > 0.f ? 1.1f : 1.f / 1.1f), 0.5f, 2.5f);
-        SaveContentBrowserThumbScale();
-    }
-    const float thumb = content_browser_thumb_scale;
-    const float item_width = std::floor(128.f * thumb);
-    const float image_size = std::floor(92.f * thumb);
-    const float item_height = image_size + 34.f;
-    constexpr float item_spacing = 10.f;
-
-    const float content_width =
-        std::max(1.f, ImGui::GetContentRegionAvail().x);
-
-    const int columns =
-        std::max(
-            1,
-            static_cast<int>(
-                (content_width + item_spacing) /
-                (item_width + item_spacing)
-            )
-        );
-
-    // Only the visible rows are drawn (a folder can hold hundreds of files).
-    const int row_count =
-        (static_cast<int>(shown.size()) + columns - 1) / columns;
-
-    // Cells of every entry (also the rows the clipper skips) : rubber band.
-    const ImVec2 grid_origin = ImGui::GetCursorScreenPos();
-    const float row_pitch = item_height + ImGui::GetStyle().ItemSpacing.y;
-    static int browser_anchor = -1;   // Shift + click range start (index in `shown`)
-    if (browser_anchor >= static_cast<int>(shown.size()))
-        browser_anchor = -1;
-
-    ImGuiListClipper clipper;
-    clipper.Begin(row_count, row_pitch);
-
-    while (clipper.Step())
-    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
-    for (int column = 0; column < columns; ++column)
-    {
-        const size_t index = static_cast<size_t>(row) * static_cast<size_t>(columns) + static_cast<size_t>(column);
-        if (index >= shown.size())
-            break;
-
-        const std::filesystem::directory_entry& entry = *shown[index];
-
-        if (column > 0)
-            ImGui::SameLine(0.f, item_spacing);
-
-        ImGui::PushID(entry.path().generic_string().c_str());
-
-        const bool is_directory =
-            entry.is_directory();
-
-        const std::string filename =
-            entry.path().filename().string();
-
-        // Keep the whole cell clickable, but draw the actual asset
-        // thumbnail ourselves so the button behaves like an image button.
-        const ImVec2 cell_pos = ImGui::GetCursorScreenPos();
-        const bool clicked =
-            ImGui::InvisibleButton(
-                "##Asset",
-                ImVec2(item_width, item_height)
-            );
-
-        const bool hovered = ImGui::IsItemHovered();
-        const bool active = ImGui::IsItemActive();
-        const bool selected = cba::IsSelected(entry.path());
-
-        // Double-click on a text file (.js, .py, .json, .xml, .txt...) : opens
-        // it in a script editor window (one window per file). A single click
-        // keeps the existing behaviour, files stay usable as drag sources.
-        if (!is_directory &&
-            hovered &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-        {
-            // .level : opens the level (and its linked voxel world).
-            if (cba::IsLevel(entry.path()))
-                cba::OpenLevel(entry.path());
-            // Files of the plugins (.dialogue, .sequence...).
-            else if (lynx::editor::plugins::CanOpen(entry.path()) &&
-                     lynx::editor::plugins::OpenFile(entry.path()))
-                ;
-            // .widget : Widget Editor (UMG-like designer).
-            else if (lynx::editor::widget_editor::CanOpen(entry.path()))
-                lynx::editor::widget_editor::Open(entry.path());
-            // .animgraph / .bt : node editors.
-            else if (lynx::editor::graph_editors::CanOpen(entry.path()))
-                lynx::editor::graph_editors::Open(entry.path());
-            // .vfx : Particle Editor (Cascade-like).
-            else if (lynx::editor::particle_editor::CanOpen(entry.path()))
-                lynx::editor::particle_editor::Open(entry.path());
-            else if (lynx::editor::script_editors::CanOpen(entry.path()))
-                lynx::editor::script_editors::Open(entry.path());
-        }
-
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-        const ImVec2 cell_min = cell_pos;
-        const ImVec2 cell_max(
-            cell_pos.x + item_width,
-            cell_pos.y + item_height
-        );
-
-        const float thumb_x =
-            cell_pos.x + (item_width - image_size) * 0.5f;
-        const float thumb_y =
-            cell_pos.y + 4.f;
-
-        const ImVec2 thumb_min(thumb_x, thumb_y);
-        const ImVec2 thumb_max(
-            thumb_x + image_size,
-            thumb_y + image_size
-        );
-        (void)thumb_max;
-
-        DrawAssetTile(draw_list, cell_min, cell_max, thumb_min, image_size, item_width,
-                      hovered, active, selected, entry.path(), is_directory, filename);
-
-        // Click : select (Ctrl : add / remove, Shift : range). Double-click on
-        // a folder : open it (like Unreal).
-        if (clicked)
-        {
-            const ImGuiIO& cio = ImGui::GetIO();
-            if (cio.KeyCtrl)
-            {
-                cba::ToggleSelected(entry.path());
-                browser_anchor = static_cast<int>(index);
-            }
-            else if (cio.KeyShift && browser_anchor >= 0)
-            {
-                std::vector<std::filesystem::path> range;
-                const size_t from = std::min(static_cast<size_t>(browser_anchor), index);
-                const size_t to = std::max(static_cast<size_t>(browser_anchor), index);
-                for (size_t k = from; k <= to; ++k)
-                    range.push_back(shown[k]->path());
-                cba::SetSelection(range, entry.path());
-            }
-            else
-            {
-                cba::SelectOnly(entry.path());
-                browser_anchor = static_cast<int>(index);
-            }
-        }
-
-        if (is_directory && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-            content_browser_current_path = entry.path();   // listed again at the next frame
-
-        if (!is_directory &&
-            ImGui::BeginDragDropSource(
-                ImGuiDragDropFlags_SourceAllowNullID))
-        {
-            const std::string asset_path =
-                entry.path().generic_string();
-
-            ImGui::SetDragDropPayload(
-                "LYNX_ASSET_FILE",
-                asset_path.c_str(),
-                asset_path.size() + 1
-            );
-
-            ImGui::TextUnformatted(filename.c_str());
-            ImGui::EndDragDropSource();
-        }
-
-        // Right click : open, rename, duplicate, copy / cut, delete...
-        cba::ItemContextMenu(entry);
-
-        ImGui::PopID();
-    }
-
-    // Rubber band : drag from an empty place of the grid (Ctrl / Shift : added
-    // to the selection). A simple click there : nothing selected.
-    {
-        static RubberBand band;
-        static std::vector<std::filesystem::path> base;
-        const bool start = ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                           !ImGui::IsAnyItemHovered() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
-        if (start)
-        {
-            base = (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) ? cba::state.selection
-                                                                      : std::vector<std::filesystem::path>{};
-            if (base.empty())
-                cba::ClearSelection();
-        }
-
-        std::vector<std::pair<ImVec2, ImVec2>> rects;
-        rects.reserve(shown.size());
-        for (size_t k = 0; k < shown.size(); ++k)
-        {
-            const float x = grid_origin.x + static_cast<float>(k % static_cast<size_t>(columns)) * (item_width + item_spacing);
-            const float y = grid_origin.y + static_cast<float>(k / static_cast<size_t>(columns)) * row_pitch;
-            rects.emplace_back(ImVec2(x, y), ImVec2(x + item_width, y + item_height));
-        }
-
-        std::vector<int> inside;
-        if (RubberBandUpdate(band, start, rects, inside))
-        {
-            std::vector<std::filesystem::path> paths = base;
-            for (int k : inside)
-                if (std::find(paths.begin(), paths.end(), shown[k]->path()) == paths.end())
-                    paths.push_back(shown[k]->path());
-            cba::SetSelection(paths, inside.empty() ? (paths.empty() ? std::filesystem::path() : paths.back())
-                                                    : shown[inside.back()]->path());
-        }
-
-        // Ctrl + A : everything shown.
-        if (content_browser_focused && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
-            !ImGui::GetIO().WantTextInput && !shown.empty())
-        {
-            std::vector<std::filesystem::path> all;
-            for (const auto* e : shown)
-                all.push_back(e->path());
-            cba::SetSelection(all, all.back());
-        }
-    }
-
-    if (entries.empty())
-        ImGui::TextDisabled("Empty folder  (right click : new folder / new file)");
-    else if (shown.empty())
-        ImGui::TextDisabled("Nothing matches \"%s\"", content_browser_search);
-
-    // Right click on the empty area, keyboard shortcuts, popups.
-    cba::BackgroundContextMenu();
-    cba::Shortcuts();
-    cba::Popups();
-
-    ImGui::EndChild();
-
-    ImGui::SetWindowFontScale(0.8f);
-    ImGui::End();
-}
-
-
-static void HandleLevelAssetDrop(lynx::Level* level)
-{
-    if (!level || isPlaying)
-        return;
-
-    ImGuiIO& io = ImGui::GetIO();
-
-    // The HRL level is rendered outside ImGui. When no ImGui window is
-    // capturing the mouse, a Content Browser payload can be dropped here.
-    if (!SceneAcceptsMouse(io.WantCaptureMouse) ||
-        !ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-    {
-        return;
-    }
-
-    const ImGuiPayload* payload =
-        ImGui::GetDragDropPayload();
-
-    if (!payload ||
-        !payload->Data ||
-        payload->DataSize <= 0 ||
-        !payload->DataType ||
-        std::strcmp(
-            payload->DataType,
-            "LYNX_ASSET_FILE"
-        ) != 0)
-    {
-        return;
-    }
-
-    std::string path(
-        static_cast<const char*>(payload->Data),
-        static_cast<size_t>(payload->DataSize)
-    );
-
-    if (!path.empty() && path.back() == '\0')
-        path.pop_back();
-
-    const std::filesystem::path asset_path(path);
-
-    if (!IsPathInside(
-            asset_path,
-            content_browser_root))
-    {
-        return;
-    }
-
-    if (IsSupportedImageExtension(asset_path))
-    {
-        CreateActorFromAsset(
-            asset_path,
-            "StaticSprite",
-            "texture_path"
-        );
-    }
-    else if (IsSupportedAudioExtension(asset_path))
-    {
-        CreateActorFromAsset(
-            asset_path,
-            "AudioSource2D",
-            "path"
-        );
-    }
-}
-
-
-// -----------------------------------------------------------------------------
-// Asset path field (Details panel, string properties)
-// -----------------------------------------------------------------------------
-// Text field + "..." button. The button opens a small explorer rooted at
-// assets/, and the value written back is ALWAYS relative to assets/
-// (e.g. "sounds/boom.wav"). A Content Browser file can also be dropped
-// directly on the field or on the button.
-// Returns true when `value` was modified.
-static bool DrawAssetPathField(std::string& value)
-{
-    static std::filesystem::path picker_dir;
-    static char picker_search[128] = {};
-
-    bool changed = false;
-
-    auto accept_drop = [&]()
-    {
-        if (!ImGui::BeginDragDropTarget())
-            return;
-
-        if (const ImGuiPayload* payload =
-                ImGui::AcceptDragDropPayload("LYNX_ASSET_FILE"))
-        {
-            std::string dropped(
-                static_cast<const char*>(payload->Data),
-                static_cast<size_t>(payload->DataSize)
-            );
-
-            if (!dropped.empty() && dropped.back() == '\0')
-                dropped.pop_back();
-
-            std::string relative;
-
-            if (GetAssetRelativePath(
-                    std::filesystem::path(dropped),
-                    relative))
-            {
-                value = relative;
-                changed = true;
-            }
-        }
-
-        ImGui::EndDragDropTarget();
-    };
-
-    const float spacing =
-        ImGui::GetStyle().ItemInnerSpacing.x;
-
-    const float button_width =
-        ImGui::GetFrameHeight() * 1.6f;
-
-    ImGui::SetNextItemWidth(
-        std::max(
-            1.f,
-            ImGui::GetContentRegionAvail().x -
-                button_width -
-                spacing
-        )
-    );
-
-    char buffer[1024];
-
-    std::snprintf(
-        buffer,
-        sizeof(buffer),
-        "%s",
-        value.c_str()
-    );
-
-    if (ImGui::InputText(
-            "##value",
-            buffer,
-            sizeof(buffer)
-        ))
-    {
-        value = buffer;
-        changed = true;
-    }
-
-    accept_drop();
-
-    ImGui::SameLine(0.f, spacing);
-
-    if (ImGui::Button(
-            "...",
-            ImVec2(button_width, 0.f)
-        ))
-    {
-        picker_dir = content_browser_root;
-        picker_search[0] = '\0';
-        ImGui::OpenPopup("AssetPicker");
-    }
-
-    accept_drop();
-
-    ImGui::SetNextWindowSize(
-        ImVec2(640.f, 600.f),
-        ImGuiCond_Appearing
-    );
-
-    if (ImGui::BeginPopup("AssetPicker"))
-    {
-        // Header : current folder, always shown relative to assets/.
-        std::string current_relative =
-            picker_dir.lexically_relative(content_browser_root)
-                .generic_string();
-
-        if (current_relative == ".")
-            current_relative.clear();
-
-        ImGui::TextDisabled(
-            "assets/%s",
-            current_relative.c_str()
-        );
-
-        if (ImGui::Button("None"))
-        {
-            value.clear();
-            changed = true;
-            ImGui::CloseCurrentPopup();
-        }
-
-        if (picker_dir != content_browser_root)
-        {
-            ImGui::SameLine();
-
-            if (ImGui::Button(".."))
-            {
-                const std::filesystem::path parent =
-                    picker_dir.parent_path();
-
-                if (IsPathInside(parent, content_browser_root))
-                    picker_dir = parent;
-            }
-        }
-
-        ImGui::SameLine();
-
-        ImGui::InputTextWithHint(
-            "##PickerSearch",
-            "Search...",
-            picker_search,
-            sizeof(picker_search)
-        );
-
-        ImGui::Separator();
-
-        // Was listed and sorted every frame while open : now when the folder
-        // changes, then refreshed in the background (see AsyncFolderList).
-        static AsyncFolderList picker_list;
-        const std::vector<std::filesystem::directory_entry>& entries =
-            picker_list.Get(picker_dir, ImGui::GetTime(), 1.0, ImGui::IsWindowAppearing());
-
-        auto to_lower = [](std::string text)
-        {
-            std::transform(
-                text.begin(),
-                text.end(),
-                text.begin(),
-                [](unsigned char c)
-                {
-                    return static_cast<char>(std::tolower(c));
-                }
-            );
-
-            return text;
-        };
-
-        const std::string search = to_lower(picker_search);
-
-        ImGui::BeginChild("##AssetPickerList", ImVec2(0.f, 0.f));
-
-        bool any_entry = false;
-
-        for (const auto& entry : entries)
-        {
-            const bool is_directory = entry.is_directory();
-
-            const std::string filename =
-                entry.path().filename().string();
-
-            if (!search.empty() &&
-                to_lower(filename).find(search) == std::string::npos)
-            {
-                continue;
-            }
-
-            any_entry = true;
-
-            const std::string relative =
-                entry.path().lexically_relative(content_browser_root)
-                    .generic_string();
-
-            ImGui::PushID(relative.c_str());
-
-            if (is_directory)
-            {
-                const std::string label = "[+] " + filename;
-
-                if (ImGui::Selectable(label.c_str(), false))
-                {
-                    picker_dir = entry.path();
-                    picker_search[0] = '\0';
-                }
-            }
-            else
-            {
-                if (ImGui::Selectable(
-                        filename.c_str(),
-                        relative == value
-                    ))
-                {
-                    value = relative;
-                    changed = true;
-                    ImGui::CloseCurrentPopup();
-                }
-            }
-
-            ImGui::PopID();
-        }
-
-        if (!any_entry)
-            ImGui::TextDisabled("Empty");
-
-        ImGui::EndChild();
-
-        ImGui::EndPopup();
-    }
-
-    return changed;
-}
-
-
-static void WindowCloseCallback(GLFWwindow* window)
-{
-    show_close_confirmation = true;
-
-    glfwSetWindowShouldClose(
-        window,
-        GLFW_FALSE
-    );
-}
 
 
 // -----------------------------------------------------------------------------
@@ -4018,14 +2169,9 @@ static void LoadSettings()
     }
 }
 
-static void ApplyRuntimeSettings(GLFWwindow* window)
+static void ApplyRuntimeSettings()
 {
-    if (window)
-    {
-        glfwSwapInterval(
-            appSettings.vsync ? 1 : 0
-        );
-    }
+    Rset_vsync(appSettings.vsync ? R_TRUE : R_FALSE);
 
     cameraSpeed = appSettings.cameraSpeed;
 
@@ -4847,128 +2993,6 @@ static void ShowEditorWarning(const std::string& text)
 #include "EditorCommands.inl"
 
 
-// Project page of the Options window (settings.cfg of the project).
-static void DrawProjectSettingsPage()
-{
-    ImGui::SeparatorText("Game DLL");
-
-    if (ImGui::Checkbox(
-            "Reload the game after \"Compile\"",
-            &appSettings.reloadAfterBuild
-        ))
-    {
-        SaveSettings();
-    }
-
-    if (ImGui::Checkbox(
-            "Reload the game when its DLL is rebuilt",
-            &appSettings.autoReloadOnChange
-        ))
-    {
-        SaveSettings();
-    }
-
-    if (ImGui::IsItemHovered())
-    {
-        ImGui::SetTooltip(
-            "Build.bat or CLion rebuilt build/<game>.dll while the editor runs.\n"
-            "While playing, the reload waits for Stop."
-        );
-    }
-
-    ImGui::SeparatorText("Display");
-
-    if (ImGui::Checkbox(
-            "VSync",
-            &appSettings.vsync
-        ))
-    {
-        ApplyRuntimeSettings(nullptr);
-        glfwSwapInterval(
-            appSettings.vsync ? 1 : 0
-        );
-        SaveSettings();
-    }
-
-    ImGui::SeparatorText("Audio");
-
-    if (ImGui::SliderFloat(
-            "Master volume",
-            &appSettings.masterVolume,
-            0.f,
-            2.f,
-            "%.2f"
-        ))
-    {
-        lynx::SetMasterVolume(
-            appSettings.masterVolume
-        );
-        SaveSettings();
-    }
-
-    ImGui::SeparatorText("Editor camera");
-
-    if (ImGui::SliderFloat(
-            "Camera speed",
-            &appSettings.cameraSpeed,
-            1.f,
-            400.f,
-            "%.0f"
-        ))
-    {
-        cameraSpeed = appSettings.cameraSpeed;
-        SaveSettings();
-    }
-
-    ImGui::SeparatorText("Voxels");
-
-    int voxelMode =
-        static_cast<int>(appSettings.voxelRenderMode);
-
-    const char* voxelModes[] =
-    {
-        "Flat",
-        "Smooth",
-        "Blocky"
-    };
-
-    if (ImGui::Combo(
-            "Render mode",
-            &voxelMode,
-            voxelModes,
-            IM_ARRAYSIZE(voxelModes)
-        ))
-    {
-        appSettings.voxelRenderMode =
-            static_cast<HRL_EVoxelRenderMode>(voxelMode);
-
-        HRL_SetVoxelRenderMode(
-            scene,
-            appSettings.voxelRenderMode
-        );
-
-        SaveSettings();
-    }
-
-    ImGui::TextDisabled("Units : 1 = 1 voxel (positions, sizes, speeds)");
-
-    ImGui::Spacing();
-
-    if (ImGui::Button("Reset project settings"))
-    {
-        appSettings = AppSettings{};
-        cameraSpeed = appSettings.cameraSpeed;
-
-        ApplyRuntimeSettings(
-            ImGui::GetCurrentContext()
-                ? glfwGetCurrentContext()
-                : nullptr
-        );
-
-        SaveSettings();
-    }
-
-}
 
 // Top bar. Every button has a keyboard shortcut that keeps working.
 // -----------------------------------------------------------------------------
@@ -4980,517 +3004,12 @@ static void DrawProjectSettingsPage()
 // Game, Reload Game, build options. Plugins : Options > Plugins (and their
 // windows / tools in the Windows menu).
 
-// Small "v" button glued to the previous one (split buttons).
-static bool ToolbarArrowButton(const char* id)
-{
-    const float frame_h = ImGui::GetFrameHeight();
-    ImGui::SameLine(0.f, 1.f);
-    const bool clicked = ImGui::Button(id, ImVec2(frame_h * 0.9f, frame_h));
-    const ImVec2 min = ImGui::GetItemRectMin();
-    const ImVec2 max = ImGui::GetItemRectMax();
-    const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f + 1.f);
-    const float r = frame_h * 0.16f;
-    const ImVec2 chevron[3] = { ImVec2(c.x - r, c.y - r * 0.5f), ImVec2(c.x, c.y + r * 0.5f), ImVec2(c.x + r, c.y - r * 0.5f) };
-    ImGui::GetWindowDrawList()->AddPolyline(chevron, 3, ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_None, 1.5f);
-    return clicked;
-}
 
-// The toolbar is made of groups (Project, Edit, Gizmo, Play, Game, right
-// side) : each one is drawn on a rounded "pill" behind its buttons, which
-// reads better than "|" separators.
-static std::vector<std::pair<ImVec2, ImVec2>> g_toolbar_groups;
 
-static void ToolbarGroupBegin()
-{
-    ImGui::BeginGroup();
-}
 
-static void ToolbarGroupEnd()
-{
-    ImGui::EndGroup();
-    g_toolbar_groups.emplace_back(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-}
 
-static void ToolbarSeparator()
-{
-    ToolbarGroupEnd();
-    ImGui::SameLine(0.f, ImGui::GetStyle().ItemSpacing.x * 2.5f);
-    ToolbarGroupBegin();
-}
 
-// Popup under the last item, left-aligned with `left_x`.
-static bool ToolbarBeginPopup(const char* id, float left_x)
-{
-    ImGui::SetNextWindowPos(ImVec2(left_x, ImGui::GetItemRectMax().y + 4.f), ImGuiCond_Appearing);
-    return ImGui::BeginPopup(id);
-}
 
-static void DrawToolbar()
-{
-    namespace ide = lynx::editor::external_ide;
-    namespace icons = lynx::editor::icons;
-
-    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
-
-    // A little taller than a button row : room for the group pills.
-    const float height =
-        ImGui::GetFrameHeight() +
-        ImGui::GetStyle().WindowPadding.y * 2.f + 4.f;
-
-    if (ImGui::BeginViewportSideBar(
-            "##Toolbar",
-            main_viewport,
-            ImGuiDir_Up,
-            height,
-            ImGuiWindowFlags_NoSavedSettings))
-    {
-        auto tooltip = [](const char* text)
-        {
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s", text);
-        };
-
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float frame_h = ImGui::GetFrameHeight();
-        const float icon_size = ImGui::GetTextLineHeight();
-
-        const std::filesystem::path game_folder =
-            currentProject.root.empty() ? std::filesystem::current_path() : currentProject.root;
-
-        // Icon of a code editor : the real one, else the generic code icon.
-        auto draw_ide_icon = [&](ImDrawList* dl, ide::Ide which, ImVec2 at, float size, bool disabled)
-        {
-            const unsigned int tex = ide::IconTexture(which);
-            const ImU32 tint = ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, disabled ? 0.4f : 1.f));
-            if (tex != 0)
-                dl->AddImage(ImTextureRef(static_cast<ImTextureID>(static_cast<intptr_t>(tex))),
-                             at, ImVec2(at.x + size, at.y + size), ImVec2(0.f, 1.f), ImVec2(1.f, 0.f), tint);
-            else
-                icons::DrawAt(dl, icons::Icon::FileCode, at, size,
-                              ImGui::GetColorU32(ImGuiCol_Text, disabled ? 0.4f : 1.f));
-        };
-
-        auto open_in = [&](ide::Ide which)
-        {
-            std::string error;
-            if (ide::Open(which, game_folder, error))
-                ide::SetLastUsed(which);
-            else
-                ShowEditorWarning(error);
-        };
-
-        // A menu row : [icon] text.
-        auto icon_row = [&](const char* id, const char* text, bool selected, bool disabled,
-                            const std::function<void(ImDrawList*, ImVec2, float)>& draw_icon) -> bool
-        {
-            const float row_icon = ImGui::GetTextLineHeight() * 1.25f;
-            const float row_h = std::max(row_icon, ImGui::GetTextLineHeight()) + 6.f;
-            const float row_w = std::max(240.f, ImGui::CalcTextSize(text).x + row_icon + 40.f);
-            const ImVec2 row_pos = ImGui::GetCursorScreenPos();
-            const bool clicked = ImGui::Selectable(id, selected, 0, ImVec2(row_w, row_h));
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            draw_icon(dl, ImVec2(row_pos.x + 4.f, row_pos.y + (row_h - row_icon) * 0.5f), row_icon);
-            dl->AddText(ImVec2(row_pos.x + row_icon + 14.f, row_pos.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
-                        ImGui::GetColorU32(disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text), text);
-            return clicked;
-        };
-
-        // Pills of the groups : drawn under the buttons (channel 0) at the end.
-        g_toolbar_groups.clear();
-        ImDrawList* toolbar_dl = ImGui::GetWindowDrawList();
-        toolbar_dl->ChannelsSplit(2);
-        toolbar_dl->ChannelsSetCurrent(1);
-        ToolbarGroupBegin();
-
-        // =================================================================
-        // Project v : infos, other project, code editors, Explorer, Ship Game
-        // =================================================================
-        {
-            const float left_x = ImGui::GetCursorScreenPos().x;
-            const std::string project_label =
-                (currentProject.name.empty() ? std::string("Project") : currentProject.name) +
-                "##ProjectButton";
-
-            const bool open_project_menu =
-                icons::ButtonWithLabel(project_label.c_str(), icons::Icon::Project);
-            tooltip("Project : open another one, code editors, Ship Game");
-            if (ToolbarArrowButton("##ProjectArrow") || open_project_menu)
-                ImGui::OpenPopup("ProjectPopup");
-
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
-            if (ToolbarBeginPopup("ProjectPopup", left_x))
-            {
-                std::error_code relative_error;
-                const std::filesystem::path module_relative =
-                    std::filesystem::relative(currentProject.module_path, currentProject.root, relative_error);
-
-                ImGui::TextUnformatted(currentProject.name.c_str());
-                ImGui::TextDisabled("%s", currentProject.root.string().c_str());
-                ImGui::TextDisabled(
-                    "Game DLL : %s",
-                    currentProject.script_only
-                        ? "none (JavaScript only)"
-                        : (relative_error ? currentProject.module_path : module_relative).generic_string().c_str());
-
-                ImGui::SeparatorText("Project");
-                if (ImGui::MenuItem("Open another project...", nullptr, false, !isPlaying))
-                {
-                    switch_project_requested = true;
-                    show_close_confirmation = true;
-                }
-                if (ImGui::MenuItem("Ship Game...", nullptr, false, !isPlaying && !lynx::editor::ship_game::IsBusy()))
-                    lynx::editor::ship_game::Open();
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip("Make the game playable without the editor :\n"
-                                      "compile it, pack assets/ inside the executable,\n"
-                                      "copy it with its DLLs to a folder.");
-                if (ImGui::MenuItem("Project settings..."))
-                {
-                    showEditorOptions = true;
-                    lynx::editor::options::OpenPage(lynx::editor::options::Page::Project);
-                }
-
-                ImGui::SeparatorText("Open the game folder with");
-                const bool searching = !ide::DetectionDone();
-                const ide::Ide last = ide::LastUsed();
-                for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
-                {
-                    const auto which = static_cast<ide::Ide>(i);
-                    const bool missing = !searching && !ide::IsInstalled(which);
-                    const std::string text = std::string(ide::Name(which)) + (missing ? "  (not found)" : "");
-                    ImGui::PushID(i);
-                    if (icon_row("##ide", text.c_str(), which == last, missing,
-                                 [&](ImDrawList* dl, ImVec2 at, float size) { draw_ide_icon(dl, which, at, size, missing); }))
-                        open_in(which);
-                    ImGui::PopID();
-                }
-                if (icon_row("##explorer", "Show in Explorer", false, false,
-                             [&](ImDrawList* dl, ImVec2 at, float size)
-                             { icons::DrawAt(dl, icons::Icon::Folder, at, size, ImGui::GetColorU32(ImGuiCol_Text)); }))
-                {
-#ifdef _WIN32
-                    ShellExecuteW(nullptr, L"open", game_folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#endif
-                }
-                if (searching)
-                    ImGui::TextDisabled("Searching the code editors...");
-
-                ImGui::EndPopup();
-            }
-            ImGui::PopStyleVar();
-
-            // One click : the game folder in the last code editor used.
-            ImGui::SameLine();
-            const ide::Ide last = ide::LastUsed();
-            if (ImGui::Button("##OpenWithLast", ImVec2(frame_h, frame_h)))
-                open_in(last);
-            {
-                const ImVec2 min = ImGui::GetItemRectMin();
-                draw_ide_icon(ImGui::GetWindowDrawList(), last,
-                              ImVec2(min.x + (frame_h - icon_size) * 0.5f, min.y + (frame_h - icon_size) * 0.5f),
-                              icon_size, false);
-            }
-            tooltip((std::string("Open the game folder in ") + ide::Name(last) +
-                     "\n(Project menu : another code editor)").c_str());
-        }
-
-        ToolbarSeparator();
-
-        // =================================================================
-        // Edit : Save (dot : unsaved changes), Undo, gizmo modes
-        // =================================================================
-        ImGui::BeginDisabled(isPlaying);
-
-        if (icons::Button("Save", icons::Icon::Save))
-            SaveEditor();
-        if (editor_dirty && !isPlaying)
-        {
-            const ImVec2 max = ImGui::GetItemRectMax();
-            const ImVec2 min = ImGui::GetItemRectMin();
-            ImGui::GetWindowDrawList()->AddCircleFilled(
-                ImVec2(max.x - 4.f, min.y + 4.f), 3.5f, IM_COL32(240, 160, 40, 255));
-        }
-        tooltip(editor_dirty ? "Save the level (Ctrl+S)\nThere are unsaved changes." : "Save the level (Ctrl+S)");
-
-        ImGui::SameLine();
-        if (icons::Button("Undo", icons::Icon::Undo) && !brushPainting)
-            UndoLastEditorAction();
-        tooltip("Undo (Ctrl+Z)");
-
-        ToolbarSeparator();
-
-        auto mode_button = [&](const char* label, icons::Icon icon, int index, const char* tip)
-        {
-            if (icons::Button(label, icon, icons::kThemeTint, gizmoModeIndex == index))
-                SetGizmoModeIndex(index);
-            tooltip(tip);
-        };
-        mode_button("Translate", icons::Icon::Translate, 0, "Translate (Space cycles the gizmo modes)");
-        ImGui::SameLine();
-        mode_button("Rotate", icons::Icon::Rotate, 1, "Rotate (Space cycles the gizmo modes)");
-        ImGui::SameLine();
-        mode_button("Scale", icons::Icon::Scale, 2, "Scale (Space cycles the gizmo modes)");
-
-        ImGui::EndDisabled();
-
-        ToolbarSeparator();
-
-        // =================================================================
-        // Play / Stop, Simulate
-        // =================================================================
-        if (icons::ButtonWithLabel(
-                isPlaying ? "Stop##PlayStop" : "Play##PlayStop",
-                isPlaying ? icons::Icon::Stop : icons::Icon::Play,
-                isPlaying ? ImVec4(0.82f, 0.22f, 0.20f, 1.f) : ImVec4(0.22f, 0.62f, 0.26f, 1.f)))
-            TogglePlayMode();
-        tooltip(isPlaying
-            ? (isSimulating ? "Stop the simulation, back to the editor (F3 / Alt+S)"
-                            : "Stop the game, back to the editor (F3)")
-            : "Play the game in the editor (F3)");
-
-        if (!isPlaying)
-        {
-            ImGui::SameLine();
-            if (icons::ButtonWithLabel("Simulate##Simulate", icons::Icon::Eye, ImVec4(0.25f, 0.55f, 0.85f, 1.f)))
-                TogglePlayMode(true);
-            tooltip("Simulate : run the game without possessing any actor,\n"
-                    "keep the editor camera and its movements (Alt+S)");
-        }
-        else if (isSimulating)
-        {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.25f, 0.55f, 0.85f, 1.f), "Simulating");
-        }
-
-        ToolbarSeparator();
-
-        // =================================================================
-        // Game : [Compile | v] (Reload Game, build output, options)
-        // A JavaScript-only project has nothing to compile : the main part
-        // reloads the game.
-        // =================================================================
-        {
-            const float left_x = ImGui::GetCursorScreenPos().x;
-            const bool building = lynx::editor::game_build::IsRunning();
-
-            auto request_reload = [&]()
-            {
-                module_changed_notice = false;
-                reload_game_requested = true;
-            };
-
-            if (currentProject.script_only)
-            {
-                if (icons::ButtonWithLabel("Reload Game##GameMain", icons::Icon::Reload))
-                    request_reload();
-                tooltip("Reload the game : stops it, saves pending level edits,\n"
-                        "destroys every actor and rebuilds the level (scripts reloaded).");
-            }
-            else
-            {
-                ImGui::BeginDisabled(building);
-                if (icons::ButtonWithLabel("Compile##GameMain", icons::Icon::Compile))
-                    lynx::editor::game_build::Start();
-                ImGui::EndDisabled();
-                tooltip(appSettings.reloadAfterBuild
-                    ? "Compile the game (Build.bat of the project)\nthen reload it if the build succeeded."
-                    : "Compile the game (Build.bat of the project).");
-            }
-
-            if (ToolbarArrowButton("##GameArrow"))
-                ImGui::OpenPopup("GamePopup");
-            tooltip("Reload Game, build output, build options");
-
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
-            if (ToolbarBeginPopup("GamePopup", left_x))
-            {
-                if (!currentProject.script_only &&
-                    ImGui::MenuItem("Compile", nullptr, false, !building))
-                    lynx::editor::game_build::Start();
-
-                if (ImGui::MenuItem("Reload Game"))
-                    request_reload();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip(
-                        "Reload %s\n"
-                        "Stops the game, saves pending level edits, destroys every actor,\n"
-                        "unloads the DLL, loads it again and rebuilds the level.",
-                        currentProject.module_path.filename().string().c_str());
-
-                if (!currentProject.script_only)
-                {
-                    if (ImGui::MenuItem("Build output", nullptr, lynx::editor::game_build::WindowOpen()))
-                        lynx::editor::game_build::WindowOpen() = !lynx::editor::game_build::WindowOpen();
-
-                    ImGui::SeparatorText("Options");
-                    if (ImGui::MenuItem("Reload after Compile", nullptr, appSettings.reloadAfterBuild))
-                    {
-                        appSettings.reloadAfterBuild = !appSettings.reloadAfterBuild;
-                        SaveSettings();
-                    }
-                    if (ImGui::MenuItem("Reload when the DLL is rebuilt", nullptr, appSettings.autoReloadOnChange))
-                    {
-                        appSettings.autoReloadOnChange = !appSettings.autoReloadOnChange;
-                        SaveSettings();
-                    }
-                }
-
-                ImGui::Separator();
-                if (ImGui::MenuItem("Ship Game...", nullptr, false, !isPlaying && !lynx::editor::ship_game::IsBusy()))
-                    lynx::editor::ship_game::Open();
-
-                ImGui::EndPopup();
-            }
-            ImGui::PopStyleVar();
-
-            // Build state / DLL rebuilt outside the editor.
-            const std::string build_status = lynx::editor::game_build::ToolbarStatus();
-            if (!build_status.empty())
-            {
-                ImGui::SameLine();
-                const bool failed = build_status == "Build failed";
-                if (failed)
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
-                ImGui::TextUnformatted(build_status.c_str());
-                if (failed)
-                    ImGui::PopStyleColor();
-                if (ImGui::IsItemClicked())
-                    lynx::editor::game_build::WindowOpen() = true;
-                tooltip("Click : build output");
-            }
-            else if (hot_reload_pending)
-            {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(reload at Stop)");
-            }
-            else if (module_changed_notice)
-            {
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.35f, 1.f));
-                ImGui::TextUnformatted("DLL rebuilt");
-                ImGui::PopStyleColor();
-                if (ImGui::IsItemClicked())
-                    request_reload();
-                tooltip("The game DLL was rebuilt : click to reload it.");
-            }
-        }
-
-        // =================================================================
-        // Right side : [speed / volume]  Windows  Options  Lynxie
-        // Right-aligned with the width measured on the previous frame.
-        // =================================================================
-        ToolbarGroupEnd();
-
-        static float right_width = 0.f;
-        {
-            ImGui::SameLine();
-            const float content_right = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - style.WindowPadding.x;
-            const float start = content_right - right_width;
-            if (start > ImGui::GetCursorScreenPos().x)
-                ImGui::SetCursorScreenPos(ImVec2(start, ImGui::GetCursorScreenPos().y));
-            const float right_begin = ImGui::GetCursorScreenPos().x;
-            ToolbarGroupBegin();
-
-            // Camera speed + master volume : one button, a popup with both.
-            char view_label[96];
-            std::snprintf(view_label, sizeof(view_label), "Speed %.0f  Vol %d%%##ViewSettings",
-                          cameraSpeed, static_cast<int>(std::lround(appSettings.masterVolume * 100.f)));
-            const float view_left = ImGui::GetCursorScreenPos().x;
-            if (ImGui::Button(view_label))
-                ImGui::OpenPopup("ViewSettingsPopup");
-            tooltip("Editor camera speed and master volume");
-
-            if (ToolbarBeginPopup("ViewSettingsPopup", view_left))
-            {
-                ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-                if (ImGui::SliderFloat("Camera speed", &cameraSpeed, 1.f, 400.f, "%.0f"))
-                {
-                    appSettings.cameraSpeed = cameraSpeed;
-                    SaveSettings();
-                }
-                ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-                if (ImGui::SliderFloat("Master volume", &appSettings.masterVolume, 0.f, 2.f, "%.2f"))
-                {
-                    lynx::SetMasterVolume(appSettings.masterVolume);
-                    SaveSettings();
-                }
-                ImGui::EndPopup();
-            }
-
-            // Windows : editor windows, then the windows / tools of the plugins.
-            ImGui::SameLine();
-            const float windows_left = ImGui::GetCursorScreenPos().x;
-            if (icons::ButtonWithLabel("Windows", icons::Icon::Windows))
-                ImGui::OpenPopup("WindowsPopup");
-            tooltip("Show or hide editor windows");
-
-            if (ToolbarBeginPopup("WindowsPopup", windows_left))
-            {
-                ImGui::TextDisabled("Editor windows");
-                ImGui::Separator();
-                EditorWindowCheckbox("Viewport", &editorWindows.viewport, icons::Icon::Camera);
-                EditorWindowCheckbox("Outliner", &editorWindows.outliner, icons::Icon::Outliner);
-                EditorWindowCheckbox("Place Actors", &editorWindows.placeActors, icons::Icon::PlaceActors);
-                EditorWindowCheckbox("Content Browser", &editorWindows.contentBrowser, icons::Icon::ContentBrowser);
-                EditorWindowCheckbox("Details", &editorWindows.details, icons::Icon::Details);
-                EditorWindowCheckbox("Color Picking", &editorWindows.colorPicking, icons::Icon::ColorPick);
-                EditorWindowCheckbox("Paint", &editorWindows.config, icons::Icon::Paint);
-                EditorWindowCheckbox("Camera Shake", &editorWindows.cameraShake, icons::Icon::Shake);
-                EditorWindowCheckbox("Post Process", &editorWindows.postProcess, icons::Icon::Settings);
-                EditorWindowCheckbox("2D Lighting", &editorWindows.lighting2D, icons::Icon::Settings);
-                EditorWindowCheckbox("Voxel World", &editorWindows.voxelWorld, icons::Icon::World);
-                EditorWindowCheckbox("Input Settings", &editorWindows.inputSettings, icons::Icon::Input);
-                EditorWindowCheckbox("Commands (Python / AI)", &editorWindows.commands, icons::Icon::Commands);
-                EditorWindowCheckbox("Git", &editorWindows.git, icons::Icon::Git);
-                EditorWindowCheckbox("Console", &editorWindows.console, icons::Icon::Console);
-                EditorWindowCheckbox("Profiler", &editorWindows.profiler, icons::Icon::Profiler);
-                lynx::editor::plugins::DrawWindowsMenuItems();
-                ImGui::Separator();
-                ImGui::TextDisabled("All editor windows are hidden during Play.");
-                ImGui::EndPopup();
-            }
-
-            // Options : interface, project settings, plugins.
-            ImGui::SameLine();
-            if (icons::ButtonWithLabel("Options", icons::Icon::Settings, icons::kThemeTint, showEditorOptions))
-                showEditorOptions = !showEditorOptions;
-            tooltip("Options : interface, project settings, plugins");
-
-            // Lynxie : opens Commands on her tab.
-            ImGui::SameLine();
-            const float icon_height = frame_h - style.FramePadding.y * 2.f;
-            if (lynx::editor::lynxie_icon::Button("Lynxie", icon_height))
-            {
-                editorWindows.commands = true;
-                SaveEditorWindowVisibility();
-                lynx::editor::commands_window::ShowLynxie();
-            }
-            tooltip("Lynxie : ask a question about the engine, or what to change in the level");
-
-            ToolbarGroupEnd();
-            right_width = ImGui::GetItemRectMax().x - right_begin;
-        }
-
-        // Pills behind the groups.
-        toolbar_dl->ChannelsSetCurrent(0);
-        const float pad_x = style.ItemSpacing.x * 0.6f;
-        const float pad_y = std::max(1.f, (ImGui::GetWindowHeight() - frame_h) * 0.5f - 2.f);
-        ImVec4 pill = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
-        pill.w *= 0.55f;
-        ImVec4 edge = ImGui::GetStyleColorVec4(ImGuiCol_Border);
-        edge.w *= 0.6f;
-        for (const auto& [min, max] : g_toolbar_groups)
-        {
-            const ImVec2 a(min.x - pad_x, min.y - pad_y);
-            const ImVec2 b(max.x + pad_x, max.y + pad_y);
-            toolbar_dl->AddRectFilled(a, b, ImGui::ColorConvertFloat4ToU32(pill), frame_h * 0.35f);
-            toolbar_dl->AddRect(a, b, ImGui::ColorConvertFloat4ToU32(edge), frame_h * 0.35f);
-        }
-        toolbar_dl->ChannelsMerge();
-    }
-
-    ImGui::End();
-}
 
 
 // =============================================================================
@@ -5826,8 +3345,13 @@ namespace editor
     }
 
 
+    // The interface (raven/EditorUi.inl).
+    static void InitUi(Rid window);
+    static void UpdateUi(float dt);
+    static void ShutdownUi();
+
     void Init(
-        GLFWwindow* win,
+        Rid win,
         lynx::Engine* engine,
         HRL_id viewport,
         HRL_id gameplay_cam,
@@ -5852,26 +3376,9 @@ namespace editor
             assets_error
         );
 
-        // Must be registered before ImGui installs (and chains) its own callbacks.
-        glfwSetWindowCloseCallback(
-            win,
-            WindowCloseCallback
-        );
-
-        glfwSetDropCallback(
-            win,
-            DropCallback
-        );
-
-
-        // Custom title bar (Windows) : before ImGui, which chains its own window procedure.
-        lynx::editor::title_bar::Install(win);
-
-        InitImGui(win);
         LoadEditorWindowVisibility();
 
-        // Editor modules of the plugins (<Name>.Editor.dll) : they draw in
-        // this ImGui context.
+        // Editor modules of the plugins (<Name>.Editor.dll).
         {
             lynx::editor::plugins::Host host;
             host.get_selected_actor = []() { return editing_actor; };
@@ -5898,19 +3405,6 @@ namespace editor
             lynx::editor::commands_window::AskLynxie(prompt, display);
         });
 
-        // Widget Editor : textures / fonts / nested widgets with the asset picker.
-        lynx::editor::widget_editor::SetAssetFieldDrawer([](std::string& value)
-        {
-            return DrawAssetPathField(value);
-        });
-        lynx::editor::graph_editors::SetAssetFieldDrawer([](std::string& value)
-        {
-            return DrawAssetPathField(value);
-        });
-        lynx::editor::particle_editor::SetAssetFieldDrawer([](std::string& value)
-        {
-            return DrawAssetPathField(value);
-        });
 
         // Apply persisted audio/camera preferences.
         lynx::SetMasterVolume(
@@ -5971,7 +3465,8 @@ namespace editor
             HRL_TRUE
         );
 
-
+        // Panels, toolbar, shortcuts (they read the state above).
+        InitUi(win);
     }
 
 
@@ -5980,7 +3475,7 @@ namespace editor
         SaveEditorCamera();
         SaveEditorWindowVisibility();
 
-        ShutdownImGui();
+        ShutdownUi();
     }
 
 
@@ -6239,17 +3734,17 @@ namespace editor
     // Simulate : the game never gets the input (the editor camera moves).
     bool BlockGameInput()
     {
-        return isSimulating || ImGui::GetIO().KeyShift;
+        return isSimulating || lynx::editor::input::Shift();
     }
 
 
     bool WantsMouse()
     {
-        return !SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse);
+        return !SceneAcceptsMouse(true);
     }
 
 
-    void OnLeftMousePress(GLFWwindow* window)
+    void OnLeftMousePress()
     {
         if (isPlaying)
             return;
@@ -6257,15 +3752,11 @@ namespace editor
         double mouseX;
         double mouseY;
 
-        glfwGetCursorPos(
-            window,
-            &mouseX,
-            &mouseY
-        );
+        lynx::editor::input::MousePosition(mouseX, mouseY);
 
         MouseToScene(mouseX, mouseY, mouseX, mouseY);
 
-        const ImGuiIO& io = ImGui::GetIO();
+        const EditorIO io = EditorIO::Now();
 
         if ((!brushPaintEnabled || io.KeyCtrl) &&
             SceneAcceptsMouse(io.WantCaptureMouse))
@@ -6299,10 +3790,10 @@ namespace editor
 
     void OnScroll(double yoffset)
     {
-        if (!SceneAcceptsMouse(ImGui::GetIO().WantCaptureMouse))
+        if (!SceneAcceptsMouse(true))
             return;
 
-        const ImGuiIO& io = ImGui::GetIO();
+        const EditorIO io = EditorIO::Now();
 
         // Ctrl + wheel = brush size.
         // Ctrl also freezes the camera Z.
@@ -6349,7 +3840,6 @@ namespace editor
 
     // Everything editor related that runs BEFORE the engine update.
     void Tick(
-        GLFWwindow* win,
         float dt)
     {
         HRL_id camera = editor_camera;
@@ -6361,30 +3851,25 @@ namespace editor
         if (isSimulating)
             lynx::voxel_physics::AddFocus(camX, camY);
 
-        ImGuiIO& io =
-            ImGui::GetIO();
+        const EditorIO io = EditorIO::Now();
 
         double mouseX;
         double mouseY;
 
-        glfwGetCursorPos(
-            win,
-            &mouseX,
-            &mouseY
-        );
+        lynx::editor::input::MousePosition(mouseX, mouseY);
 
         // C = pick the voxel under the mouse. HRL expects framebuffer
         // coordinates, while GLFW returns window coordinates. Do this
         // conversion independently from the editor viewport conversion.
         static bool c_was_down = false;
         const bool c_down =
-            glfwGetKey(win, GLFW_KEY_C) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_C);
 
         if (c_down &&
             !c_was_down &&
             !isPlaying &&
             !io.WantTextInput &&
-            !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow))
+            sceneViewport.hovered)
         {
             // Use exactly the same screen-coordinate calculation as actor/voxel
             // placement. MouseToScene() is the authoritative conversion for the
@@ -6445,10 +3930,7 @@ namespace editor
         // --------------------------------------------------------
 
         const bool f4_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_F4
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_F4);
 
 
         if (f4_down && !f4_was_down)
@@ -6470,21 +3952,12 @@ namespace editor
         // --------------------------------------------------------
 
         const bool ctrl_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_LEFT_CONTROL
-            ) == GLFW_PRESS ||
-            glfwGetKey(
-                win,
-                GLFW_KEY_RIGHT_CONTROL
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_LEFT_CONTROL) ||
+            lynx::editor::input::Key(GLFW_KEY_RIGHT_CONTROL);
 
 
         const bool s_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_S
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_S);
 
 
         const bool ctrl_s =
@@ -6527,10 +4000,10 @@ namespace editor
         // 3D : free camera while the right mouse button is held over the
         // viewport (like Unreal).
         static bool flying = false;
-        const bool rmb = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+        const bool rmb = lynx::editor::input::Mouse(GLFW_MOUSE_BUTTON_RIGHT);
         if (!rmb)
             flying = false;
-        else if (!flying && sceneViewport.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        else if (!flying && sceneViewport.hovered && lynx::editor::input::MouseClicked(GLFW_MOUSE_BUTTON_RIGHT))
             flying = true;
 
         if (cameraMode == EditorCameraMode::Mode3D &&
@@ -6551,12 +4024,12 @@ namespace editor
                 };
                 const float up[3] = { 0.f, 1.f, 0.f };
 
-                if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) add(front, 1.f);
-                if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) add(front, -1.f);
-                if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) add(right, 1.f);
-                if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) add(right, -1.f);
-                if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) add(up, 1.f);
-                if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) add(up, -1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_W)) add(front, 1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_S)) add(front, -1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_D)) add(right, 1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_A)) add(right, -1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_E)) add(up, 1.f);
+                if (lynx::editor::input::Key(GLFW_KEY_Q)) add(up, -1.f);
 
                 const float speed = cameraSpeed * 2.f * (io.KeyShift ? 3.f : 1.f) * dt;
                 camX += move[0] * speed;
@@ -6575,17 +4048,17 @@ namespace editor
             // Speed depends on the camera height : slow when close, fast when far.
             const float moveSpeed = GetCameraSpeedForHeight();
 
-            if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS)
+            if (lynx::editor::input::Key(GLFW_KEY_W))
                 camY += moveSpeed * dt;
 
             if (!ctrl_down &&
-                glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS)
+                lynx::editor::input::Key(GLFW_KEY_S))
                 camY -= moveSpeed * dt;
 
-            if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS)
+            if (lynx::editor::input::Key(GLFW_KEY_D))
                 camX += moveSpeed * dt;
 
-            if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS)
+            if (lynx::editor::input::Key(GLFW_KEY_A))
                 camX -= moveSpeed * dt;
 
             camZ = ClampCameraZ(camZ);
@@ -6679,10 +4152,7 @@ namespace editor
 
         // Finish one gizmo movement as one undoable editor action.
         if (gizmoUndoActive &&
-            glfwGetMouseButton(
-                win,
-                GLFW_MOUSE_BUTTON_LEFT
-            ) != GLFW_PRESS)
+            !lynx::editor::input::Mouse(GLFW_MOUSE_BUTTON_LEFT))
         {
             const std::string actor_id =
                 gizmoUndoActorId;
@@ -6729,10 +4199,7 @@ namespace editor
             if (SceneAcceptsMouse(io.WantCaptureMouse))
             {
                 const bool leftMousePressed =
-                    glfwGetMouseButton(
-                        win,
-                        GLFW_MOUSE_BUTTON_LEFT
-                    ) == GLFW_PRESS;
+                    lynx::editor::input::Mouse(GLFW_MOUSE_BUTTON_LEFT);
 
 
                 const bool dragShape = IsDragShape(brushShape);
@@ -6926,10 +4393,7 @@ namespace editor
                 // F1 save
                 // ------------------------------------------------
 
-                if (glfwGetKey(
-                        win,
-                        GLFW_KEY_F1
-                    ) == GLFW_PRESS)
+                if (lynx::editor::input::Key(GLFW_KEY_F1))
                 {
                     std::cout
                         << "[F1] Saving world to: "
@@ -6945,10 +4409,7 @@ namespace editor
                 // F2 load
                 // ------------------------------------------------
 
-                if (glfwGetKey(
-                        win,
-                        GLFW_KEY_F2
-                    ) == GLFW_PRESS)
+                if (lynx::editor::input::Key(GLFW_KEY_F2))
                 {
 
                     auto world_save_data =
@@ -7012,10 +4473,7 @@ namespace editor
         static bool tab_was_down = false;
 
         const bool tab_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_TAB
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_TAB);
 
         if (tab_down &&
             !tab_was_down &&
@@ -7069,10 +4527,7 @@ namespace editor
         static bool space_was_down = false;
 
         const bool space_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_SPACE
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_SPACE);
 
         if (space_down &&
             !space_was_down &&
@@ -7091,10 +4546,7 @@ namespace editor
         // ------------------------------------------------------------
 
         const bool f3_down =
-            glfwGetKey(
-                win,
-                GLFW_KEY_F3
-            ) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_F3);
 
         if (f3_down && !f3_was_down)
             TogglePlayMode();
@@ -7110,12 +4562,12 @@ namespace editor
         static bool alt_s_was_down = false;
 
         const bool alt_down =
-            glfwGetKey(win, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
-            glfwGetKey(win, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+            lynx::editor::input::Key(GLFW_KEY_LEFT_ALT) ||
+            lynx::editor::input::Key(GLFW_KEY_RIGHT_ALT);
 
         const bool alt_s_down =
             alt_down &&
-            glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS &&
+            lynx::editor::input::Key(GLFW_KEY_S) &&
             !io.WantTextInput;
 
         if (alt_s_down && !alt_s_was_down)
@@ -7126,1916 +4578,12 @@ namespace editor
     }
 
 
-    // ImGui frame : all panels, shortcuts, popups. Ends with the ImGui render.
-    // "Viewport" window : the scene texture, stretched over the whole window.
-    static void DrawViewportWindow()
-    {
-        sceneViewport.visible = false;
-        sceneViewport.hovered = false;
 
-        // First launch : cover the whole work area.
-        const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
 
-        ImGui::SetNextWindowPos(
-            main_viewport->WorkPos,
-            ImGuiCond_FirstUseEver
-        );
-
-        ImGui::SetNextWindowSize(
-            main_viewport->WorkSize,
-            ImGuiCond_FirstUseEver
-        );
-
-        ImGui::PushStyleVar(
-            ImGuiStyleVar_WindowPadding,
-            ImVec2(0.f, 0.f)
-        );
-
-        const bool open =
-            ImGui::Begin(
-                "Viewport",
-                nullptr,
-                ImGuiWindowFlags_NoScrollbar |
-                ImGuiWindowFlags_NoScrollWithMouse
-            );
-
-        ImGui::PopStyleVar();
-
-        if (open)
-        {
-            const ImVec2 size = ImGui::GetContentRegionAvail();
-
-            const unsigned int texture_id =
-                HRL_GL_GetSceneTextureGL_ID(scene);
-
-            if (texture_id != 0 && size.x > 1.f && size.y > 1.f)
-            {
-                const ImVec2 pos = ImGui::GetCursorScreenPos();
-
-                // OpenGL textures are bottom-up : flip V.
-                ImGui::Image(
-                    (ImTextureID)(intptr_t)texture_id,
-                    size,
-                    ImVec2(0.f, 1.f),
-                    ImVec2(1.f, 0.f)
-                );
-
-                // Invisible button on top : it receives the clicks (so the
-                // window is not dragged) and keeps the mouse captured for
-                // the scene while a brush stroke goes outside the window.
-                ImGui::SetCursorScreenPos(pos);
-
-                // The 2D / 3D buttons are drawn over it afterwards.
-                ImGui::SetNextItemAllowOverlap();
-                ImGui::InvisibleButton(
-                    "##scene_viewport",
-                    size,
-                    ImGuiButtonFlags_MouseButtonLeft |
-                    ImGuiButtonFlags_MouseButtonRight |
-                    ImGuiButtonFlags_MouseButtonMiddle
-                );
-
-                sceneViewport.visible = true;
-                sceneViewport.x = pos.x;
-                sceneViewport.y = pos.y;
-                sceneViewport.w = size.x;
-                sceneViewport.h = size.y;
-                // A Place Actors drag keeps its source item active, which can
-                // make IsItemHovered() report false over this image even when
-                // the cursor is visibly inside it. Test the viewport bounds
-                // directly so releasing a class here commits its instance.
-                const ImVec2 viewportMax(
-                    pos.x + size.x,
-                    pos.y + size.y
-                );
-                // Only when no other window (panel, menu, popup, tooltip
-                // window...) is drawn over the image at the cursor.
-                // AllowWhenBlockedByActiveItem : a drag from Place Actors /
-                // the Content Browser still drops here.
-                sceneViewport.hovered =
-                    ImGui::IsMouseHoveringRect(pos, viewportMax, false) &&
-                    (ImGui::IsItemActive() ||
-                     ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem));
-
-                // Camera mode : 2D / 3D buttons at the top right (editor
-                // camera : hidden while playing, shown while simulating).
-                if (!isPlaying || isSimulating)
-                {
-                    const ImGuiStyle& style = ImGui::GetStyle();
-                    const float button_w = ImGui::CalcTextSize("3D").x + style.FramePadding.x * 2.f + 6.f;
-                    const float bar_w = button_w * 2.f + style.ItemSpacing.x;
-                    const float bar_h = ImGui::GetFrameHeight();
-                    const ImVec2 bar_pos(pos.x + size.x - bar_w - 8.f, pos.y + 8.f);
-
-                    ImGui::SetCursorScreenPos(bar_pos);
-                    ImGui::BeginGroup();
-
-                    auto mode_button = [&](const char* label, EditorCameraMode mode, const char* help)
-                    {
-                        const bool active = cameraMode == mode;
-                        ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4(0.25f, 0.45f, 0.75f, 0.95f)
-                                                                     : ImVec4(0.12f, 0.12f, 0.14f, 0.80f));
-                        if (ImGui::Button(label, ImVec2(button_w, bar_h)))
-                            SetEditorCameraMode(mode);
-                        ImGui::PopStyleColor();
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("%s", help);
-                    };
-
-                    mode_button("2D##CamMode", EditorCameraMode::Mode2D,
-                                "2D camera : WASD to move, the wheel for the height");
-                    ImGui::SameLine();
-                    mode_button("3D##CamMode", EditorCameraMode::Mode3D,
-                                "3D camera : hold the right mouse button to look around,\n"
-                                "WASD to fly, Q / E down / up, Shift faster, wheel forward");
-
-                    ImGui::EndGroup();
-
-                    // The buttons take the mouse, not the scene (brush, picking).
-                    if (ImGui::IsMouseHoveringRect(bar_pos, ImVec2(bar_pos.x + bar_w, bar_pos.y + bar_h), false))
-                        sceneViewport.hovered = false;
-                }
-
-                // A click that starts on a panel / menu / popup over the
-                // viewport (or outside it) is not for the scene, even when the
-                // mouse then moves over the image with the button held : no
-                // brush stroke, picking or rubber band until every button is
-                // released.
-                {
-                    bool any_down = false;
-                    bool clicked_outside = false;
-                    for (int b = 0; b < 3; ++b)
-                    {
-                        any_down |= ImGui::IsMouseDown(b);
-                        clicked_outside |= ImGui::IsMouseClicked(b) && !sceneViewport.hovered;
-                    }
-                    if (clicked_outside)
-                        sceneViewport.blocked = true;
-                    else if (!any_down)
-                        sceneViewport.blocked = false;
-                }
-
-                // ImGui sizes are logical pixels; HRL renders into a physical
-                // framebuffer. Resize the scene to exactly match the image.
-                int windowW = 0, windowH = 0;
-                int framebufferW = 0, framebufferH = 0;
-                glfwGetWindowSize(glfwGetCurrentContext(), &windowW, &windowH);
-                glfwGetFramebufferSize(glfwGetCurrentContext(), &framebufferW, &framebufferH);
-                const float scaleX = windowW > 0 ? static_cast<float>(framebufferW) / windowW : 1.f;
-                const float scaleY = windowH > 0 ? static_cast<float>(framebufferH) / windowH : 1.f;
-                const int renderW = std::max(1, static_cast<int>(std::lround(size.x * scaleX)));
-                const int renderH = std::max(1, static_cast<int>(std::lround(size.y * scaleY)));
-                sceneViewport.x -= main_viewport->Pos.x;
-                sceneViewport.y -= main_viewport->Pos.y;
-                if (!sceneViewport.hasRenderSize ||
-                    renderW != sceneViewport.renderW || renderH != sceneViewport.renderH)
-                {
-                    sceneViewport.renderW = renderW;
-                    sceneViewport.renderH = renderH;
-                    sceneViewport.hasRenderSize = true;
-                    // Renderer + widgets of the game (DPI scale).
-                    editor_engine->SetRenderSize(renderW, renderH);
-                }
-
-                // Right click on an actor (without moving) : its menu (Convert to voxels...).
-                static lynx::Actor* menu_actor = nullptr;
-                const ImGuiIO& vio = ImGui::GetIO();
-                if (!isPlaying && SceneAcceptsMouse(true) &&
-                    ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
-                    vio.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 25.f)
-                {
-                    double scene_x = 0.0, scene_y = 0.0;
-                    MouseToScene(vio.MousePos.x, vio.MousePos.y, scene_x, scene_y);
-                    const HRL_id object = HRL_GL_GetHoveredObject(scene, (int)scene_x, (int)scene_y, nullptr);
-                    lynx::Actor* actor = object != HRL_INVALID_ID
-                        ? static_cast<lynx::Actor*>(HRL_GetMeshUserHandle(object))
-                        : nullptr;
-                    if (actor && editor_level)
-                    {
-                        SetActorSelected(actor);
-                        menu_actor = actor;
-                        ImGui::OpenPopup("##ViewportActorMenu");
-                    }
-                }
-                if (ImGui::BeginPopup("##ViewportActorMenu"))
-                {
-                    const auto& actors = editor_level ? editor_level->GetActors() : std::vector<lynx::Actor*>{};
-                    if (menu_actor && std::find(actors.begin(), actors.end(), menu_actor) != actors.end())
-                    {
-                        const std::string title = menu_actor->GetTypeName() +
-                            (menu_actor->object_id_.empty() ? std::string() : " [" + menu_actor->object_id_ + "]");
-                        ImGui::TextDisabled("%s", title.c_str());
-                        ImGui::Separator();
-                        lynx::editor::sprite_voxels::MenuItem(menu_actor);
-                    }
-                    else
-                    {
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::EndPopup();
-                }
-            }
-        }
-
-        ImGui::End();
-    }
-
-
-    void DrawUI(GLFWwindow* win)
-    {
-        lynx::Level* level = editor_level;
-
-        BeginImGuiFrame();
-
-        if (editorWindows.viewport)
-            DrawViewportWindow();
-
-        // Resolve the release after the viewport has updated its hover state
-        // for this frame. This also lets SceneAcceptsMouse distinguish the
-        // scene image from the surrounding ImGui panels.
-        if (!isPlaying)
-            HandleActorPlacementDrag(level);
-
-        // Title bar of the window (Windows : replaces the native one), above the toolbar.
-        // Engine version after Lynxie ; the tab shows the project infos when hovered.
-        {
-            static std::string shown_module = "\x01";
-            if (shown_module != currentProject.module_path.string())
-            {
-                shown_module = currentProject.module_path.string();
-                lynx::editor::project_info::Project info;
-                info.name = currentProject.name;
-                info.root = currentProject.root;
-                info.assets_dir = currentProject.assets_dir;
-                info.build_dir = currentProject.build_dir;
-                info.module_path = currentProject.module_path;
-                info.engine_version = lynx::GetEngineVersion();
-                lynx::editor::project_info::SetProject(info);
-                lynx::editor::title_bar::SetVersionText("Lynx " + info.engine_version);
-                lynx::editor::title_bar::SetTitleTooltip(lynx::editor::project_info::DrawTooltip);
-            }
-        }
-        lynx::editor::title_bar::Draw(
-            "Lynx - " + (currentProject.name.empty() ? std::string("Project") : currentProject.name),
-            [] { show_close_confirmation = true; },
-            []
-            {
-                editorWindows.commands = true;
-                SaveEditorWindowVisibility();
-                lynx::editor::commands_window::ShowLynxie();
-            });
-
-        DrawToolbar();
-
-        // The Console stays visible while playing : output and errors of the game.
-        // (In the editor, it is drawn with the other windows below.)
-        if (isPlaying && editorWindows.console)
-            lynx::editor::output_console::Draw(&editorWindows.console);
-
-        // The Profiler too (profiling the game is the point) ; called even when
-        // closed : it stops recording then.
-        if (isPlaying)
-            lynx::editor::profiler_window::Draw(&editorWindows.profiler);
-
-        // While playing, the toolbar and the Console are the only ImGui windows that remain visible.
-        if (!isPlaying)
-        {
-            ImGuiIO& io =
-            ImGui::GetIO();
-
-
-
-
-        // --------------------------------------------------------
-        // Command palette : Ctrl+P (everything), Ctrl+Shift+P (commands)
-        // --------------------------------------------------------
-
-        if (!isPlaying &&
-            !lynx::editor::command_palette::IsOpen() &&
-            !lynx::editor::input_settings::BlocksEditorShortcuts() &&
-            io.KeyCtrl &&
-            ImGui::IsKeyPressed(ImGuiKey_P, false) &&
-            !io.WantTextInput)
-        {
-            OpenCommandPalette(io.KeyShift ? ">" : "");
-        }
-        lynx::editor::command_palette::Draw();
-
-
-        // --------------------------------------------------------
-        // Undo
-        // --------------------------------------------------------
-
-        if (!isPlaying &&
-            !lynx::editor::input_settings::BlocksEditorShortcuts() &&
-            !lynx::editor::widget_editor::HasFocus() &&
-            !lynx::editor::graph_editors::HasFocus() &&
-            !lynx::editor::particle_editor::HasFocus() &&
-            !lynx::editor::plugins::HasFocus() &&
-            io.KeyCtrl &&
-            ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
-            !io.WantTextInput &&
-            !brushPainting)
-        {
-            UndoLastEditorAction();
-        }
-
-
-        // --------------------------------------------------------
-        // Delete selected actor
-        // --------------------------------------------------------
-
-        if (!isPlaying &&
-            editing_actor &&
-            !io.WantTextInput &&
-            !content_browser_focused &&
-            !lynx::editor::widget_editor::HasFocus() &&
-            !lynx::editor::graph_editors::HasFocus() &&
-            !lynx::editor::particle_editor::HasFocus() &&
-            !lynx::editor::plugins::HasFocus() &&
-            !lynx::editor::input_settings::BlocksEditorShortcuts() &&
-            ImGui::IsKeyPressed(ImGuiKey_Delete, false))
-        {
-            // Every selected actor (Ctrl / Shift / rubber band), one undo.
-            PruneActorSelection();
-            std::vector<lynx::Actor*> to_delete = selected_actors;
-            if (to_delete.empty())
-                to_delete.push_back(editing_actor);
-
-            std::vector<EditorActorSnapshot> snapshots;
-            for (lynx::Actor* actor : to_delete)
-                snapshots.push_back(CaptureActorSnapshot(actor));
-
-            PushEditorUndo([snapshots]()
-            {
-                if (!editor_level)
-                    return;
-
-                std::vector<lynx::Actor*> restored_all;
-                for (const EditorActorSnapshot& snapshot : snapshots)
-                {
-                    if (!snapshot.object_id.empty() && FindEditorActor(snapshot.object_id))
-                        continue;
-                    if (lynx::Actor* restored = RestoreActorSnapshot(editor_level, snapshot))
-                        restored_all.push_back(restored);
-                }
-
-                if (!restored_all.empty())
-                    SetActorSelection(restored_all, restored_all.back());
-            });
-
-            SetActorSelected(nullptr);
-
-            for (lynx::Actor* actor : to_delete)
-                level->DestroyActor(actor);
-            MarkEditorDirty();
-        }
-
-
-        // --------------------------------------------------------
-        // Outliner
-        // --------------------------------------------------------
-
-        if (!isPlaying && editorWindows.outliner)
-        {
-            ImGui::Begin("Outliner");
-
-            PruneActorSelection();
-            outliner_rows_next.clear();
-
-            const auto& actors = level->GetActors();
-
-            // One row of the tree : icon, name, drag, right click menu.
-            auto draw_actor = [&](lynx::Actor* actor, size_t i)
-            {
-
-                    std::string typeName =
-                        actor->GetTypeName();
-
-                    std::string label = typeName;
-
-                    if (!actor->object_id_.empty())
-                    {
-                        label += " [" + actor->object_id_ + "]";
-                    }
-
-                    label += "##OutlinerActor";
-                    label += std::to_string(i);
-
-                    const bool selected =
-                        IsActorInSelection(actor);
-
-                    // Small icon of the class.
-                    DrawActorTypePreview(typeName, ImGui::GetTextLineHeight());
-                    ImGui::SameLine(0.f, ImGui::GetStyle().ItemSpacing.x * 0.5f);
-
-                    if (ImGui::Selectable(
-                            label.c_str(),
-                            selected
-                        ))
-                    {
-                        const ImGuiIO& sio = ImGui::GetIO();
-                        if (sio.KeyCtrl)
-                        {
-                            // Ctrl : adds / removes this actor.
-                            ToggleActorSelection(actor);
-                            outliner_anchor = actor;
-                        }
-                        else if (sio.KeyShift && outliner_anchor && IsActorAlive(outliner_anchor))
-                        {
-                            // Shift : every row between the last click and this one.
-                            int a = -1, b = -1;
-                            for (int r = 0; r < static_cast<int>(outliner_rows.size()); ++r)
-                            {
-                                if (outliner_rows[r].actor == outliner_anchor) a = r;
-                                if (outliner_rows[r].actor == actor) b = r;
-                            }
-                            std::vector<lynx::Actor*> range;
-                            if (a >= 0 && b >= 0)
-                                for (int r = std::min(a, b); r <= std::max(a, b); ++r)
-                                    range.push_back(outliner_rows[r].actor);
-                            else
-                                range.push_back(actor);
-                            SetActorSelection(range, actor);
-                        }
-                        else
-                        {
-                            SetActorSelected(actor);
-                            outliner_anchor = actor;
-                        }
-                    }
-                    outliner_rows_next.push_back({ actor, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
-
-                    // Drag onto a folder (or the empty space : root).
-                    if (ImGui::BeginDragDropSource())
-                    {
-                        lynx::Actor* dragged = actor;
-                        ImGui::SetDragDropPayload("LYNX_OUTLINER_ACTOR", &dragged, sizeof(dragged));
-                        ImGui::TextUnformatted(label.substr(0, label.find("##")).c_str());
-                        ImGui::EndDragDropSource();
-                    }
-
-
-                    // Right-click context menu for this actor.
-                    if (ImGui::BeginPopupContextItem())
-                    {
-                        if (ImGui::MenuItem("Duplicate"))
-                        {
-                            lynx::Actor* duplicated_actor =
-                                level->SpawnActor(
-                                    typeName.c_str()
-                                );
-
-                            if (duplicated_actor)
-                            {
-                                // Copy the transform and every registered property
-                                // from the source actor to the new instance.
-                                duplicated_actor->transform =
-                                    actor->transform;
-
-                                const auto& source_properties =
-                                    actor->GetProperties();
-
-                                auto& destination_properties =
-                                    duplicated_actor->GetProperties();
-
-                                for (const auto& [name, source_property] :
-                                     source_properties)
-                                {
-                                    if (name == "object_id_")
-                                        continue;
-
-                                    auto destination_it =
-                                        destination_properties.find(name);
-
-                                    if (destination_it ==
-                                        destination_properties.end())
-                                    {
-                                        continue;
-                                    }
-
-                                    const auto& destination_property =
-                                        destination_it->second;
-
-                                    if (source_property.GetType() !=
-                                        destination_property.GetType())
-                                    {
-                                        continue;
-                                    }
-
-                                    switch (source_property.GetType())
-                                    {
-                                        case 0: // int
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<int*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<int*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 1: // float
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<float*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<float*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 2: // bool
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<bool*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<bool*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 3: // string
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<std::string*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<std::string*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 4: // vec2
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<lynx::vec2*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<lynx::vec2*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 5: // vec3
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<lynx::vec3*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<lynx::vec3*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 6: // vec4
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<lynx::vec4*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<lynx::vec4*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        case 7: // transform
-                                        {
-                                            auto source_ptr =
-                                                std::get_if<lynx::transform*>(
-                                                    &source_property.property_member
-                                                );
-
-                                            auto destination_ptr =
-                                                std::get_if<lynx::transform*>(
-                                                    &destination_property.property_member
-                                                );
-
-                                            if (source_ptr && destination_ptr &&
-                                                *source_ptr && *destination_ptr)
-                                            {
-                                                **destination_ptr = **source_ptr;
-                                            }
-                                            break;
-                                        }
-
-                                        default:
-                                            break;
-                                    }
-                                }
-
-                                // Generate a unique object ID for the copy.
-                                std::string base_id =
-                                    actor->object_id_.empty()
-                                        ? typeName
-                                        : actor->object_id_;
-
-                                std::string duplicated_id =
-                                    base_id + "_Copy";
-
-                                int copy_index = 2;
-
-                                while (level->GetActorFromID(
-                                           duplicated_id.c_str()
-                                       ))
-                                {
-                                    duplicated_id =
-                                        base_id +
-                                        "_Copy" +
-                                        std::to_string(copy_index++);
-                                }
-
-                                duplicated_actor->object_id_ =
-                                    duplicated_id;
-
-                                const std::string duplicated_actor_id =
-                                    duplicated_actor->object_id_;
-
-                                PushEditorUndo([duplicated_actor_id]()
-                                {
-                                    if (lynx::Actor* duplicated =
-                                            FindEditorActor(duplicated_actor_id))
-                                    {
-                                        if (editing_actor == duplicated)
-                                        {
-                                            editing_actor = nullptr;
-                                            editing_object = HRL_INVALID_ID;
-                                            HRL_SetGizmoVisible(gizmo, HRL_FALSE);
-                                        }
-
-                                        editor_level->DestroyActor(duplicated);
-                                    }
-                                });
-
-                                SetActorSelected(duplicated_actor);
-                                MarkEditorDirty();
-                            }
-
-                            ImGui::CloseCurrentPopup();
-                        }
-
-
-                        // Outliner folder of the actor.
-                        OutlinerMoveToMenu(level, actor);
-
-                        // Sprite -> voxels (dialog with the options).
-                        lynx::editor::sprite_voxels::MenuItem(actor);
-                        ImGui::Separator();
-
-                        if (ImGui::MenuItem("Delete"))
-                        {
-                            const EditorActorSnapshot deleted_snapshot =
-                                CaptureActorSnapshot(actor);
-
-                            PushEditorUndo([deleted_snapshot]()
-                            {
-                                if (!editor_level ||
-                                    (!deleted_snapshot.object_id.empty() &&
-                                     FindEditorActor(deleted_snapshot.object_id)))
-                                {
-                                    return;
-                                }
-
-                                lynx::Actor* restored =
-                                    RestoreActorSnapshot(
-                                        editor_level,
-                                        deleted_snapshot
-                                    );
-
-                                if (restored)
-                                    SetActorSelected(restored);
-                            });
-
-                            if (editing_actor == actor)
-                            {
-                                editing_actor = nullptr;
-                                editing_object = HRL_INVALID_ID;
-
-                                HRL_SetGizmoVisible(
-                                    gizmo,
-                                    HRL_FALSE
-                                );
-                            }
-
-                            level->DestroyActor(actor);
-                            MarkEditorDirty();
-
-                            ImGui::CloseCurrentPopup();
-                        }
-
-                        ImGui::EndPopup();
-                    }
-            };
-
-            DrawOutlinerTree(level, draw_actor);
-            outliner_rows.swap(outliner_rows_next);
-
-            ImGui::End();
-
-
-            // --------------------------------------------------------
-            // Place Actors
-            // --------------------------------------------------------
-
-            if (editorWindows.placeActors)
-                PlaceActorsWindow(level);
-
-
-            // --------------------------------------------------------
-            // Content Browser
-            // --------------------------------------------------------
-
-            if (editorWindows.contentBrowser)
-                DrawContentBrowser(level);
-
-
-            // --------------------------------------------------------
-            // Script editors (one window per open file)
-            // --------------------------------------------------------
-
-            lynx::editor::script_editors::DrawAll(central_dock_id);
-
-            // Widget editors (one window per open .widget).
-            lynx::editor::widget_editor::DrawAll(central_dock_id);
-
-            // Anim Graph / Behavior Tree editors (one window per open file).
-            lynx::editor::graph_editors::DrawAll(central_dock_id);
-
-            // Particle editors (one window per open .vfx).
-            lynx::editor::particle_editor::DrawAll(central_dock_id);
-
-
-            // --------------------------------------------------------
-            if (editorWindows.details)
-            {
-// Details
-            // --------------------------------------------------------
-
-            static bool details_undo_active = false;
-            static EditorActorSnapshot details_undo_before;
-            static std::string details_undo_actor_id;
-
-            if (!details_undo_active && editing_actor)
-            {
-                details_undo_before =
-                    CaptureActorSnapshot(editing_actor);
-                details_undo_actor_id =
-                    editing_actor->object_id_;
-            }
-
-            bool details_changed = false;
-
-            ImGui::Begin("Details");
-
-            if (!editing_actor)
-            {
-                ImGui::TextDisabled("No actor selected");
-            }
-            else
-            {
-                std::string typeName =
-                    editing_actor->GetTypeName();
-
-                ImGui::Text(
-                    "%s",
-                    typeName.c_str()
-                );
-
-                ImGui::Separator();
-
-
-                // ----------------------------------------------------
-                // Object ID
-                // ----------------------------------------------------
-
-                ImGui::Text("Object ID");
-
-                char objectIdBuffer[512];
-
-                std::snprintf(
-                    objectIdBuffer,
-                    sizeof(objectIdBuffer),
-                    "%s",
-                    editing_actor->object_id_.c_str()
-                );
-
-                if (ImGui::InputText(
-                        "##ObjectID",
-                        objectIdBuffer,
-                        sizeof(objectIdBuffer)
-                    ))
-                {
-                    editing_actor->object_id_ =
-                        objectIdBuffer;
-                    details_changed = true;
-                    MarkEditorDirty();
-                }
-
-
-                ImGui::Separator();
-
-
-                // ----------------------------------------------------
-                // Properties
-                // ----------------------------------------------------
-
-                const auto& properties =
-                    editing_actor->GetProperties();
-
-                // Transform properties first, in their own section
-                // (Location / Rotation / Scale rows, like Unreal).
-                for (const auto& [name, prop] : properties)
-                {
-                    if (prop.GetType() != 7)
-                        continue;
-
-                    auto ptr = std::get_if<lynx::transform*>(&prop.property_member);
-                    if (!ptr || !*ptr)
-                        continue;
-
-                    ImGui::PushID(name.c_str());
-                    const std::string header =
-                        (name == "transform" ? std::string("Transform") : name) + "##section";
-
-                    if (ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen) &&
-                        lynx::editor::property_widgets::BeginTable("##transform"))
-                    {
-                        lynx::transform& value = **ptr;
-
-                        if (lynx::editor::property_widgets::TransformRows(value))
-                        {
-                            // Keep the editor gizmo synchronized with
-                            // the transform edited from the Details panel.
-                            SyncGizmoFromTransform(value);
-                            details_changed = true;
-                            MarkEditorDirty();
-                        }
-
-                        lynx::editor::property_widgets::EndTable();
-                    }
-                    ImGui::PopID();
-                }
-
-                if (!ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    // section closed
-                }
-                else if (properties.size() <= 1)
-                {
-                    ImGui::TextDisabled(
-                        "No properties"
-                    );
-                }
-                else if (lynx::editor::property_widgets::BeginTable("##properties"))
-                {
-                    for (const auto& [name, prop] : properties)
-                    {
-                        // object_id_ is edited separately above, transforms in their section.
-                        if (name == "object_id_" || name == "outliner_folder" || prop.GetType() == 7)
-                            continue;
-
-                        ImGui::PushID(name.c_str());
-
-                            // Vectors draw their own row (label with its menu) ;
-                            // a vec3 / vec4 called "...color..." is a color picker.
-                            const int type = prop.GetType();
-                            const bool is_color = (type == 5 || type == 6) && IsColorPropertyName(name);
-                            if (type < 4 || type > 6 || is_color)
-                                lynx::editor::property_widgets::RowLabel(name.c_str());
-
-                            bool changed = false;
-
-                            if (is_color)
-                            {
-                                ImGui::SetNextItemWidth(-FLT_MIN);
-                                if (auto ptr = std::get_if<lynx::vec3*>(&prop.property_member); ptr && *ptr)
-                                {
-                                    float rgb[3] = { (*ptr)->x, (*ptr)->y, (*ptr)->z };
-                                    if (ImGui::ColorEdit3("##color", rgb, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR))
-                                    {
-                                        **ptr = lynx::vec3(rgb[0], rgb[1], rgb[2]);
-                                        changed = true;
-                                    }
-                                }
-                                else if (auto ptr4 = std::get_if<lynx::vec4*>(&prop.property_member); ptr4 && *ptr4)
-                                {
-                                    float rgba[4] = { (*ptr4)->x, (*ptr4)->y, (*ptr4)->z, (*ptr4)->w };
-                                    if (ImGui::ColorEdit4("##color", rgba, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR))
-                                    {
-                                        (*ptr4)->x = rgba[0];
-                                        (*ptr4)->y = rgba[1];
-                                        (*ptr4)->z = rgba[2];
-                                        (*ptr4)->w = rgba[3];
-                                        changed = true;
-                                    }
-                                }
-                            }
-                            else switch (prop.GetType())
-                            {
-                                case 0: // int
-                                {
-                                    if (auto ptr =
-                                            std::get_if<int*>(&prop.property_member))
-                                    {
-                                        if (*ptr && name == "auto_possess_player")
-                                            changed = DrawAutoPossessCombo(**ptr);
-                                        else if (*ptr)
-                                            changed = ImGui::DragInt(
-                                                "##value",
-                                                *ptr,
-                                                1.0f
-                                            );
-                                    }
-                                    break;
-                                }
-
-                                case 1: // float
-                                {
-                                    if (auto ptr =
-                                            std::get_if<float*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                            changed = ImGui::DragFloat(
-                                                "##value",
-                                                *ptr,
-                                                0.05f
-                                            );
-                                    }
-                                    break;
-                                }
-
-                                case 2: // bool
-                                {
-                                    if (auto ptr =
-                                            std::get_if<bool*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                            changed = ImGui::Checkbox(
-                                                "##value",
-                                                *ptr
-                                            );
-                                    }
-                                    break;
-                                }
-
-                                case 3: // string (text field + asset explorer)
-                                {
-                                    if (auto ptr =
-                                            std::get_if<std::string*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                            changed = DrawAssetPathField(**ptr);
-                                    }
-                                    break;
-                                }
-
-                                case 4: // vec2
-                                {
-                                    if (auto ptr =
-                                            std::get_if<lynx::vec2*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                        {
-                                            float values[2] =
-                                            {
-                                                (*ptr)->x,
-                                                (*ptr)->y
-                                            };
-
-                                            if (lynx::editor::property_widgets::VectorRow(
-                                                    name.c_str(),
-                                                    values,
-                                                    2,
-                                                    0.05f,
-                                                    nullptr
-                                                ))
-                                            {
-                                                (*ptr)->x = values[0];
-                                                (*ptr)->y = values[1];
-                                                changed = true;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-
-                                case 5: // vec3
-                                {
-                                    if (auto ptr =
-                                            std::get_if<lynx::vec3*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                        {
-                                            float values[3] =
-                                            {
-                                                (*ptr)->x,
-                                                (*ptr)->y,
-                                                (*ptr)->z
-                                            };
-
-                                            if (lynx::editor::property_widgets::VectorRow(
-                                                    name.c_str(),
-                                                    values,
-                                                    3,
-                                                    0.05f,
-                                                    nullptr
-                                                ))
-                                            {
-                                                (*ptr)->x = values[0];
-                                                (*ptr)->y = values[1];
-                                                (*ptr)->z = values[2];
-                                                changed = true;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-
-                                case 6: // vec4
-                                {
-                                    if (auto ptr =
-                                            std::get_if<lynx::vec4*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                        {
-                                            float values[4] =
-                                            {
-                                                (*ptr)->x,
-                                                (*ptr)->y,
-                                                (*ptr)->z,
-                                                (*ptr)->w
-                                            };
-
-                                            if (lynx::editor::property_widgets::VectorRow(
-                                                    name.c_str(),
-                                                    values,
-                                                    4,
-                                                    0.05f,
-                                                    nullptr
-                                                ))
-                                            {
-                                                (*ptr)->x = values[0];
-                                                (*ptr)->y = values[1];
-                                                (*ptr)->z = values[2];
-                                                (*ptr)->w = values[3];
-                                                changed = true;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-
-                                case 7: // transform
-                                {
-                                    if (auto ptr =
-                                            std::get_if<lynx::transform*>(&prop.property_member))
-                                    {
-                                        if (*ptr)
-                                        {
-                                            lynx::transform& value = **ptr;
-
-                                            float location[3] =
-                                            {
-                                                value.location.x,
-                                                value.location.y,
-                                                value.location.z
-                                            };
-
-                                            float rotation[3] =
-                                            {
-                                                value.rotation.x,
-                                                value.rotation.y,
-                                                value.rotation.z
-                                            };
-
-                                            float scale[3] =
-                                            {
-                                                value.scale.x,
-                                                value.scale.y,
-                                                value.scale.z
-                                            };
-
-                                            ImGui::Text("Location");
-                                            changed |= ImGui::DragFloat3(
-                                                "##location",
-                                                location,
-                                                0.05f
-                                            );
-
-                                            ImGui::Text("Rotation");
-                                            changed |= ImGui::DragFloat3(
-                                                "##rotation",
-                                                rotation,
-                                                0.5f
-                                            );
-
-                                            ImGui::Text("Scale");
-                                            changed |= ImGui::DragFloat3(
-                                                "##scale",
-                                                scale,
-                                                0.05f
-                                            );
-
-                                            value.location.x = location[0];
-                                            value.location.y = location[1];
-                                            value.location.z = location[2];
-
-                                            value.rotation.x = rotation[0];
-                                            value.rotation.y = rotation[1];
-                                            value.rotation.z = rotation[2];
-
-                                            value.scale.x = scale[0];
-                                            value.scale.y = scale[1];
-                                            value.scale.z = scale[2];
-
-                                            // Keep the editor gizmo synchronized with
-                                            // the transform edited from the Details panel.
-                                            if (changed && editing_actor)
-                                            {
-                                                SyncGizmoFromTransform(value);
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-
-                                default:
-                                {
-                                    ImGui::TextDisabled(
-                                        "%s",
-                                        lynx::PropertyToString(prop).c_str()
-                                    );
-                                    break;
-                                }
-                            }
-
-                            if (changed)
-                            {
-                                details_changed = true;
-                                MarkEditorDirty();
-                            }
-
-                        ImGui::PopID();
-                    }
-
-                    lynx::editor::property_widgets::EndTable();
-                }
-            }
-
-
-            ImGui::End();
-
-            if (details_changed)
-                details_undo_active = true;
-
-            if (details_undo_active &&
-                !ImGui::IsAnyItemActive())
-            {
-                const std::string actor_id_after =
-                    editing_actor
-                        ? editing_actor->object_id_
-                        : details_undo_actor_id;
-
-                const EditorActorSnapshot undo_snapshot =
-                    details_undo_before;
-
-                PushEditorUndo([undo_snapshot, actor_id_after]()
-                {
-                    lynx::Actor* actor =
-                        FindEditorActor(actor_id_after);
-
-                    if (!actor)
-                        return;
-
-                    actor->object_id_ =
-                        undo_snapshot.object_id;
-                    actor->transform =
-                        undo_snapshot.transform;
-
-                    auto& properties = actor->GetProperties();
-
-                    for (const auto& [name, value] :
-                         undo_snapshot.properties)
-                    {
-                        auto it = properties.find(name);
-
-                        if (it != properties.end())
-                            ApplyEditorProperty(it->second, value);
-                    }
-
-                    SetActorSelected(actor);
-                    MarkEditorDirty();
-                });
-
-                details_undo_active = false;
-                details_undo_actor_id.clear();
-            }
-        }
-
-
-        // --------------------------------------------------------
-                    }
-
-        // --------------------------------------------------------
-        // Color Picking
-        // --------------------------------------------------------
-
-        if (editorWindows.colorPicking)
-        {
-
-        // Color and properties of the voxel type of the brush.
-        if (ImGui::Begin("Color Picking", &editorWindows.colorPicking))
-            lynx::editor::voxel_types::DrawEditor(brushVoxelType, scene);
-        ImGui::End();
-
-
-        // --------------------------------------------------------
-        }
-
-        // --------------------------------------------------------
-        // Config
-        // --------------------------------------------------------
-
-        if (editorWindows.config)
-        {
-
-        ImGui::Begin("Paint");
-
-
-        // --------------------------------------------------------
-        // Brush Mode : two big tiles with an icon (Tab switches)
-        // --------------------------------------------------------
-
-        {
-            const ImGuiStyle& style = ImGui::GetStyle();
-            const float avail = ImGui::GetContentRegionAvail().x;
-            const float tile_w = std::max(70.f, (avail - style.ItemSpacing.x) * 0.5f);
-            const float tile_h = std::floor(ImGui::GetFontSize() * 3.2f);
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-
-            // 0 : paint (brush), 1 : select (arrow)
-            auto tile = [&](int kind, const char* label, const char* help, bool active) -> bool
-            {
-                ImGui::PushID(kind);
-                const ImVec2 p0 = ImGui::GetCursorScreenPos();
-                const bool clicked = ImGui::InvisibleButton("##mode", ImVec2(tile_w, tile_h));
-                const bool hovered = ImGui::IsItemHovered();
-                const ImVec2 p1(p0.x + tile_w, p0.y + tile_h);
-                const float r = 6.f;
-
-                const ImU32 bg = active ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
-                                        : hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
-                                                  : ImGui::GetColorU32(ImGuiCol_Button);
-                dl->AddRectFilled(p0, p1, bg, r);
-                dl->AddRect(p0, p1, active ? IM_COL32(240, 160, 40, 255) : ImGui::GetColorU32(ImGuiCol_Border), r, 0,
-                            active ? 2.5f : 1.f);
-
-                // Icon (pixel style) on the left, label + help on the right
-                const float u = std::floor(tile_h / 16.f);   // one "pixel"
-                const ImVec2 icon(p0.x + u * 3.f, p0.y + (tile_h - u * 10.f) * 0.5f);
-                const ImU32 ink = IM_COL32(28, 24, 22, 255);
-                auto px = [&](int x, int y, ImU32 c)
-                {
-                    dl->AddRectFilled(ImVec2(icon.x + x * u, icon.y + y * u), ImVec2(icon.x + (x + 1) * u, icon.y + (y + 1) * u), c);
-                };
-                if (kind == 0)
-                {
-                    // brush : handle (wood), ferrule (grey), bristles (color of the voxel type)
-                    ImU32 tip = IM_COL32(230, 90, 70, 255);
-                    if (const lynx::voxels::VoxelType* t = lynx::voxels::GetType(static_cast<uint8_t>(brushVoxelType)))
-                        tip = ImGui::ColorConvertFloat4ToU32(ImVec4(t->color[0], t->color[1], t->color[2], 1.f));
-                    for (int i = 0; i < 5; ++i) { px(9 - i, i, IM_COL32(170, 110, 60, 255)); px(10 - i, i, ink); }
-                    for (int i = 0; i < 2; ++i) { px(4 - i, 5 + i, IM_COL32(160, 160, 170, 255)); px(5 - i, 5 + i, IM_COL32(110, 110, 120, 255)); }
-                    px(1, 7, tip); px(2, 7, tip); px(1, 8, tip); px(0, 9, tip); px(2, 8, ink); px(0, 8, ink);
-                }
-                else
-                {
-                    // arrow cursor
-                    static const char* arrow[] = {
-                        "X.......", "XX......", "XWX.....", "XWWX....", "XWWWX...",
-                        "XWWWWX..", "XWWXXX..", "XX.XWX..", "X...XWX.", ".....XX.",
-                    };
-                    for (int y = 0; y < 10; ++y)
-                        for (int x = 0; x < 8; ++x)
-                        {
-                            if (arrow[y][x] == 'X') px(x + 1, y, ink);
-                            else if (arrow[y][x] == 'W') px(x + 1, y, IM_COL32(250, 248, 240, 255));
-                        }
-                }
-
-                const float tx = p0.x + u * 15.f;
-                const float line = ImGui::GetTextLineHeight();
-                dl->AddText(ImVec2(tx, p0.y + tile_h * 0.5f - line), ImGui::GetColorU32(ImGuiCol_Text), label);
-                dl->AddText(ImVec2(tx, p0.y + tile_h * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), help);
-                if (hovered)
-                    ImGui::SetTooltip("%s  (Tab : switch)", label);
-                ImGui::PopID();
-                return clicked;
-            };
-
-            ImGui::SeparatorText("Mode");
-            if (tile(0, "Paint", "draw voxels", brushPaintEnabled))
-                brushPaintEnabled = true;
-            ImGui::SameLine();
-            if (tile(1, "Select", "pick actors", !brushPaintEnabled))
-                brushPaintEnabled = false;
-            ImGui::TextDisabled("Tab : switch mode");
-        }
-
-        if (brushPaintEnabled)
-        {
-            ImGui::SeparatorText("Brush");
-            ImGui::SliderInt(
-                "Brush Radius",
-                &brushRadius,
-                1,
-                50
-            );
-
-            // ----------------------------------------------------
-            // Brush shapes
-            // ----------------------------------------------------
-
-            struct BrushShapeButton
-            {
-                BrushShape shape;
-                const char* name;
-            };
-
-            static const BrushShapeButton brushShapeButtons[] =
-            {
-                { BrushShape::Single,      "Single" },
-                { BrushShape::Circle,      "Circle" },
-                { BrushShape::Square,      "Square" },
-                { BrushShape::Diamond,     "Diamond" },
-                { BrushShape::Horizontal,  "Horizontal" },
-                { BrushShape::Vertical,    "Vertical" },
-                { BrushShape::Cross,            "Cross" },
-                { BrushShape::Line,             "Line" },
-                { BrushShape::Rectangle,        "Rectangle" },
-                { BrushShape::RectangleOutline, "Rectangle Outline" },
-                { BrushShape::CircleOutline,    "Circle Outline" }
-            };
-
-            auto drawBrushShapeIcon = [](
-                ImDrawList* drawList,
-                const ImVec2& min,
-                const ImVec2& max,
-                BrushShape shape
-            )
-            {
-                const ImVec2 center(
-                    (min.x + max.x) * 0.5f,
-                    (min.y + max.y) * 0.5f
-                );
-
-                const float iconSize =
-                    std::min(max.x - min.x, max.y - min.y) * 0.62f;
-
-                const float cell = iconSize / 9.f;
-                const int iconRadius = 4;
-                const ImU32 iconColor = IM_COL32(
-                    225, 225, 225, 255
-                );
-
-                for (int y = -iconRadius; y <= iconRadius; ++y)
-                {
-                    for (int x = -iconRadius; x <= iconRadius; ++x)
-                    {
-                        bool filled = false;
-
-                        switch (shape)
-                        {
-                            case BrushShape::Single:
-                                filled = x == 0 && y == 0;
-                                break;
-
-                            case BrushShape::Circle:
-                                filled = x * x + y * y <= 10;
-                                break;
-
-                            case BrushShape::Square:
-                                filled = true;
-                                break;
-
-                            case BrushShape::Diamond:
-                                filled = std::abs(x) + std::abs(y) <= 4;
-                                break;
-
-                            case BrushShape::Horizontal:
-                                filled = y == 0;
-                                break;
-
-                            case BrushShape::Vertical:
-                                filled = x == 0;
-                                break;
-
-                            case BrushShape::Cross:
-                                filled = x == 0 || y == 0;
-                                break;
-
-                            case BrushShape::Line:
-                                filled = y == 0;
-                                break;
-
-                            case BrushShape::Rectangle:
-                                filled = std::abs(x) <= 3 && std::abs(y) <= 3;
-                                break;
-
-                            case BrushShape::RectangleOutline:
-                                filled = (std::abs(x) == 3 || std::abs(y) == 3) &&
-                                         std::abs(x) <= 3 && std::abs(y) <= 3;
-                                break;
-
-                            case BrushShape::CircleOutline:
-                                {
-                                    const int d = x * x + y * y;
-                                    filled = d >= 8 && d <= 18;
-                                }
-                                break;
-                        }
-
-                        if (!filled)
-                            continue;
-
-                        const ImVec2 cellMin(
-                            center.x + (x - 0.5f) * cell,
-                            center.y + (y - 0.5f) * cell
-                        );
-
-                        const ImVec2 cellMax(
-                            cellMin.x + cell,
-                            cellMin.y + cell
-                        );
-
-                        drawList->AddRectFilled(
-                            cellMin,
-                            cellMax,
-                            iconColor,
-                            1.f
-                        );
-                    }
-                }
-            };
-
-            for (int i = 0;
-                 i < static_cast<int>(IM_ARRAYSIZE(brushShapeButtons));
-                 ++i)
-            {
-                const BrushShapeButton& brushButton =
-                    brushShapeButtons[i];
-
-                ImGui::PushID(
-                    static_cast<int>(brushButton.shape)
-                );
-
-                const ImVec2 buttonSize(44.f, 44.f);
-
-                // wrap to the next line when the window is too narrow
-                if (i > 0)
-                {
-                    const float next = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + buttonSize.x;
-                    if (next < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
-                        ImGui::SameLine();
-                }
-
-                const ImVec2 cursor = ImGui::GetCursorScreenPos();
-
-                const bool pressed =
-                    ImGui::InvisibleButton(
-                        "##BrushShape",
-                        buttonSize
-                    );
-
-                const bool hovered =
-                    ImGui::IsItemHovered();
-
-                ImDrawList* drawList =
-                    ImGui::GetWindowDrawList();
-
-                const bool selected_shape = brushShape == brushButton.shape;
-                const ImU32 background =
-                    selected_shape ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
-                    : hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
-                              : IM_COL32(60, 58, 66, 255);
-
-                drawList->AddRectFilled(
-                    cursor,
-                    ImVec2(
-                        cursor.x + buttonSize.x,
-                        cursor.y + buttonSize.y
-                    ),
-                    background,
-                    4.f
-                );
-
-                drawBrushShapeIcon(
-                    drawList,
-                    cursor,
-                    ImVec2(
-                        cursor.x + buttonSize.x,
-                        cursor.y + buttonSize.y
-                    ),
-                    brushButton.shape
-                );
-
-                const bool selected =
-                    brushShape == brushButton.shape;
-
-                drawList->AddRect(
-                    ImVec2(
-                        cursor.x + 1.f,
-                        cursor.y + 1.f
-                    ),
-                    ImVec2(
-                        cursor.x + buttonSize.x - 1.f,
-                        cursor.y + buttonSize.y - 1.f
-                    ),
-                    selected
-                        ? IM_COL32(240, 160, 40, 255)
-                        : IM_COL32(90, 90, 90, 255),
-                    4.f,
-                    0,
-                    selected ? 2.f : 1.f
-                );
-
-                if (pressed)
-                    brushShape = brushButton.shape;
-
-                if (hovered)
-                    ImGui::SetTooltip("%s", brushButton.name);
-
-                ImGui::PopID();
-            }
-
-            // Radius has no effect on the single-voxel brush.
-            if (brushShape == BrushShape::Single)
-            {
-                ImGui::TextDisabled("Single voxel");
-            }
-
-
-            ImGui::Checkbox(
-                "Paint empty voxels",
-                &brushPaintEmptyVoxels
-            );
-
-
-            ImGui::SliderFloat(
-                "Brush Density",
-                &brushDensity,
-                0.f,
-                1.f,
-                "%.2f"
-            );
-
-
-            ImGui::SeparatorText("Voxel Type");
-
-
-            // ----------------------------------------------------
-            // Voxel types : swatches, "+" (new type), right click menu
-            // ----------------------------------------------------
-
-            bool editVoxelType = false;
-            lynx::editor::voxel_types::DrawPalette(brushVoxelType, scene, editVoxelType);
-            if (editVoxelType)
-            {
-                editorWindows.colorPicking = true;
-                ImGui::SetWindowFocus("Color Picking");
-            }
-        }
-
-
-            ImGui::End();
-        }
-
-        if (editorWindows.postProcess)
-            DrawPostProcessWindow();
-
-        if (editorWindows.lighting2D)
-            DrawLighting2DWindow();
-
-        if (editorWindows.voxelWorld)
-            DrawVoxelWorldWindow(&editorWindows.voxelWorld);
-
-        // Plugins : manager and the windows of the editor modules.
-        // Plugins : a page of the Options window (old entry points open it).
-        if (showPluginManager)
-        {
-            showPluginManager = false;
-            showEditorOptions = true;
-            lynx::editor::options::OpenPage(lynx::editor::options::Page::Plugins);
-        }
-        lynx::editor::plugins::DrawWindows();
-
-        // --------------------------------------------------------
-        // Camera Shake
-        // --------------------------------------------------------
-
-        if (editorWindows.cameraShake)
-            DrawCameraShakeWindow(&editorWindows.cameraShake);
-
-        // --------------------------------------------------------
-        // Input Settings (project input.json)
-        // --------------------------------------------------------
-
-        lynx::editor::game_build::DrawWindow();
-
-        {
-            const bool was_open = editorWindows.inputSettings;
-
-            lynx::editor::input_settings::Draw(&editorWindows.inputSettings);
-
-            if (was_open != editorWindows.inputSettings)
-                SaveEditorWindowVisibility();
-        }
-
-        // Python scripts / editor console / AI (MCP) connection.
-        {
-            const bool was_open = editorWindows.commands;
-
-            lynx::editor::commands_window::Draw(&editorWindows.commands);
-
-            if (was_open != editorWindows.commands)
-                SaveEditorWindowVisibility();
-        }
-
-        // Ship Game window (and its steps : build, packing).
-        lynx::editor::ship_game::SetProject(currentProject.root, currentProject.name);
-        lynx::editor::ship_game::Draw([]() { SaveEditor(); });
-
-        // Profiler (frame times, LYNX_PROFILE_SCOPE zones, Tracy).
-        {
-            const bool was_open = editorWindows.profiler;
-
-            lynx::editor::profiler_window::Draw(&editorWindows.profiler);
-
-            if (was_open != editorWindows.profiler)
-                SaveEditorWindowVisibility();
-        }
-
-        lynx::editor::options::Draw(&showEditorOptions);
-
-        // Output of the editor (stdout / stderr, the Windows console is disabled).
-        {
-            const bool was_open = editorWindows.console;
-
-            lynx::editor::output_console::Draw(&editorWindows.console);
-
-            if (was_open != editorWindows.console)
-                SaveEditorWindowVisibility();
-        }
-
-        // Git (version control of the project folder).
-        {
-            const bool was_open = editorWindows.git;
-
-            git_window::Draw(&editorWindows.git, editor_dirty, []() { SaveEditor(); });
-
-            if (was_open != editorWindows.git)
-                SaveEditorWindowVisibility();
-        }
-
-// Level drag & drop
-        // --------------------------------------------------------
-
-        HandleLevelAssetDrop(level);
-
-
-        // Sprite -> voxels dialog (right click on a sprite actor).
-        lynx::editor::sprite_voxels::Draw(SpriteVoxelHost());
-
-        // --------------------------------------------------------
-        // Close confirmation
-        // --------------------------------------------------------
-
-        if (show_close_confirmation)
-        {
-            ImGui::OpenPopup("Save before quitting?");
-            show_close_confirmation = false;
-        }
-
-        if (ImGui::BeginPopupModal(
-                "Save before quitting?",
-                nullptr,
-                ImGuiWindowFlags_AlwaysAutoResize
-            ))
-        {
-            if (switch_project_requested)
-            {
-                ImGui::TextUnformatted(
-                    "The project browser opens after this editor closes."
-                );
-                ImGui::Separator();
-            }
-
-            const bool scripts_dirty =
-                lynx::editor::script_editors::HasUnsavedChanges() ||
-                lynx::editor::widget_editor::HasUnsavedChanges() ||
-                lynx::editor::graph_editors::HasUnsavedChanges() ||
-                lynx::editor::particle_editor::HasUnsavedChanges();
-
-            if (editor_dirty || scripts_dirty)
-            {
-                if (editor_dirty)
-                    ImGui::TextUnformatted(
-                        "The level has unsaved changes."
-                    );
-                if (scripts_dirty)
-                    ImGui::TextUnformatted(
-                        "Some scripts or widgets have unsaved changes (marked * in their tab)."
-                    );
-                ImGui::TextUnformatted(
-                    "Do you want to save before quitting?"
-                );
-                ImGui::Separator();
-
-                if (ImGui::Button("Save and Quit"))
-                {
-                    if (editor_dirty)
-                        SaveEditor();
-                    lynx::editor::script_editors::SaveAll();
-                    lynx::editor::widget_editor::SaveAll();
-                    lynx::editor::graph_editors::SaveAll();
-                    lynx::editor::particle_editor::SaveAll();
-                    glfwSetWindowShouldClose(win, GLFW_TRUE);
-                    ImGui::CloseCurrentPopup();
-                }
-
-                ImGui::SameLine();
-
-                if (ImGui::Button("Quit without Saving"))
-                {
-                    glfwSetWindowShouldClose(win, GLFW_TRUE);
-                    ImGui::CloseCurrentPopup();
-                }
-
-                ImGui::SameLine();
-
-                if (ImGui::Button("Cancel"))
-                {
-                    switch_project_requested = false;
-                    ImGui::CloseCurrentPopup();
-                }
-            }
-            else
-            {
-                ImGui::TextUnformatted(
-                    "There are no unsaved level changes."
-                );
-                ImGui::Separator();
-
-                if (ImGui::Button("Quit"))
-                {
-                    glfwSetWindowShouldClose(win, GLFW_TRUE);
-                    ImGui::CloseCurrentPopup();
-                }
-
-                ImGui::SameLine();
-
-                if (ImGui::Button("Cancel"))
-                {
-                    switch_project_requested = false;
-                    ImGui::CloseCurrentPopup();
-                }
-            }
-
-            ImGui::EndPopup();
-        }
-
-
-        if (editor_warning_pending)
-        {
-            ImGui::OpenPopup("Warning##EditorWarning");
-            editor_warning_pending = false;
-        }
-
-        if (ImGui::BeginPopupModal(
-                "Warning##EditorWarning",
-                nullptr,
-                ImGuiWindowFlags_AlwaysAutoResize
-            ))
-        {
-            ImGui::TextUnformatted(editor_warning.c_str());
-            ImGui::Separator();
-
-            if (ImGui::Button("OK"))
-                ImGui::CloseCurrentPopup();
-
-            ImGui::EndPopup();
-        }
-
-        if (show_copy_error)
-        {
-            ImGui::OpenPopup("Content Browser Error");
-            show_copy_error = false;
-        }
-
-        if (ImGui::BeginPopupModal(
-                "Content Browser Error",
-                nullptr,
-                ImGuiWindowFlags_AlwaysAutoResize
-            ))
-        {
-            ImGui::TextWrapped(
-                "%s",
-                copy_error_message.c_str()
-            );
-
-            if (ImGui::Button("OK"))
-                ImGui::CloseCurrentPopup();
-
-            ImGui::EndPopup();
-        }
-
-        } // !isPlaying: hide every editor window while the game is running
-
-        EndImGuiFrame();
-    }
 }
 
 
 
-static void FramebufferSizeCallback(
-    GLFWwindow*,
-    int width,
-    int height)
-{
-    // In the editor the rendered scene belongs to the ImGui viewport. Its
-    // dimensions are sent to HRL from DrawViewportWindow(); resizing the host
-    // window must not change the scene's render dimensions.
-    if (editorWindows.viewport)
-        return;
-    if (lynx::Engine* engine = lynx::Engine::Get())
-        engine->SetRenderSize(width, height);
-}
 
 
 static double lastMouseX = 0.0;
@@ -9043,132 +4591,23 @@ static double lastMouseY = 0.0;
 static bool haveLastMousePosition = false;
 
 
-static void MouseMove(
-    GLFWwindow*,
-    double x,
-    double y)
-{
-    double scene_x = x;
-    double scene_y = y;
-
-    MouseToScene(x, y, scene_x, scene_y);
-
-    HRL_MouseMovedCallback(
-        static_cast<float>(scene_x),
-        static_cast<float>(scene_y)
-    );
-
-    if (haveLastMousePosition)
-    {
-        lynx::InjectMouseMove(
-            static_cast<float>(x - lastMouseX),
-            static_cast<float>(y - lastMouseY)
-        );
-    }
-
-    lastMouseX = x;
-    lastMouseY = y;
-    haveLastMousePosition = true;
-}
 
 
-static void MouseButtonCallback(
-    GLFWwindow* window,
-    int button,
-    int action,
-    int mods)
-{
-    // An ImGui window must completely own the click.
-    // Keep the decision made on PRESS until RELEASE so a click that starts
-    // on an ImGui window can never leak a release into the game.
-    static bool gameMouseButtonDown[GLFW_MOUSE_BUTTON_LAST + 1] = {};
-
-    // Input Settings : "press the key to bind".
-    if (lynx::editor::input_settings::OnMouseButton(button, action))
-        return;
-
-    const bool editorOwnsMouse = editor::WantsMouse();
-    const bool blocked = editor::BlockGameInput() || editorOwnsMouse;
-
-    if (button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST)
-    {
-        if (action == GLFW_PRESS)
-        {
-            gameMouseButtonDown[button] = !blocked;
-
-            if (!blocked)
-                lynx::InjectMouseButtonDown(button);
-        }
-        else if (action == GLFW_RELEASE)
-        {
-            if (gameMouseButtonDown[button])
-                lynx::InjectMouseButtonUp(button);
-
-            gameMouseButtonDown[button] = false;
-        }
-    }
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT &&
-        action == GLFW_PRESS)
-    {
-        editor::OnLeftMousePress(window);
-    }
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT)
-    {
-        HRL_MouseButtonCallback(
-            HRL_MOUSE_BUTTON_LEFT,
-            action == GLFW_PRESS
-                ? HRL_MOUSE_PRESS
-                : HRL_MOUSE_RELEASE
-        );
-    }
-}
 
 
-void ScrollCallback(
-    GLFWwindow* window,
-    double xoffset,
-    double yoffset)
-{
-    if (lynx::editor::input_settings::OnScroll(yoffset))
-        return;
-
-    if (!editor::BlockGameInput() &&
-        !editor::WantsMouse())
-    {
-        lynx::InjectMouseWheel(
-            static_cast<float>(yoffset)
-        );
-    }
-
-    editor::OnScroll(yoffset);
-}
 
 
-void inject_keys_callback(
-    GLFWwindow* window,
-    int key,
-    int scancode,
-    int action,
-    int mods)
-{
-    // Input Settings : "press the key to bind".
-    if (lynx::editor::input_settings::OnKey(key, action))
-        return;
 
-    if (editor::BlockGameInput())
-        return;
 
-    if (action == GLFW_PRESS)
-    {
-        lynx::InjectKeyDown(key);
-    }
-    else if (action == GLFW_RELEASE)
-    {
-        lynx::InjectKeyUp(key);
-    }
-}
+// -----------------------------------------------------------------------------
+// Interface of main() (raven/EditorUi.inl, at the end of this file)
+// -----------------------------------------------------------------------------
+static bool editor_quit = false;                 // the editor window closes
+static bool StartInterface();                    // Rinit, embedded files, themes
+static void StopInterface();
+static void SetProjectWindowIcon(Rid window, const std::vector<uint8_t>& png);
+static void SetFpsText(double fps);
+static void SetGameCursorHidden(bool hidden);   // the game hid the cursor (Play)
 
 
 // -----------------------------------------------------------------------------
@@ -9446,6 +4885,10 @@ int main(int argc, char** argv)
     SetUnhandledExceptionFilter(EditorCrashFilter);
     ExportEngineLocationForCMake();
 #endif
+
+    // Raven : every window of the editor (project browser, splash, editor).
+    if (!StartInterface())
+        return 1;
     // ------------------------------------------------------------
     // Project
     // ------------------------------------------------------------
@@ -9627,107 +5070,58 @@ int main(int argc, char** argv)
 
     lynx::editor::splash::SetStep("Creating the editor window", 0.32f);
 
+    // Gamepads only (GLFW opens no window).
     glfwInit();
-
-    // Hidden until the project is loaded : the splash is shown meanwhile, the
-    // window appears (maximized) once its content is ready.
-    glfwWindowHint(
-        GLFW_VISIBLE,
-        GLFW_FALSE
-    );
-
-    glfwWindowHint(
-        GLFW_CONTEXT_VERSION_MAJOR,
-        3
-    );
-
-    glfwWindowHint(
-        GLFW_CONTEXT_VERSION_MINOR,
-        3
-    );
-
-    glfwWindowHint(
-        GLFW_OPENGL_PROFILE,
-        GLFW_OPENGL_CORE_PROFILE
-    );
-
 
     const std::string window_title =
         "Lynx - " + currentProject.name;
 
-    GLFWwindow* win =
-        glfwCreateWindow(
-            1280,
-            720,
-            window_title.c_str(),
-            nullptr,
-            nullptr
-        );
+    // Hidden until the project is loaded : the splash is shown meanwhile, the
+    // window appears (maximized) once its content is ready.
+    const Rid win =
+        lynx::editor::ui::LoadWindow("editor.xml");
 
-    if (!win)
+    if (win == R_INVALID_ID)
     {
         std::cerr << "[WINDOW] Could not create the editor window\n";
         lynx::editor::splash::Close();
         return 1;
     }
 
-    // Maximized when it is shown, at the end of the loading (a hidden window
-    // would be shown by glfwMaximizeWindow on Windows).
+    Rwindow_set_title(win, window_title.c_str());
 
-    glfwMakeContextCurrent(win);
+    // icon.png of the project (assets) ; otherwise the icon of the executable.
+    SetProjectWindowIcon(win, lynx::fs::ReadBinary("icon.png"));
 
-    glfwSwapInterval(
-        appSettings.vsync ? 1 : 0
-    );
-
-    // icon.png of the project (assets) : this window and the next ones
-    // (window_icon) ; otherwise the editor icon (exe resource / icon.png
-    // next to the editor).
-    lynx::editor::window_icon::SetImage(lynx::fs::ReadBinary("icon.png"));
-    lynx::editor::window_icon::Apply(win);
-
-
-    glfwSetFramebufferSizeCallback(
-        win,
-        FramebufferSizeCallback
-    );
-
-    glfwSetMouseButtonCallback(
-        win,
-        MouseButtonCallback
-    );
-
-    glfwSetCursorPosCallback(
-        win,
-        MouseMove
-    );
-
-    glfwSetScrollCallback(
-        win,
-        ScrollCallback
-    );
-
-    glfwSetKeyCallback(
-        win,
-        inject_keys_callback
-    );
-
+    Rset_vsync(appSettings.vsync ? R_TRUE : R_FALSE);
 
 
     lynx::editor::splash::SetStep("Starting the renderer", 0.38f);
 
+    // HRL keeps OpenGL 3.3 : a context of its own (hidden window), the scene
+    // is rendered off-screen and shown in the Viewport panel (GlBridge).
+    if (!lynx::editor::gl::Init())
+    {
+        std::cerr << "[WINDOW] OpenGL 3.3 is not available\n";
+        lynx::editor::splash::Close();
+#ifdef _WIN32
+        MessageBoxW(nullptr, L"OpenGL 3.3 is not available on this computer : the renderer cannot start.",
+                    L"Lynx Editor", MB_OK | MB_ICONERROR);
+#endif
+        return 1;
+    }
+
     HRL_Init(HRL_OPENGL_33);
 
-    int winX, winY;
-    glfwGetWindowSize(win, &winX, &winY);
+    int winX = 1280, winY = 720;
 
     HRL_InitContext(
         winX,
         winY,
-        (void*)glfwGetProcAddress
+        (void*)lynx::editor::gl::GetProcAddress
     );
 
-    // Size known by the widgets too (the Viewport window sets its own).
+    // Size known by the widgets too (the Viewport panel sets its own).
     engine->SetRenderSize(winX, winY);
 
     HRL_RegisterErrorCallback(
@@ -9982,7 +5376,7 @@ int main(int argc, char** argv)
 
     // Input Settings window : edits the project's input.json (project root).
     lynx::editor::input_settings::Init(
-        win,
+        nullptr,
         currentProject.root / "input.json"
     );
 
@@ -10052,9 +5446,8 @@ int main(int argc, char** argv)
 
     lynx::editor::splash::Complete();
 
-    glfwMaximizeWindow(win);
-    glfwShowWindow(win);
-    glfwFocusWindow(win);
+    Rwindow_maximize(win);
+    Rwindow_show(win);
 
     // The loading time is not a frame.
     lastFrameTime =
@@ -10164,11 +5557,12 @@ int main(int argc, char** argv)
 
     LYNX_PROFILE_THREAD("Main");
 
-    while (!glfwWindowShouldClose(win))
+    while (!editor_quit && Rwindow_is_valid(win))
     {
         {
             LYNX_PROFILE_SCOPE("Events");
-            glfwPollEvents();
+            glfwPollEvents();   // gamepads
+            Rpoll_events();
         }
 
 
@@ -10233,10 +5627,7 @@ int main(int argc, char** argv)
         {
             if (!reload_game_module())
             {
-                glfwSetWindowShouldClose(
-                    win,
-                    GLFW_TRUE
-                );
+                editor_quit = true;
 
                 continue;
             }
@@ -10269,10 +5660,7 @@ int main(int argc, char** argv)
             {
                 std::cerr << "[WORLD] ERROR: could not open " << next_level << "\n";
 
-                glfwSetWindowShouldClose(
-                    win,
-                    GLFW_TRUE
-                );
+                editor_quit = true;
 
                 continue;
             }
@@ -10310,10 +5698,7 @@ int main(int argc, char** argv)
             {
                 std::cerr << "[PLAY] ERROR: could not restore the level.\n";
 
-                glfwSetWindowShouldClose(
-                    win,
-                    GLFW_TRUE
-                );
+                editor_quit = true;
 
                 continue;
             }
@@ -10364,22 +5749,6 @@ int main(int argc, char** argv)
             );
 
 
-        // --------------------------------------------------------
-        // Clear
-        // --------------------------------------------------------
-
-        glClearColor(
-            0.f,
-            0.f,
-            0.f,
-            1.f
-        );
-
-
-        glClear(
-            GL_COLOR_BUFFER_BIT |
-            GL_DEPTH_BUFFER_BIT
-        );
 
 
         // --------------------------------------------------------
@@ -10400,21 +5769,7 @@ int main(int argc, char** argv)
                 (now - fpsTimer);
 
 
-            char title[256];
-
-
-            std::snprintf(
-                title,
-                sizeof(title),
-                "%s",
-                window_title.c_str()
-            );
-
-
-            glfwSetWindowTitle(
-                win,
-                title
-            );
+            SetFpsText(fps);
 
 
             fpsFrames = 0;
@@ -10435,7 +5790,6 @@ int main(int argc, char** argv)
         {
             LYNX_PROFILE_SCOPE("Editor Tick");
             editor::Tick(
-                win,
                 dt
             );
         }
@@ -10464,35 +5818,36 @@ int main(int argc, char** argv)
             if (hide != cursor_hidden)
             {
                 cursor_hidden = hide;
-                // Else the ImGui backend shows the cursor again every frame.
-                if (hide)
-                    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-                else
-                    ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
-                glfwSetInputMode(win, GLFW_CURSOR, hide ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_NORMAL);
+                SetGameCursorHidden(hide);
             }
         }
 
 
 
         // --------------------------------------------------------
-        // Editor UI (ImGui)
+        // Editor UI (Raven) : panels follow the state, the scene image
+        // goes to the Viewport, then the window is drawn.
         // --------------------------------------------------------
 
         {
             LYNX_PROFILE_SCOPE("Editor UI");
-            editor::DrawUI(win);
+            editor::UpdateUi(dt);
         }
 
-        // Screenshots / frame waits asked by commands (the frame is drawn).
-        ProcessFrameEndCommands();
-
+        // The presses / clicks of this frame were read (Tick, panels) : the
+        // events pumped from here (Rdraw_frame, Rpoll_events) are the next frame's.
+        lynx::editor::input::NewFrame();
 
         {
             // Includes the wait for vsync when it is on.
-            LYNX_PROFILE_SCOPE("Swap buffers");
-            glfwSwapBuffers(win);
+            LYNX_PROFILE_SCOPE("Draw frame");
+            if (!Rdraw_frame())
+                editor_quit = true;
         }
+
+
+        // Screenshots / frame waits asked by commands (the frame is drawn).
+        ProcessFrameEndCommands();
 
         // Splash fade-out over the first frames of the editor.
         lynx::editor::splash::Tick();
@@ -10531,6 +5886,9 @@ int main(int argc, char** argv)
     lynx::Engine::Destroy();
 
     editor::Shutdown();
+
+    lynx::editor::gl::Shutdown();
+    StopInterface();
 
 
     // "Project > Open another project..." : a new editor, on the browser.
@@ -10593,105 +5951,6 @@ static void ResizeVoxelWorldWithUndo(int width, int height)
     std::cout << "[WORLD] Voxel world resized to " << width << " x " << height << "\n";
 }
 
-static void DrawVoxelWorldWindow(bool* open)
-{
-    static int wanted_w = 0, wanted_h = 0;
-    static int synced_w = -1, synced_h = -1;
-    static uint64_t pending_removed = 0;
-
-    int width = 0, height = 0;
-    HRL_GetVoxelSize(scene, &width, &height);
-
-    // New level / undo : the fields follow the world.
-    if (width != synced_w || height != synced_h)
-    {
-        wanted_w = synced_w = width;
-        wanted_h = synced_h = height;
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 24.f, 0.f), ImGuiCond_FirstUseEver);
-    const bool was_open = *open;
-    if (!ImGui::Begin("Voxel World", open))
-    {
-        ImGui::End();
-        if (was_open != *open) SaveEditorWindowVisibility();
-        return;
-    }
-    if (was_open != *open)
-        SaveEditorWindowVisibility();
-
-    ImGui::TextDisabled("Level");
-    ImGui::SameLine();
-    ImGui::TextUnformatted(current_level_file.empty() ? "(none)" : current_level_file.c_str());
-    ImGui::TextDisabled("File");
-    ImGui::SameLine();
-    ImGui::TextUnformatted(world_file_path_string.c_str());
-    ImGui::Text("Current size : %d x %d voxels  (chunks of %d)", width, height, HRL_GetVoxelChunkSize(scene));
-
-    ImGui::SeparatorText("New size");
-    ImGui::BeginDisabled(isPlaying);
-    ImGui::PushItemWidth(ImGui::GetFontSize() * 8.f);
-    ImGui::InputInt("Width", &wanted_w, 256, 4096);
-    ImGui::SameLine();
-    ImGui::InputInt("Height", &wanted_h, 256, 4096);
-    ImGui::PopItemWidth();
-    wanted_w = std::clamp(wanted_w, 16, 1 << 30);
-    wanted_h = std::clamp(wanted_h, 16, 1 << 30);
-
-    ImGui::TextDisabled("Presets");
-    for (int preset : { 1024, 4096, 16384, 65536, 131072, 262144 })
-    {
-        ImGui::SameLine();
-        char label[32];
-        std::snprintf(label, sizeof(label), "%dk", preset / 1024);
-        if (ImGui::SmallButton(label))
-            wanted_w = wanted_h = preset;
-    }
-
-    const bool encodable = HRL_IsVoxelSizeEncodable(scene, wanted_w, wanted_h) != 0;
-    const bool same = wanted_w == width && wanted_h == height;
-    if (!encodable)
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f), "Too large for the .hrlv format (too many chunks).");
-    ImGui::TextDisabled("The origin (0, 0) stays : the world grows / shrinks to the right and the top.");
-
-    ImGui::BeginDisabled(!encodable || same);
-    if (ImGui::Button("Apply", ImVec2(ImGui::GetFontSize() * 8.f, 0.f)))
-    {
-        pending_removed = HRL_CountVoxelsOutside(scene, wanted_w, wanted_h);
-        if (pending_removed > 0)
-            ImGui::OpenPopup("Shrink the voxel world ?");
-        else
-            ResizeVoxelWorldWithUndo(wanted_w, wanted_h);
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Reset"))
-    {
-        wanted_w = width;
-        wanted_h = height;
-    }
-    ImGui::EndDisabled();
-    if (isPlaying)
-        ImGui::TextDisabled("Stop the game to resize the world.");
-
-    if (ImGui::BeginPopupModal("Shrink the voxel world ?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        ImGui::Text("%llu voxel(s) are outside %d x %d and will be removed.",
-                    static_cast<unsigned long long>(pending_removed), wanted_w, wanted_h);
-        ImGui::TextDisabled("Ctrl+Z restores them (until the editor is closed).");
-        if (ImGui::Button("Resize", ImVec2(ImGui::GetFontSize() * 7.f, 0.f)))
-        {
-            ResizeVoxelWorldWithUndo(wanted_w, wanted_h);
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(ImGui::GetFontSize() * 7.f, 0.f)))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    ImGui::End();
-}
 
 // =============================================================================
 // Camera Shake window
@@ -10706,191 +5965,6 @@ static bool g_camera_shake_dirty = false;
 static bool g_camera_shake_loop = false;
 static float g_camera_shake_loop_wait = 0.f;
 
-static void DrawCameraShakeWindow(bool* open)
-{
-    lynx::CameraShake& shake = lynx::GetCameraShake();
-
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 26.f, ImGui::GetFontSize() * 30.f), ImGuiCond_FirstUseEver);
-    const bool was_open = *open;
-    if (!ImGui::Begin("Camera Shake", open))
-    {
-        ImGui::End();
-        if (was_open != *open) SaveEditorWindowVisibility();
-        return;
-    }
-    if (was_open != *open)
-        SaveEditorWindowVisibility();
-
-    // --- Test -------------------------------------------------------------
-    const float button_h = ImGui::GetFrameHeight() * 1.6f;
-    ImGui::BeginDisabled(isPlaying || !shake.enabled);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.45f, 0.75f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.53f, 0.85f, 1.f));
-    if (ImGui::Button(shake.active ? "Shaking...##Test" : "Test##Test",
-                      ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, button_h)))
-        shake.Trigger();
-    ImGui::PopStyleColor(2);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip(isPlaying ? "Stop the game to test in the editor\n(in game : Engine.cameraShake() / GetCameraShake().Trigger())"
-                                    : "Shakes the editor camera with these settings");
-    ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Checkbox("Loop", &g_camera_shake_loop);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Triggers it again and again (0.4 s pause) : tweak the sliders while it plays");
-    if (ImGui::SmallButton("Stop"))
-    {
-        g_camera_shake_loop = false;
-        shake.Stop();
-    }
-    ImGui::EndGroup();
-
-    // Loop : a short pause between two shakes.
-    if (g_camera_shake_loop && !isPlaying && shake.enabled && !shake.active)
-    {
-        g_camera_shake_loop_wait += ImGui::GetIO().DeltaTime;
-        if (g_camera_shake_loop_wait >= 0.4f)
-        {
-            g_camera_shake_loop_wait = 0.f;
-            shake.Trigger();
-        }
-    }
-
-    // --- Settings -----------------------------------------------------------
-    ImGui::SeparatorText("Settings");
-    bool changed = false;
-    changed |= ImGui::Checkbox("Enabled", &shake.enabled);
-    ImGui::BeginDisabled(!shake.enabled);
-    ImGui::PushItemWidth(-ImGui::GetFontSize() * 9.f);
-    changed |= ImGui::SliderFloat("Duration", &shake.duration, 0.01f, 3.f, "%.2f s");
-    changed |= ImGui::SliderFloat("Position amplitude", &shake.positionAmplitude, 0.f, 20.f, "%.2f voxels");
-    changed |= ImGui::SliderFloat("Rotation amplitude", &shake.rotationAmplitude, 0.f, 20.f, "%.2f deg");
-    changed |= ImGui::SliderFloat("Frequency", &shake.frequency, 1.f, 80.f, "%.1f Hz");
-    changed |= ImGui::SliderFloat("Falloff", &shake.falloff, 0.1f, 6.f, "%.2f");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("How fast it calms down : 1 = linear, higher = a strong hit that stops quickly");
-    ImGui::PopItemWidth();
-    changed |= ImGui::Checkbox("Horizontal (X)", &shake.shake_x);
-    ImGui::SameLine();
-    changed |= ImGui::Checkbox("Vertical (Y)", &shake.shake_y);
-    ImGui::SameLine();
-    changed |= ImGui::Checkbox("Roll", &shake.shake_roll);
-
-    // Presets.
-    ImGui::TextDisabled("Presets");
-    ImGui::SameLine();
-    auto preset = [&](const char* name, float duration, float pos, float rot, float freq, float falloff)
-    {
-        if (ImGui::SmallButton(name))
-        {
-            shake.duration = duration;
-            shake.positionAmplitude = pos;
-            shake.rotationAmplitude = rot;
-            shake.frequency = freq;
-            shake.falloff = falloff;
-            changed = true;
-            if (!isPlaying)
-                shake.Trigger();
-        }
-        ImGui::SameLine();
-    };
-    preset("Hit", 0.15f, 2.3f, 0.6f, 20.f, 1.25f);
-    preset("Explosion", 0.6f, 6.f, 3.f, 25.f, 2.f);
-    preset("Earthquake", 2.f, 3.f, 1.f, 8.f, 0.5f);
-    preset("Rumble", 1.f, 0.8f, 0.2f, 40.f, 0.3f);
-    ImGui::NewLine();
-    ImGui::EndDisabled();
-
-    // --- Curves -------------------------------------------------------------
-    ImGui::SeparatorText("Preview");
-    {
-        const float width = ImGui::GetContentRegionAvail().x;
-        const float height = std::max(ImGui::GetFontSize() * 7.f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 2.2f);
-        const ImVec2 a = ImGui::GetCursorScreenPos();
-        const ImVec2 b(a.x + width, a.y + height);
-        ImGui::InvisibleButton("##ShakeCurves", ImVec2(width, height));
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(a, b, IM_COL32(24, 24, 28, 255), 4.f);
-        dl->AddRect(a, b, IM_COL32(70, 70, 80, 255), 4.f);
-        const float mid = (a.y + b.y) * 0.5f;
-        dl->AddLine(ImVec2(a.x, mid), ImVec2(b.x, mid), IM_COL32(70, 70, 80, 255));
-
-        // Scale : the largest amplitude fills the box.
-        const float range = std::max(0.001f, std::max(shake.positionAmplitude, shake.rotationAmplitude));
-        const float half = height * 0.45f;
-        const int samples = std::max(32, static_cast<int>(width));
-        struct Curve { int axis; ImU32 color; bool on; };
-        const Curve curves[] = {
-            { 0, IM_COL32(235, 90, 90, 255), shake.shake_x },
-            { 1, IM_COL32(110, 210, 110, 255), shake.shake_y },
-            { 2, IM_COL32(100, 160, 255, 255), shake.shake_roll },
-        };
-        for (const Curve& c : curves)
-        {
-            if (!c.on)
-                continue;
-            ImVec2 previous;
-            for (int i = 0; i <= samples; ++i)
-            {
-                const float t = shake.duration * static_cast<float>(i) / static_cast<float>(samples);
-                float v[3];
-                lynx::CameraShake settings = shake;   // the settings alone (not a scaled shake from the game)
-                settings.scale = 1.f;
-                settings.length_scale = 1.f;
-                settings.Sample(std::min(t, shake.duration * 0.9999f), v[0], v[1], v[2]);
-                const ImVec2 p(a.x + width * static_cast<float>(i) / static_cast<float>(samples),
-                               mid - v[c.axis] / range * half);
-                if (i > 0)
-                    dl->AddLine(previous, p, c.color, 1.5f);
-                previous = p;
-            }
-        }
-
-        // Play head.
-        if (shake.active && shake.duration > 0.f)
-        {
-            const float x = a.x + width * std::clamp(shake.elapsed / shake.Duration(), 0.f, 1.f);
-            dl->AddLine(ImVec2(x, a.y), ImVec2(x, b.y), IM_COL32(255, 220, 120, 255), 2.f);
-        }
-
-        char legend[96];
-        std::snprintf(legend, sizeof(legend), "X  Y  Roll      %.2f s", shake.duration);
-        dl->AddText(ImVec2(a.x + 6.f, a.y + 4.f), IM_COL32(235, 90, 90, 255), "X");
-        dl->AddText(ImVec2(a.x + 6.f + ImGui::CalcTextSize("X  ").x, a.y + 4.f), IM_COL32(110, 210, 110, 255), "Y");
-        dl->AddText(ImVec2(a.x + 6.f + ImGui::CalcTextSize("X  Y  ").x, a.y + 4.f), IM_COL32(100, 160, 255, 255), "Roll");
-        char right[32];
-        std::snprintf(right, sizeof(right), "%.2f s", shake.duration);
-        dl->AddText(ImVec2(b.x - ImGui::CalcTextSize(right).x - 6.f, b.y - ImGui::GetTextLineHeight() - 4.f),
-                    IM_COL32(150, 150, 160, 255), right);
-        (void)legend;
-    }
-
-    // --- Save ---------------------------------------------------------------
-    if (changed)
-        g_camera_shake_dirty = true;
-    ImGui::BeginDisabled(!g_camera_shake_dirty);
-    if (ImGui::Button("Save"))
-        g_camera_shake_dirty = !lynx::SaveCameraShakeSettings();
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Revert"))
-    {
-        lynx::CameraShake defaults;
-        shake.duration = defaults.duration;
-        shake.positionAmplitude = defaults.positionAmplitude;
-        shake.rotationAmplitude = defaults.rotationAmplitude;
-        shake.frequency = defaults.frequency;
-        shake.falloff = defaults.falloff;
-        shake.shake_x = shake.shake_y = shake.shake_roll = true;
-        lynx::LoadCameraShakeSettings();
-        g_camera_shake_dirty = false;
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled(g_camera_shake_dirty ? "assets/camera_shake.json (not saved)" : "assets/camera_shake.json");
-
-    ImGui::End();
-}
 
 // Editor camera : the shake started by "Test" (not during Play : the game
 // cameras apply it).
@@ -10925,310 +5999,20 @@ static void ApplyCameraShakePreview(HRL_id camera, float dt)
 // Post Process window
 // =============================================================================
 
-static void DrawPostProcessWindow()
-{
-    namespace pp = lynx::postprocess;
-
-    bool open = true;
-    if (!ImGui::Begin("Post Process", &open))
-    {
-        ImGui::End();
-        if (!open) { editorWindows.postProcess = false; SaveEditorWindowVisibility(); }
-        return;
-    }
-
-    if (ImGui::Button("Save"))
-        pp::Save();
-    ImGui::SameLine();
-    if (ImGui::Button("Revert"))
-        pp::Load();
-    ImGui::SameLine();
-    if (ImGui::Button("Reset all"))
-        pp::Reset();
-    ImGui::SameLine();
-    ImGui::TextDisabled(pp::IsDirty() ? "assets/postprocess.json (not saved)" : "assets/postprocess.json");
-
-    ImGui::Separator();
-
-    std::string group;
-    bool group_open = false;
-
-    for (const pp::ParamInfo& p : pp::GetParams())
-    {
-        if (group != p.group)
-        {
-            group = p.group;
-            group_open = ImGui::CollapsingHeader(p.group, ImGuiTreeNodeFlags_DefaultOpen);
-        }
-        if (!group_open)
-            continue;
-
-        ImGui::PushID(p.name);
-
-        float v[3] = {};
-        pp::GetValue(p.name, v);
-        bool changed = false;
-
-        switch (p.type)
-        {
-        case pp::ParamType::Float:
-            changed = ImGui::SliderFloat(p.label, &v[0], p.min, p.max, "%.3f");
-            break;
-        case pp::ParamType::Toggle:
-        {
-            bool b = v[0] != 0.f;
-            if (ImGui::Checkbox(p.label, &b)) { v[0] = b ? 1.f : 0.f; changed = true; }
-            break;
-        }
-        case pp::ParamType::Color:
-            changed = ImGui::ColorEdit3(p.label, v, ImGuiColorEditFlags_Float);
-            break;
-        }
-
-        if (changed)
-            pp::SetValue(p.name, v, 3);
-
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s%s%s", p.name, p.tooltip[0] ? "\n" : "", p.tooltip);
-
-        // Back to the default value.
-        if (pp::IsModified(p.name))
-        {
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Reset"))
-                pp::Reset(p.name);
-        }
-
-        ImGui::PopID();
-    }
-
-    ImGui::End();
-
-    if (!open)
-    {
-        editorWindows.postProcess = false;
-        SaveEditorWindowVisibility();
-    }
-}
 
 
 // =============================================================================
 // 2D Lighting window
 // =============================================================================
 
-static void DrawLighting2DWindow()
-{
-    namespace l2 = lynx::lighting2d;
-
-    bool open = true;
-    if (!ImGui::Begin("2D Lighting", &open))
-    {
-        ImGui::End();
-        if (!open) { editorWindows.lighting2D = false; SaveEditorWindowVisibility(); }
-        return;
-    }
-
-    if (ImGui::Button("Save"))
-        l2::Save();
-    ImGui::SameLine();
-    if (ImGui::Button("Revert"))
-        l2::Load();
-    ImGui::SameLine();
-    if (ImGui::Button("Reset all"))
-        l2::Reset();
-    ImGui::SameLine();
-    ImGui::TextDisabled(l2::IsDirty() ? "assets/lighting2d.json (not saved)" : "assets/lighting2d.json");
-
-    if (!l2::GetError().empty())
-        ImGui::TextColored(ImVec4(1.f, 0.4f, 0.35f, 1.f), "%s", l2::GetError().c_str());
-    else if (l2::IsEnabled())
-        ImGui::TextDisabled("%d light(s) drawn (max %d per view). Add lights : Place Actors > Light2DActor.",
-                            l2::GetDrawnLightCount(), l2::kMaxLights);
-    else
-        ImGui::TextDisabled("Off : tick Enabled to light the level with the 2D lights.");
-
-    ImGui::Separator();
-
-    std::string group;
-    bool group_open = false;
-    for (const l2::ParamInfo& p : l2::GetParams())
-    {
-        if (group != p.group)
-        {
-            group = p.group;
-            group_open = ImGui::CollapsingHeader(p.group, ImGuiTreeNodeFlags_DefaultOpen);
-        }
-        if (!group_open)
-            continue;
-
-        ImGui::PushID(p.name);
-        float v[3] = {};
-        l2::GetValue(p.name, v);
-        bool changed = false;
-        switch (p.type)
-        {
-        case l2::ParamType::Float:
-            changed = ImGui::SliderFloat(p.label, &v[0], p.min, p.max, "%.2f");
-            break;
-        case l2::ParamType::Toggle:
-        {
-            bool b = v[0] != 0.f;
-            if (ImGui::Checkbox(p.label, &b)) { v[0] = b ? 1.f : 0.f; changed = true; }
-            break;
-        }
-        case l2::ParamType::Color:
-            changed = ImGui::ColorEdit3(p.label, v, ImGuiColorEditFlags_Float);
-            break;
-        }
-        if (changed)
-            l2::SetValue(p.name, v, 3);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s%s%s", p.name, p.tooltip[0] ? "\n" : "", p.tooltip);
-        if (l2::IsModified(p.name))
-        {
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Reset"))
-                l2::Reset(p.name);
-        }
-        ImGui::PopID();
-    }
-
-    ImGui::End();
-
-    if (!open)
-    {
-        editorWindows.lighting2D = false;
-        SaveEditorWindowVisibility();
-    }
-}
 
 
 // =============================================================================
 // Command palette (Ctrl+P)
 // =============================================================================
 
-static void OpenCommandPalette(const std::string& prefix)
-{
-    namespace cp = lynx::editor::command_palette;
-    std::vector<cp::Item> items;
 
-    auto command = [&](const char* label, const char* shortcut, std::function<void()> run)
-    {
-        items.push_back({ label, shortcut, cp::Kind::Command, std::move(run) });
-    };
-
-    // --- Commands -------------------------------------------------------------
-    command("Save level", "Ctrl+S", []() { SaveEditor(); });
-    command("Play / Stop", "F3", []() { TogglePlayMode(); });
-    command("Simulate", "Alt+S", []() { TogglePlayMode(true); });
-    command("Undo", "Ctrl+Z", []() { UndoLastEditorAction(); });
-    command("Hot reload game code", "", []() { RequestHotReload(); });
-    command("Options", "", []() { showEditorOptions = true; });
-    command("Plugins", "Options > Plugins", []() { showPluginManager = true; });
-    command("Ask Lynxie (AI assistant)", "Commands window", []()
-    {
-        editorWindows.commands = true;
-        SaveEditorWindowVisibility();
-        ImGui::SetWindowFocus("Commands");
-    });
-    command(lynx::lighting2d::IsEnabled() ? "2D lighting : turn off" : "2D lighting : turn on", "2D Lighting", []()
-    {
-        lynx::lighting2d::SetFloat("enabled", lynx::lighting2d::IsEnabled() ? 0.f : 1.f);
-    });
-    if (editing_actor && IsActorAlive(editing_actor))
-    {
-        command("Focus the selected actor", "camera", []()
-        {
-            if (editing_actor && IsActorAlive(editing_actor))
-            {
-                camX = editing_actor->transform.location.x;
-                camY = editing_actor->transform.location.y;
-            }
-        });
-    }
-
-    // --- Windows --------------------------------------------------------------
-    struct WindowEntry { const char* name; bool* flag; };
-    const WindowEntry windows[] = {
-        { "Viewport", &editorWindows.viewport },
-        { "Outliner", &editorWindows.outliner },
-        { "Place Actors", &editorWindows.placeActors },
-        { "Content Browser", &editorWindows.contentBrowser },
-        { "Details", &editorWindows.details },
-        { "Color Picking", &editorWindows.colorPicking },
-        { "Paint", &editorWindows.config },
-        { "Camera Shake", &editorWindows.cameraShake },
-        { "Post Process", &editorWindows.postProcess },
-        { "2D Lighting", &editorWindows.lighting2D },
-        { "Voxel World", &editorWindows.voxelWorld },
-        { "Input Settings", &editorWindows.inputSettings },
-        { "Commands (Python / AI)", &editorWindows.commands },
-        { "Git", &editorWindows.git },
-        { "Console", &editorWindows.console },
-        { "Profiler", &editorWindows.profiler },
-    };
-    for (const WindowEntry& w : windows)
-    {
-        bool* flag = w.flag;
-        items.push_back({ std::string(*flag ? "Hide " : "Show ") + w.name, "window", cp::Kind::Window, [flag]()
-        {
-            *flag = !*flag;
-            SaveEditorWindowVisibility();
-        } });
-    }
-
-    // --- Actors of the level ----------------------------------------------------
-    if (editor_level)
-    {
-        for (const auto& owned : editor_level->GetActors())
-        {
-            lynx::Actor* actor = owned;
-            std::string label = actor->GetTypeName();
-            if (!actor->object_id_.empty())
-                label += " [" + actor->object_id_ + "]";
-            char where[64];
-            std::snprintf(where, sizeof(where), "%.0f, %.0f", actor->transform.location.x, actor->transform.location.y);
-            items.push_back({ label, where, cp::Kind::Actor, [actor]()
-            {
-                if (!IsActorAlive(actor))
-                    return;
-                SetActorSelected(actor);
-                camX = actor->transform.location.x;
-                camY = actor->transform.location.y;
-            } });
-        }
-    }
-
-    // --- Files of assets/ -------------------------------------------------------
-    {
-        std::error_code error;
-        const std::filesystem::path root = content_browser_root;
-        int count = 0;
-        for (auto it = std::filesystem::recursive_directory_iterator(
-                 root, std::filesystem::directory_options::skip_permission_denied, error);
-             it != std::filesystem::recursive_directory_iterator() && count < 5000;
-             it.increment(error))
-        {
-            if (error)
-                break;
-            const std::string name = it->path().filename().string();
-            if (!name.empty() && name[0] == '.')
-            {
-                if (it->is_directory(error))
-                    it.disable_recursion_pending();
-                continue;
-            }
-            if (!it->is_regular_file(error))
-                continue;
-            const std::filesystem::path path = it->path();
-            const std::string relative = path.lexically_relative(root).generic_string();
-            items.push_back({ name, relative, cp::Kind::File, [path]()
-            {
-                content_browser_actions::OpenEntry(path);
-            } });
-            ++count;
-        }
-    }
-
-    cp::Open(std::move(items), prefix);
-}
+// =============================================================================
+// Interface (Raven) : shell, toolbar, panels, dialogs
+// =============================================================================
+#include "raven/EditorUi.inl"

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A window of its own (not docked) : opened by the editor, closing it hides it. -->
+<Window Title="Lynx - 2D Lighting" Width="460" Height="600" MinWidth="320" MinHeight="240" Hidden="true">
+<!-- 2D lighting pass (lynx::lighting2d), saved in assets/lighting2d.json. Rows built by raven/PanelTools.inl. -->
+<VBox Name="lighting2d" Spacing="4" Slot.Padding="6">
+	<HBox Spacing="6">
+		<Button Name="l2.save" Text="Save"/>
+		<Button Name="l2.revert" Text="Revert"/>
+		<Button Name="l2.reset" Text="Reset all"/>
+		<Label Name="l2.file" Text="assets/lighting2d.json" Class="dim" Slot.VAlign="Center"/>
+	</HBox>
+	<Label Name="l2.status" Text="" Class="dim" Wrap="true"/>
+	<Separator/>
+	<ScrollBox Slot.Fill="1">
+		<VBox Name="l2.body" Spacing="3" Slot.Padding="0,0,8,0"/>
+	</ScrollBox>
+</VBox>
+</Window>

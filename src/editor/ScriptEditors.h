@@ -23,7 +23,7 @@
 
 #include <filesystem>
 
-#include <imgui/imgui.h>
+// ImGuiID is an unsigned int : the old ImGui implementation still matches.
 
 namespace lynx::editor::script_editors
 {
@@ -39,7 +39,7 @@ namespace lynx::editor::script_editors
 
 	// Draws every open editor. `dock_id` : where new windows are docked
 	// (0 : floating).
-	void DrawAll(ImGuiID dock_id);
+	void DrawAll(unsigned int dock_id);
 
 	// A script editor has the keyboard (the editor's own shortcuts wait).
 	bool HasKeyboardFocus();

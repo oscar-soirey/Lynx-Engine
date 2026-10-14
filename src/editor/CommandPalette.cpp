@@ -1,6 +1,6 @@
 #include "CommandPalette.h"
 
-#include <imgui/imgui.h>
+#include "raven/RavenUi.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,12 +13,15 @@ namespace lynx::editor::command_palette
 		std::vector<Item> g_items;
 		std::vector<int> g_matches;          // indices in g_items, best first
 		std::vector<std::string> g_recent;   // labels of the last items run (most recent first)
-		char g_query[256] = "";
-		std::string g_last_query = "\x01";
-		int g_selected = 0;
+		std::string g_query;
 		bool g_open = false;
-		bool g_focus = false;
-		bool g_scroll_to_selected = false;
+
+		// The dialog while it is open.
+		Rid g_dialog = R_INVALID_ID;
+		Rid g_results = R_INVALID_ID;
+		Rid g_count = R_INVALID_ID;
+		std::vector<Rid> g_rows;             // tree items, in the order of g_matches
+		int g_selected = 0;
 
 		const char* KindLabel(Kind kind)
 		{
@@ -31,14 +34,14 @@ namespace lynx::editor::command_palette
 			}
 		}
 
-		ImVec4 KindColor(Kind kind)
+		void KindColor(Kind kind, float rgb[3])
 		{
 			switch (kind)
 			{
-			case Kind::Window: return ImVec4(0.55f, 0.75f, 1.f, 1.f);
-			case Kind::Actor:  return ImVec4(0.55f, 0.9f, 0.6f, 1.f);
-			case Kind::File:   return ImVec4(0.95f, 0.8f, 0.45f, 1.f);
-			default:           return ImVec4(0.96f, 0.56f, 0.2f, 1.f);
+			case Kind::Window: rgb[0] = 0.33f; rgb[1] = 0.55f; rgb[2] = 0.85f; break;
+			case Kind::Actor:  rgb[0] = 0.30f; rgb[1] = 0.65f; rgb[2] = 0.36f; break;
+			case Kind::File:   rgb[0] = 0.80f; rgb[1] = 0.58f; rgb[2] = 0.15f; break;
+			default:           rgb[0] = 0.85f; rgb[1] = 0.42f; rgb[2] = 0.12f; break;
 			}
 		}
 
@@ -49,13 +52,11 @@ namespace lynx::editor::command_palette
 
 		void Filter()
 		{
-			g_last_query = g_query;
 			g_matches.clear();
 			g_selected = 0;
-			g_scroll_to_selected = true;
 
 			// Prefix : one kind only.
-			const char* q = g_query;
+			const char* q = g_query.c_str();
 			int only = -1;   // -1 : every kind ; 0 commands + windows ; 1 actors ; 2 files
 			if (q[0] == '>') { only = 0; ++q; }
 			else if (q[0] == '@') { only = 1; ++q; }
@@ -110,21 +111,62 @@ namespace lynx::editor::command_palette
 				g_matches.push_back(index);
 		}
 
+		void Close()
+		{
+			if (g_dialog != R_INVALID_ID && Rwidget_is_valid(g_dialog))
+				Rdialog_close(g_dialog, 0);
+		}
+
 		void Run(int index)
 		{
 			if (index < 0 || index >= static_cast<int>(g_items.size()))
 				return;
 			Item item = g_items[index];   // a copy : running may reopen the palette
-			g_open = false;
-			ImGui::CloseCurrentPopup();
+			Close();
 
 			g_recent.erase(std::remove(g_recent.begin(), g_recent.end(), item.label), g_recent.end());
 			g_recent.insert(g_recent.begin(), item.label);
 			if (g_recent.size() > 12)
 				g_recent.resize(12);
 
+			// After the dialog is gone (the item may open another one).
 			if (item.run)
-				item.run();
+				ui::Later(item.run);
+		}
+
+		void Select(int row)
+		{
+			const int count = static_cast<int>(g_rows.size());
+			if (count == 0)
+				return;
+			g_selected = (row % count + count) % count;
+			Rtree_view_set_selected_item(g_results, g_rows[g_selected]);
+		}
+
+		void Fill()
+		{
+			Filter();
+			Rtree_view_clear_items(g_results);
+			g_rows.clear();
+			const int count = static_cast<int>(g_matches.size());
+			for (int i = 0; i < count && i < 400; ++i)
+			{
+				const Item& item = g_items[g_matches[i]];
+				std::string text = std::string(KindLabel(item.kind));
+				text.resize(9, ' ');
+				text += item.label;
+				if (!item.detail.empty())
+					text += "    " + item.detail;
+				const Rid row = Rtree_view_add_item(g_results, R_INVALID_ID, text.c_str());
+				float rgb[3];
+				KindColor(item.kind, rgb);
+				if (item.kind != Kind::Command)
+					Rtree_item_set_text_color(row, rgb[0], rgb[1], rgb[2], 1.f);
+				g_rows.push_back(row);
+			}
+			ui::SetText(g_count, count == 0 ? std::string("No result.")
+			                                : std::to_string(count) + " result(s)  -  > commands   @ actors   # files");
+			Select(0);
 		}
 	}
 
@@ -175,126 +217,84 @@ namespace lynx::editor::command_palette
 
 	void Open(std::vector<Item> items, const std::string& prefix)
 	{
+		const Rid window = input::Window();
+		if (window == R_INVALID_ID)
+			return;
+		if (g_open)
+			Close();
+
 		g_items = std::move(items);
-		std::strncpy(g_query, prefix.c_str(), sizeof(g_query) - 1);
-		g_query[sizeof(g_query) - 1] = '\0';
-		g_last_query = "\x01";
+		g_query = prefix;
+
+		g_dialog = ui::Load("dialogs/command_palette.xml");
+		if (g_dialog == R_INVALID_ID)
+			return;
+		const Rid query = ui::Find(g_dialog, "palette.query");
+		g_results = ui::Find(g_dialog, "palette.results");
+		g_count = ui::Find(g_dialog, "palette.count");
+
+		Rtext_input_set_text(query, g_query.c_str());
+		ui::OnText(query, [](const std::string& text)
+		{
+			g_query = text;
+			Fill();
+		});
+		// Arrows and Enter in the field move in the results.
+		ui::OnEvent(query, [](const REvent& event)
+		{
+			if (event.type != R_EVENT_KEY_DOWN)
+				return false;
+			switch (event.key)
+			{
+			case R_KEY_DOWN: Select(g_selected + 1); return true;
+			case R_KEY_UP: Select(g_selected - 1); return true;
+			case R_KEY_PAGE_DOWN: Select(std::min(g_selected + 10, static_cast<int>(g_rows.size()) - 1)); return true;
+			case R_KEY_PAGE_UP: Select(std::max(g_selected - 10, 0)); return true;
+			case R_KEY_ENTER:
+			case R_KEY_KP_ENTER:
+				if (g_selected >= 0 && g_selected < static_cast<int>(g_matches.size()))
+					Run(g_matches[g_selected]);
+				return true;
+			default:
+				return false;
+			}
+		});
+		ui::OnTreeSelect(g_results, [](Rid item)
+		{
+			for (int i = 0; i < static_cast<int>(g_rows.size()); ++i)
+				if (g_rows[i] == item)
+					g_selected = i;
+		});
+		// One click runs it.
+		ui::OnEvent(g_results, [](const REvent& event)
+		{
+			if (event.type == R_EVENT_MOUSE_UP && event.button == R_MOUSE_LEFT)
+			{
+				const Rid item = Rtree_view_get_item_at(g_results, event.local_x, event.local_y);
+				for (int i = 0; i < static_cast<int>(g_rows.size()); ++i)
+					if (g_rows[i] == item)
+					{
+						ui::Later([i]() { if (g_open && i < static_cast<int>(g_matches.size())) Run(g_matches[i]); });
+						return false;
+					}
+			}
+			return false;
+		});
+
+		Fill();
 		g_open = true;
-		g_focus = true;
+		Rdialog_open(window, g_dialog, [](Rid, int, void*)
+		{
+			g_open = false;
+			g_dialog = g_results = g_count = R_INVALID_ID;
+			g_rows.clear();
+		}, nullptr);
+		Rwidget_focus(query);
+		Rtext_input_select_all(query);
 	}
 
 	bool IsOpen()
 	{
 		return g_open;
-	}
-
-	void Draw()
-	{
-		if (!g_open)
-			return;
-
-		if (!ImGui::IsPopupOpen("##command_palette"))
-			ImGui::OpenPopup("##command_palette");
-
-		const ImGuiViewport* viewport = ImGui::GetMainViewport();
-		const float font = ImGui::GetFontSize();
-		const float width = std::min(viewport->WorkSize.x * 0.9f, font * 38.f);
-		ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-		                               viewport->WorkPos.y + viewport->WorkSize.y * 0.12f),
-		                        ImGuiCond_Always, ImVec2(0.5f, 0.f));
-		ImGui::SetNextWindowSize(ImVec2(width, 0.f));
-
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(font * 0.6f, font * 0.6f));
-		const bool visible = ImGui::BeginPopup("##command_palette",
-		                                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
-		                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
-		ImGui::PopStyleVar();
-		if (!visible)
-		{
-			g_open = false;   // closed by a click outside
-			return;
-		}
-
-		if (g_focus)
-		{
-			ImGui::SetKeyboardFocusHere();
-			g_focus = false;
-		}
-		ImGui::SetNextItemWidth(-1.f);
-		ImGui::InputTextWithHint("##query", "Search : commands, windows, @actors, #files", g_query, sizeof(g_query));
-		if (g_last_query != g_query)
-			Filter();
-
-		const int count = static_cast<int>(g_matches.size());
-		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && count > 0)
-		{
-			g_selected = (g_selected + 1) % count;
-			g_scroll_to_selected = true;
-		}
-		if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && count > 0)
-		{
-			g_selected = (g_selected + count - 1) % count;
-			g_scroll_to_selected = true;
-		}
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-		{
-			g_open = false;
-			ImGui::CloseCurrentPopup();
-			ImGui::EndPopup();
-			return;
-		}
-		if ((ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && count > 0)
-		{
-			Run(g_matches[std::clamp(g_selected, 0, count - 1)]);
-			ImGui::EndPopup();
-			return;
-		}
-
-		ImGui::TextDisabled(count == 0 ? "No result." : "%d result(s)  -  > commands   @ actors   # files", count);
-
-		const float row = ImGui::GetTextLineHeightWithSpacing();
-		const int shown = std::min(count, 12);
-		if (shown > 0)
-		{
-			ImGui::BeginChild("##results", ImVec2(0.f, row * shown + ImGui::GetStyle().WindowPadding.y),
-			                  ImGuiChildFlags_None);
-			int clicked = -1;
-			for (int i = 0; i < count; ++i)
-			{
-				const Item& item = g_items[g_matches[i]];
-				ImGui::PushID(i);
-				const bool selected = i == g_selected;
-				const ImVec2 start = ImGui::GetCursorPos();
-				if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap,
-				                      ImVec2(0.f, ImGui::GetTextLineHeight())))
-					clicked = i;
-				if (ImGui::IsItemHovered() && ImGui::GetIO().MouseDelta.x * ImGui::GetIO().MouseDelta.x +
-				                                  ImGui::GetIO().MouseDelta.y * ImGui::GetIO().MouseDelta.y > 0.f)
-					g_selected = i;
-				if (selected && g_scroll_to_selected)
-				{
-					ImGui::SetScrollHereY(0.5f);
-					g_scroll_to_selected = false;
-				}
-
-				ImGui::SetCursorPos(start);
-				ImGui::TextColored(KindColor(item.kind), "%-7s", KindLabel(item.kind));
-				ImGui::SameLine();
-				ImGui::TextUnformatted(item.label.c_str());
-				if (!item.detail.empty())
-				{
-					const float detail_w = ImGui::CalcTextSize(item.detail.c_str()).x;
-					const float right = ImGui::GetWindowContentRegionMax().x;
-					ImGui::SameLine(std::max(ImGui::GetCursorPosX() + font, right - detail_w));
-					ImGui::TextDisabled("%s", item.detail.c_str());
-				}
-				ImGui::PopID();
-			}
-			ImGui::EndChild();
-			if (clicked >= 0)
-				Run(g_matches[clicked]);
-		}
-
-		ImGui::EndPopup();
 	}
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// "Profiler" window (editor)
+// "Profiler" window (editor, Raven : windows/profiler.xml)
 // -----------------------------------------------------------------------------
 // - Built-in profiler (core/Profiler.h) : frame times (graph), time of every
 //   LYNX_PROFILE_SCOPE zone of the main thread as a tree (average, self time,
@@ -13,5 +13,8 @@
 
 namespace lynx::editor::profiler_window
 {
-	void Draw(bool* open);
+	void Show();
+	bool IsOpen();
+	// Every frame (records, refreshes the window).
+	void Update();
 }

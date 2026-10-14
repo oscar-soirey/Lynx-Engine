@@ -2,8 +2,7 @@
 
 #include "../core/Voxels.h"
 #include "../core/Utils.h"
-
-#include <imgui/imgui.h>
+#include "raven/RavenUi.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,41 +19,58 @@ namespace lynx::editor::voxel_types
 {
 	namespace
 	{
-		constexpr float kSwatch = 40.f;
+		constexpr float kSwatch = 36.f;
 		constexpr const char* kFile = "assets/voxels.json";
-
-		bool g_dirty = false;          // changed, not written yet
-		std::string g_message;         // last save result
-		double g_message_time = -100.0;
-		char g_new_flag[64] = {};
-		bool g_confirm_delete = false;
-
 		const char* const kSides[] = { "LEFT", "RIGHT", "TOP", "BOTTOM", "INSIDE" };
 
-		void Changed(uint8_t type, const voxels::VoxelType& value, uint32_t scene)
+		Host g_host;
+		bool g_dirty = false;          // changed, not written yet
+		double g_dirty_time = 0.0;     // last change (saved a moment after)
+
+		// Palette
+		Rid g_palette = R_INVALID_ID;
+		Rid g_hint = R_INVALID_ID;
+		std::string g_palette_key;     // what the swatches show (rebuilt when it changes)
+		std::unique_ptr<ui::Menu> g_menu;
+
+		// Editor
+		Rid g_editor = R_INVALID_ID;
+		int g_editor_type = -1;        // type shown by the fields
+		std::string g_editor_key;      // its values when they were shown (a reload, an undo... : shown again)
+		bool g_filling = false;        // the fields are being set : no change callback
+
+		struct Widgets
+		{
+			Rid empty, body, id, name, color, others, collision, sides, sides_hint, side[5];
+			Rid flags, new_flag, emissive, emissive_color, texture, tile_row, tile, indestructible, on_destroyed;
+			Rid preset, behavior, density_row, density, density_value, dispersion_row, dispersion, dispersion_value;
+			Rid drag_row, drag, drag_value, buoyancy_row, buoyancy, buoyancy_value, friction_row, friction, friction_value;
+			Rid bounciness_row, bounciness, bounciness_value, damage, damage_value, contact, duplicate, remove, message;
+		} w{};
+
+		int Selected()
+		{
+			return g_host.get_selected ? g_host.get_selected() : 0;
+		}
+
+		void Select(int type)
+		{
+			if (g_host.set_selected)
+				g_host.set_selected(type);
+		}
+
+		void Message(const std::string& text)
+		{
+			if (w.message != R_INVALID_ID)
+				ui::SetText(w.message, text);
+		}
+
+		void Changed(uint8_t type, const voxels::VoxelType& value)
 		{
 			voxels::SetType(type, value);
-			voxels::ApplyToScene(scene);
+			voxels::ApplyToScene(g_host.scene);
 			g_dirty = true;
-		}
-
-		void Outline(bool selected)
-		{
-			if (!selected)
-				return;
-			const ImVec2 min = ImGui::GetItemRectMin();
-			const ImVec2 max = ImGui::GetItemRectMax();
-			// Text color : visible on the light pixel theme as on a dark one.
-			ImGui::GetWindowDrawList()->AddRect(ImVec2(min.x - 3.f, min.y - 3.f), ImVec2(max.x + 3.f, max.y + 3.f),
-			                                    ImGui::GetColorU32(ImGuiCol_Text), 0.f, 0, 2.f);
-		}
-
-		std::string Hex(const float* rgb)
-		{
-			char text[8];
-			auto c = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.f, 1.f) * 255.f)); };
-			std::snprintf(text, sizeof(text), "%02x%02x%02x", c(rgb[0]), c(rgb[1]), c(rgb[2]));
-			return text;
+			g_dirty_time = Rget_time();
 		}
 
 		voxels::VoxelType NewType(const voxels::VoxelType* from)
@@ -70,27 +87,401 @@ namespace lynx::editor::voxel_types
 				t.flags = voxels::GetSolidMask();
 				// A color that differs from the last type.
 				const float hue = std::fmod(voxels::GetTypeCount() * 0.137f, 1.f);
-				ImGui::ColorConvertHSVtoRGB(hue, 0.55f, 0.85f, t.color[0], t.color[1], t.color[2]);
+				Rcolor_hsv_to_rgb(hue, 0.55f, 0.85f, &t.color[0], &t.color[1], &t.color[2]);
 				t.color[3] = 1.f;
 			}
 			return t;
 		}
 
-		int Add(const voxels::VoxelType* from, uint32_t scene)
+		int Add(const voxels::VoxelType* from)
 		{
 			const uint8_t id = voxels::AddType(NewType(from));
 			if (id == 0)
 			{
-				g_message = "255 types at most";
-				g_message_time = ImGui::GetTime();
+				Message("255 types at most");
 				return 0;
 			}
-			voxels::ApplyToScene(scene);
+			voxels::ApplyToScene(g_host.scene);
 			g_dirty = true;
+			g_dirty_time = Rget_time();
 			return id;
+		}
+
+		void RemoveLast()
+		{
+			const int count = voxels::GetTypeCount();
+			voxels::RemoveLastType();
+			voxels::ApplyToScene(g_host.scene);
+			if (Selected() >= count)
+				Select(count - 1);
+			Save();
+		}
+
+		void AskRemoveLast()
+		{
+			const int count = voxels::GetTypeCount();
+			const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(count));
+			if (!t)
+				return;
+			ui::Ask(g_host.window, "Delete voxel type",
+			        "Delete \"" + t->name + "\" ?\n\nVoxels of this type already painted keep its number : "
+			        "they would take the next type added.",
+			        { "Delete", "Cancel" }, [](int button)
+			{
+				if (button == 0)
+					RemoveLast();
+			});
+		}
+
+		// ---------------------------------------------------------------------
+		// Palette
+		// ---------------------------------------------------------------------
+
+		std::string PaletteKey()
+		{
+			std::string key = std::to_string(Selected()) + ";";
+			char part[96];
+			for (int type = 1; type <= voxels::GetTypeCount(); ++type)
+				if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type)))
+				{
+					std::snprintf(part, sizeof(part), "%d:%.3f,%.3f,%.3f,%d,%u;", type, t->color[0], t->color[1], t->color[2],
+					              t->emissive ? 1 : 0, (t->flags & voxels::GetCollisionMask()) ? 1u : 0u);
+					key += part;
+				}
+			return key;
+		}
+
+		void OpenTypeMenu(int type)
+		{
+			const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type));
+			if (!t)
+				return;
+			const int count = voxels::GetTypeCount();
+			if (!g_menu)
+				g_menu = std::make_unique<ui::Menu>(g_host.window);
+			g_menu->Clear();
+			g_menu->Title(std::to_string(type) + " : " + t->name);
+			g_menu->Separator();
+			g_menu->Item("Edit (Color Picking)", [type]()
+			{
+				Select(type);
+				if (g_host.show_editor)
+					g_host.show_editor();
+			});
+			g_menu->Item("Duplicate", [type]()
+			{
+				if (const voxels::VoxelType* src = voxels::GetType(static_cast<uint8_t>(type)))
+				{
+					const voxels::VoxelType copy = *src;
+					if (const int id = Add(&copy))
+					{
+						Select(id);
+						if (g_host.show_editor)
+							g_host.show_editor();
+					}
+				}
+			});
+			const Rid remove = g_menu->Item("Delete", []() { AskRemoveLast(); }, type == count);
+			if (type != count)
+				Rwidget_set_tooltip(remove, "Only the last type can be deleted : the levels store the number of the types.");
+			g_menu->Open();
+		}
+
+		// One swatch : the color, an outline when it is the brush type, small marks.
+		Rid MakeSwatch(int type)
+		{
+			const Rid swatch = Rwidget_create(R_WIDGET_CUSTOM);
+			Rwidget_set_size(swatch, kSwatch, kSwatch);
+			Rwidget_set_cursor(swatch, R_CURSOR_HAND);
+			ui::OnPaint(swatch, [swatch, type](RPainter* p, float width, float height)
+			{
+				float text[4];
+				Rwidget_get_color(swatch, R_COLOR_TEXT, &text[0], &text[1], &text[2], &text[3]);
+				const bool selected = Selected() == type;
+				const float inset = 3.f;
+				if (type == 0)
+				{
+					Rdraw_rect(p, inset, inset, width - inset * 2.f, height - inset * 2.f, 0.f, 0.f, 0.f, 0.f, 1.f);
+					// eraser : a diagonal
+					Rdraw_line(p, inset + 4.f, height - inset - 4.f, width - inset - 4.f, inset + 4.f, 2.f, 0.9f, 0.3f, 0.3f, 1.f);
+				}
+				else if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type)))
+				{
+					Rdraw_rect(p, inset, inset, width - inset * 2.f, height - inset * 2.f, 0.f, t->color[0], t->color[1], t->color[2], 1.f);
+					Rdraw_rect_outline(p, inset, inset, width - inset * 2.f, height - inset * 2.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.6f);
+					if (t->emissive)
+						Rdraw_circle(p, width - inset - 6.f, inset + 6.f, 3.5f, 1.f, 0.96f, 0.63f, 1.f);
+					if ((t->flags & voxels::GetCollisionMask()) == 0)
+						Rdraw_line(p, inset + 3.f, height - inset - 3.f, inset + 12.f, height - inset - 12.f, 2.f, 0.f, 0.f, 0.f, 0.65f);
+				}
+				if (selected)
+					Rdraw_rect_outline(p, 0.f, 0.f, width, height, 0.f, 2.f, text[0], text[1], text[2], 1.f);
+			});
+			ui::OnEvent(swatch, [type](const REvent& event)
+			{
+				if (event.type == R_EVENT_MOUSE_DOWN && event.button == R_MOUSE_LEFT)
+				{
+					Select(type);
+					if (event.clicks == 2 && type > 0 && g_host.show_editor)
+						g_host.show_editor();
+					return true;
+				}
+				if (event.type == R_EVENT_MOUSE_UP && event.button == R_MOUSE_RIGHT && type > 0)
+				{
+					ui::Later([type]() { OpenTypeMenu(type); });
+					return true;
+				}
+				return event.type == R_EVENT_MOUSE_DOWN;
+			});
+			if (type == 0)
+				Rwidget_set_tooltip(swatch, "0 : empty (eraser)");
+			else if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type)))
+				Rwidget_set_tooltip(swatch, (std::to_string(type) + " : " + t->name + "\n(double-click : edit, right click : menu)").c_str());
+			return swatch;
+		}
+
+		void RebuildPalette()
+		{
+			Rwidget_clear_children(g_palette);
+			for (int type = 0; type <= voxels::GetTypeCount(); ++type)
+				if (type == 0 || voxels::GetType(static_cast<uint8_t>(type)))
+					Rwidget_add_child(g_palette, MakeSwatch(type));
+
+			const Rid add = Rbutton_create("+");
+			Rwidget_set_size(add, kSwatch, kSwatch);
+			Rwidget_set_tooltip(add, "New voxel type");
+			ui::OnClick(add, []()
+			{
+				if (const int id = Add(nullptr))
+				{
+					Select(id);
+					if (g_host.show_editor)
+						g_host.show_editor();
+				}
+			});
+			Rwidget_add_child(g_palette, add);
+
+			ui::SetText(g_hint, voxels::GetTypeCount() == 0 ? std::string("No voxel type yet : \"+\" adds one.")
+			                                                 : std::string());
+			ui::SetVisible(g_hint, voxels::GetTypeCount() == 0);
+		}
+
+		// ---------------------------------------------------------------------
+		// Editor
+		// ---------------------------------------------------------------------
+
+		// The type being edited, a copy to change and give back.
+		bool Current(uint8_t& id, voxels::VoxelType& t)
+		{
+			const int selected = Selected();
+			const voxels::VoxelType* current = selected > 0 ? voxels::GetType(static_cast<uint8_t>(selected)) : nullptr;
+			if (!current)
+				return false;
+			id = static_cast<uint8_t>(selected);
+			t = *current;
+			return true;
+		}
+
+		// A change made by a field : `edit` changes the copy.
+		void Edit(const std::function<void(voxels::VoxelType&)>& edit, bool physics = false)
+		{
+			if (g_filling)
+				return;
+			uint8_t id = 0;
+			voxels::VoxelType t;
+			if (!Current(id, t))
+				return;
+			edit(t);
+			if (physics)
+				t.physics.preset.clear();   // custom values now
+			Changed(id, t);
+		}
+
+		std::string EditorKey(const voxels::VoxelType& t)
+		{
+			char text[256];
+			std::snprintf(text, sizeof(text), "%s|%.4f,%.4f,%.4f|%u|%d|%.3f,%.3f,%.3f|%s|%.3f|%d|%s|%s|%d|%.3f|%d|%.3f|%.3f|%.3f|%.3f|%.3f|%d|%d",
+			              t.name.c_str(), t.color[0], t.color[1], t.color[2], t.flags, t.emissive ? 1 : 0,
+			              t.emissive_color[0], t.emissive_color[1], t.emissive_color[2], t.texture.c_str(), t.texture_tile,
+			              t.indestructible ? 1 : 0, t.on_destroyed.c_str(), t.physics.preset.c_str(),
+			              static_cast<int>(t.physics.behavior), t.physics.density, t.physics.dispersion, t.physics.friction,
+			              t.physics.bounciness, t.physics.drag, t.physics.buoyancy, t.physics.damage,
+			              t.physics.contact_events ? 1 : 0, static_cast<int>(voxels::GetFlagNames().size()));
+			return text;
+		}
+
+		std::string Number(float value, int decimals = 2)
+		{
+			char text[32];
+			std::snprintf(text, sizeof(text), "%.*f", decimals, value);
+			return text;
+		}
+
+		void RebuildOthers(int selected)
+		{
+			Rwidget_clear_children(w.others);
+			for (int other = 1; other <= voxels::GetTypeCount(); ++other)
+			{
+				const voxels::VoxelType* o = voxels::GetType(static_cast<uint8_t>(other));
+				if (!o || other == selected)
+					continue;
+				const Rid swatch = Rwidget_create(R_WIDGET_CUSTOM);
+				Rwidget_set_size(swatch, 20.f, 20.f);
+				Rwidget_set_cursor(swatch, R_CURSOR_HAND);
+				Rwidget_set_tooltip(swatch, ("Take the color of " + o->name).c_str());
+				ui::OnPaint(swatch, [other](RPainter* p, float width, float height)
+				{
+					if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(other)))
+					{
+						Rdraw_rect(p, 0.f, 0.f, width, height, 0.f, t->color[0], t->color[1], t->color[2], 1.f);
+						Rdraw_rect_outline(p, 0.f, 0.f, width, height, 0.f, 1.f, 0.f, 0.f, 0.f, 0.6f);
+					}
+				});
+				ui::OnEvent(swatch, [other](const REvent& event)
+				{
+					if (event.type != R_EVENT_MOUSE_DOWN || event.button != R_MOUSE_LEFT)
+						return false;
+					if (const voxels::VoxelType* src = voxels::GetType(static_cast<uint8_t>(other)))
+					{
+						const float rgb[3] = { src->color[0], src->color[1], src->color[2] };
+						Edit([rgb](voxels::VoxelType& t) { std::copy(rgb, rgb + 3, t.color); });
+						g_editor_key.clear();   // the picker shows the new color
+					}
+					return true;
+				});
+				Rwidget_add_child(w.others, swatch);
+			}
+		}
+
+		void RebuildFlags(const voxels::VoxelType& t)
+		{
+			Rwidget_clear_children(w.flags);
+			const std::vector<std::string> names = voxels::GetFlagNames();
+			if (names.empty())
+			{
+				Rwidget_add_child(w.flags, Rlabel_create("No flag yet."));
+				return;
+			}
+			for (const std::string& name : names)
+			{
+				const uint32_t mask = voxels::GetFlagMask(name.c_str());
+				const Rid box = Rcheckbox_create(name.c_str());
+				Rcheckbox_set_checked(box, (t.flags & mask) != 0);
+				ui::OnToggle(box, [mask](bool on) { Edit([mask, on](voxels::VoxelType& v) { v.flags = on ? (v.flags | mask) : (v.flags & ~mask); }); });
+				Rwidget_add_child(w.flags, box);
+			}
+		}
+
+		// The fields show the type (when the selection or the type changed elsewhere).
+		void FillEditor()
+		{
+			const int selected = Selected();
+			const voxels::VoxelType* current = selected > 0 ? voxels::GetType(static_cast<uint8_t>(selected)) : nullptr;
+			ui::SetVisible(w.empty, current == nullptr);
+			ui::SetVisible(w.body, current != nullptr);
+			if (!current)
+				return;
+
+			const voxels::VoxelType& t = *current;
+			g_filling = true;
+
+			ui::SetText(w.id, "Type " + std::to_string(selected));
+			if (!Rwidget_is_focused(w.name))
+				ui::SetText(w.name, t.name);
+			Rcolor_picker_set_color(w.color, t.color[0], t.color[1], t.color[2], 1.f);
+			RebuildOthers(selected);
+
+			const uint32_t all = voxels::GetCollisionMask();
+			const uint32_t solid = voxels::GetSolidMask();
+			const uint32_t collision = t.flags & all;
+			const int mode = collision == solid ? 0 : collision == 0 ? 1 : 2;
+			if (Rcombo_box_get_selected(w.collision) != mode)
+				Rcombo_box_set_selected(w.collision, mode);
+			ui::SetVisible(w.sides, mode == 2);
+			ui::SetVisible(w.sides_hint, mode == 2);
+			for (int i = 0; i < 5; ++i)
+				ui::SetChecked(w.side[i], (t.flags & voxels::GetFlagMask(kSides[i])) != 0);
+
+			RebuildFlags(t);
+
+			ui::SetChecked(w.emissive, t.emissive);
+			ui::SetVisible(w.emissive_color, t.emissive);
+			Rcolor_picker_set_color(w.emissive_color, t.emissive_color[0], t.emissive_color[1], t.emissive_color[2], 1.f);
+			if (!Rwidget_is_focused(w.texture))
+				ui::SetText(w.texture, t.texture);
+			ui::SetVisible(w.tile_row, !t.texture.empty());
+			ui::SetValue(w.tile, t.texture_tile);
+			ui::SetChecked(w.indestructible, t.indestructible);
+			if (!Rwidget_is_focused(w.on_destroyed))
+				ui::SetText(w.on_destroyed, t.on_destroyed);
+
+			// Physics
+			const voxels::VoxelPhysicsProps& ph = t.physics;
+			const auto& presets = voxels::GetPhysicsPresets();
+			int preset_index = ph.preset.empty() ? (ph.IsDefault() ? 0 : -1) : -1;
+			for (int i = 0; i < static_cast<int>(presets.size()); ++i)
+				if (presets[i].first == ph.preset)
+					preset_index = i + 1;
+			Rcombo_box_clear_items(w.preset);
+			Rcombo_box_add_item(w.preset, "None (static)");
+			for (const auto& [name, props] : presets)
+				Rcombo_box_add_item(w.preset, name.c_str());
+			if (preset_index < 0)
+			{
+				Rcombo_box_add_item(w.preset, "Custom");
+				preset_index = static_cast<int>(presets.size()) + 1;
+			}
+			Rcombo_box_set_selected(w.preset, preset_index);
+
+			const int behavior = static_cast<int>(ph.behavior);
+			if (Rcombo_box_get_selected(w.behavior) != behavior)
+				Rcombo_box_set_selected(w.behavior, behavior);
+			const bool moving = ph.behavior != voxels::VoxelBehavior::Static;
+			const bool fluid = ph.behavior == voxels::VoxelBehavior::Liquid || ph.behavior == voxels::VoxelBehavior::Gas;
+			ui::SetVisible(w.density_row, moving);
+			ui::SetVisible(w.dispersion_row, moving && ph.behavior != voxels::VoxelBehavior::Powder);
+			ui::SetVisible(w.drag_row, fluid);
+			ui::SetVisible(w.buoyancy_row, fluid);
+			ui::SetVisible(w.friction_row, !fluid);
+			ui::SetVisible(w.bounciness_row, !fluid);
+			auto slider = [](Rid s, Rid label, float v, int decimals)
+			{
+				ui::SetValue(s, v);
+				ui::SetText(label, Number(v, decimals));
+			};
+			slider(w.density, w.density_value, ph.density, 2);
+			slider(w.dispersion, w.dispersion_value, static_cast<float>(ph.dispersion), 0);
+			slider(w.drag, w.drag_value, ph.drag, 2);
+			slider(w.buoyancy, w.buoyancy_value, ph.buoyancy, 2);
+			slider(w.friction, w.friction_value, ph.friction, 2);
+			slider(w.bounciness, w.bounciness_value, ph.bounciness, 2);
+			slider(w.damage, w.damage_value, ph.damage, 1);
+			ui::SetChecked(w.contact, ph.contact_events);
+
+			ui::SetEnabled(w.remove, selected == voxels::GetTypeCount());
+
+			g_filling = false;
+			g_editor_type = selected;
+			g_editor_key = EditorKey(t);
+		}
+
+		// A slider of the physics : the value, then its label.
+		void BindSlider(Rid slider, Rid label, int decimals, std::function<void(voxels::VoxelType&, float)> set)
+		{
+			ui::OnValue(slider, [label, decimals, set](double value)
+			{
+				ui::SetText(label, Number(static_cast<float>(value), decimals));
+				const float v = static_cast<float>(value);
+				Edit([set, v](voxels::VoxelType& t) { set(t, v); }, true);
+			});
 		}
 	}
 
+
+	void SetHost(const Host& host)
+	{
+		g_host = host;
+	}
 
 	bool HasUnsavedChanges()
 	{
@@ -104,546 +495,252 @@ namespace lynx::editor::voxel_types
 		std::ofstream out(kFile, std::ios::binary | std::ios::trunc);
 		if (!out)
 		{
-			g_message = std::string("Could not write ") + kFile;
-			g_message_time = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
-			std::cerr << "[VOXELS] " << g_message << "\n";
+			Message(std::string("Could not write ") + kFile);
+			std::cerr << "[VOXELS] Could not write " << kFile << "\n";
 			return false;
 		}
 		out << voxels::SaveToString();
 		g_dirty = false;
-		g_message = "Saved in assets/voxels.json";
-		g_message_time = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
+		Message("Saved in assets/voxels.json");
 		return true;
 	}
 
-
-	// =========================================================================
-	// Paint window : swatches
-	// =========================================================================
-
-	void DrawPalette(int& selected, uint32_t scene, bool& open_editor)
+	void BindPalette(Rid palette, Rid hint)
 	{
-		const ImGuiStyle& style = ImGui::GetStyle();
-		const float avail = ImGui::GetContentRegionAvail().x;
-		const int per_row = std::max(1, static_cast<int>((avail + style.ItemSpacing.x) / (kSwatch + style.ItemSpacing.x)));
-		int column = 0;
-		auto next = [&]()
-		{
-			if (++column < per_row)
-				ImGui::SameLine();
-			else
-				column = 0;
-		};
-
-		// Empty voxel (eraser)
-		ImGui::PushID(0);
-		if (ImGui::ColorButton("##VoxelEmpty", ImVec4(0.f, 0.f, 0.f, 1.f), ImGuiColorEditFlags_NoTooltip, ImVec2(kSwatch, kSwatch)))
-			selected = 0;
-		Outline(selected == 0);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("0 : empty (eraser)");
-		ImGui::PopID();
-		next();
-
-		const int count = voxels::GetTypeCount();
-		int remove = 0;
-		for (int type = 1; type <= count; ++type)
-		{
-			const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type));
-			if (!t)
-				continue;
-
-			ImGui::PushID(type);
-			const ImVec4 color(t->color[0], t->color[1], t->color[2], 1.f);
-			if (ImGui::ColorButton("##VoxelColor", color, ImGuiColorEditFlags_NoTooltip, ImVec2(kSwatch, kSwatch)))
-				selected = type;
-			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				open_editor = true;
-			Outline(selected == type);
-
-			// Small marks : emissive (star), no collision (dashed corner)
-			{
-				ImDrawList* dl = ImGui::GetWindowDrawList();
-				const ImVec2 min = ImGui::GetItemRectMin();
-				const ImVec2 max = ImGui::GetItemRectMax();
-				if (t->emissive)
-					dl->AddCircleFilled(ImVec2(max.x - 6.f, min.y + 6.f), 3.5f, IM_COL32(255, 245, 160, 255));
-				if ((t->flags & voxels::GetCollisionMask()) == 0)
-					dl->AddLine(ImVec2(min.x + 3.f, max.y - 3.f), ImVec2(min.x + 12.f, max.y - 12.f), IM_COL32(0, 0, 0, 160), 2.f);
-			}
-
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%d : %s\n(double-click : edit, right click : menu)", type, t->name.c_str());
-
-			if (ImGui::BeginPopupContextItem("##type_menu"))
-			{
-				ImGui::TextDisabled("%d : %s", type, t->name.c_str());
-				ImGui::Separator();
-				if (ImGui::MenuItem("Edit (Color Picking)"))
-				{
-					selected = type;
-					open_editor = true;
-				}
-				if (ImGui::MenuItem("Duplicate"))
-				{
-					const voxels::VoxelType copy = *t;
-					if (const int id = Add(&copy, scene))
-					{
-						selected = id;
-						open_editor = true;
-					}
-				}
-				if (ImGui::MenuItem("Delete", nullptr, false, type == count))
-					remove = type;
-				if (type != count && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-					ImGui::SetTooltip("Only the last type can be deleted :\nthe levels store the number of the types.");
-				ImGui::EndPopup();
-			}
-			ImGui::PopID();
-			next();
-		}
-
-		// New type
-		ImGui::PushID("##new_type");
-		if (ImGui::Button("+", ImVec2(kSwatch, kSwatch)))
-		{
-			const voxels::VoxelType* from = nullptr;
-			if (const int id = Add(from, scene))
-			{
-				selected = id;
-				open_editor = true;
-			}
-		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("New voxel type");
-		ImGui::PopID();
-		if (column != 0)
-			ImGui::NewLine();
-
-		if (remove)
-		{
-			voxels::RemoveLastType();
-			voxels::ApplyToScene(scene);
-			if (selected >= remove)
-				selected = remove - 1;
-			Save();
-		}
-
-		if (count == 0)
-			ImGui::TextDisabled("No voxel type yet : \"+\" adds one.");
+		g_palette = palette;
+		g_hint = hint;
+		g_palette_key.clear();
 	}
 
-
-	// =========================================================================
-	// Color Picking window : the selected type
-	// =========================================================================
-
-	void DrawEditor(int& selected, uint32_t scene)
+	void BindEditor(Rid panel)
 	{
-		const voxels::VoxelType* current = selected > 0 ? voxels::GetType(static_cast<uint8_t>(selected)) : nullptr;
-		if (!current)
+		g_editor = panel;
+		auto find = [panel](const char* name) { return ui::Find(panel, name); };
+		w.empty = find("vt.empty");
+		w.body = find("vt.editor");
+		w.id = find("vt.id");
+		w.name = find("vt.name");
+		w.color = find("vt.color");
+		w.others = find("vt.others");
+		w.collision = find("vt.collision");
+		w.sides = find("vt.sides");
+		w.sides_hint = find("vt.sides.hint");
+		for (int i = 0; i < 5; ++i)
+			w.side[i] = find((std::string("vt.side.") + kSides[i]).c_str());
+		w.flags = find("vt.flags");
+		w.new_flag = find("vt.new_flag");
+		w.emissive = find("vt.emissive");
+		w.emissive_color = find("vt.emissive_color");
+		w.texture = find("vt.texture");
+		w.tile_row = find("vt.tile.row");
+		w.tile = find("vt.tile");
+		w.indestructible = find("vt.indestructible");
+		w.on_destroyed = find("vt.on_destroyed");
+		w.preset = find("vt.preset");
+		w.behavior = find("vt.behavior");
+		w.density_row = find("vt.density.row");
+		w.density = find("vt.density");
+		w.density_value = find("vt.density.value");
+		w.dispersion_row = find("vt.dispersion.row");
+		w.dispersion = find("vt.dispersion");
+		w.dispersion_value = find("vt.dispersion.value");
+		w.drag_row = find("vt.drag.row");
+		w.drag = find("vt.drag");
+		w.drag_value = find("vt.drag.value");
+		w.buoyancy_row = find("vt.buoyancy.row");
+		w.buoyancy = find("vt.buoyancy");
+		w.buoyancy_value = find("vt.buoyancy.value");
+		w.friction_row = find("vt.friction.row");
+		w.friction = find("vt.friction");
+		w.friction_value = find("vt.friction.value");
+		w.bounciness_row = find("vt.bounciness.row");
+		w.bounciness = find("vt.bounciness");
+		w.bounciness_value = find("vt.bounciness.value");
+		w.damage = find("vt.damage");
+		w.damage_value = find("vt.damage.value");
+		w.contact = find("vt.contact");
+		w.duplicate = find("vt.duplicate");
+		w.remove = find("vt.delete");
+		w.message = find("vt.message");
+
+		ui::OnText(w.name, [](const std::string& text) { Edit([text](voxels::VoxelType& t) { t.name = text; }); });
+		ui::OnColor(w.color, [](float r, float g, float b, float)
 		{
-			ImGui::TextDisabled("No voxel type selected.");
-			ImGui::Spacing();
-			ImGui::TextWrapped("Pick a type in the Paint window (\"+\" adds one), or press C over a voxel of the viewport.");
-			return;
-		}
-
-		const uint8_t id = static_cast<uint8_t>(selected);
-		voxels::VoxelType t = *current;
-		bool changed = false;
-
-		ImGui::Text("Type %d", selected);
-		ImGui::SameLine();
-		ImGui::ColorButton("##preview", ImVec4(t.color[0], t.color[1], t.color[2], 1.f), ImGuiColorEditFlags_NoTooltip,
-		                   ImVec2(ImGui::GetFrameHeight() * 2.f, ImGui::GetFrameHeight()));
-
-		// Name
+			Edit([r, g, b](voxels::VoxelType& t) { t.color[0] = r; t.color[1] = g; t.color[2] = b; });
+		});
+		ui::OnSelect(w.collision, [](int mode)
 		{
-			char name[128];
-			std::snprintf(name, sizeof(name), "%s", t.name.c_str());
-			ImGui::SetNextItemWidth(-FLT_MIN);
-			if (ImGui::InputText("##name", name, sizeof(name)))
+			Edit([mode](voxels::VoxelType& t)
 			{
-				t.name = name;
-				changed = true;
-			}
-		}
-
-		// Color picking
-		ImGui::SeparatorText("Color");
-		{
-			ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 16.f));
-			if (ImGui::ColorPicker3("##color", t.color,
-			                        ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_PickerHueBar |
-			                        ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB))
-				changed = true;
-
-			char hex[16];
-			std::snprintf(hex, sizeof(hex), "%s", Hex(t.color).c_str());
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.f);
-			if (ImGui::InputText("Hex", hex, sizeof(hex), ImGuiInputTextFlags_CharsNoBlank))
-			{
-				float rgba[4];
-				if (HexToColor(hex, rgba))
-				{
-					std::copy(rgba, rgba + 3, t.color);
-					changed = true;
-				}
-			}
-
-			// The colors of the other types (click : take it).
-			const int count = voxels::GetTypeCount();
-			if (count > 1)
-			{
-				ImGui::TextDisabled("Other types");
-				const float size = ImGui::GetFrameHeight();
-				const float avail = ImGui::GetContentRegionAvail().x;
-				float x = 0.f;
-				for (int other = 1; other <= count; ++other)
-				{
-					const voxels::VoxelType* o = voxels::GetType(static_cast<uint8_t>(other));
-					if (!o || other == selected)
-						continue;
-					if (x > 0.f && x + size > avail)
-						x = 0.f;
-					else if (x > 0.f)
-						ImGui::SameLine();
-					ImGui::PushID(other);
-					if (ImGui::ColorButton("##other", ImVec4(o->color[0], o->color[1], o->color[2], 1.f), 0, ImVec2(size, size)))
-					{
-						std::copy(o->color, o->color + 3, t.color);
-						changed = true;
-					}
-					ImGui::PopID();
-					x += size + ImGui::GetStyle().ItemSpacing.x;
-				}
-			}
-		}
-
-		// Collision
-		ImGui::SeparatorText("Collision");
-		{
-			const uint32_t all = voxels::GetCollisionMask();
-			const uint32_t solid = voxels::GetSolidMask();
-			const uint32_t collision = t.flags & all;
-			int mode = collision == solid ? 0 : collision == 0 ? 1 : 2;
-			const char* modes[] = { "Solid (4 sides)", "None", "Custom" };
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-			if (ImGui::Combo("##collision", &mode, modes, 3))
-			{
+				const uint32_t all = voxels::GetCollisionMask();
+				const uint32_t solid = voxels::GetSolidMask();
+				const uint32_t collision = t.flags & all;
 				t.flags &= ~all;
 				if (mode == 0)
 					t.flags |= solid;
 				else if (mode == 2)
 					t.flags |= collision == 0 || collision == solid ? voxels::GetFlagMask("TOP") : collision;
-				changed = true;
-			}
-			if (mode == 2)
-			{
-				for (int i = 0; i < 5; ++i)
-				{
-					const uint32_t mask = voxels::GetFlagMask(kSides[i]);
-					bool on = (t.flags & mask) != 0;
-					if (i > 0)
-						ImGui::SameLine();
-					if (ImGui::Checkbox(kSides[i], &on))
-					{
-						t.flags = on ? (t.flags | mask) : (t.flags & ~mask);
-						changed = true;
-					}
-				}
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::TextDisabled("TOP only : a platform you can jump through from below.");
-				ImGui::PopTextWrapPos();
-			}
-		}
-
-		// Game flags
-		ImGui::SeparatorText("Flags");
+			});
+			g_editor_key.clear();
+		});
+		for (int i = 0; i < 5; ++i)
 		{
-			const std::vector<std::string> names = voxels::GetFlagNames();
-			if (names.empty())
-				ImGui::TextDisabled("No flag yet.");
-			for (size_t i = 0; i < names.size(); ++i)
-			{
-				const uint32_t mask = voxels::GetFlagMask(names[i].c_str());
-				bool on = (t.flags & mask) != 0;
-				if (i > 0)
-				{
-					// Next to the previous one when it fits.
-					const float w = ImGui::CalcTextSize(names[i].c_str()).x + ImGui::GetFrameHeight() * 1.5f;
-					const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-					if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + w < right)
-						ImGui::SameLine();
-				}
-				if (ImGui::Checkbox(names[i].c_str(), &on))
-				{
-					t.flags = on ? (t.flags | mask) : (t.flags & ~mask);
-					changed = true;
-				}
-			}
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.f);
-			const bool enter = ImGui::InputTextWithHint("##new_flag", "NEW_FLAG", g_new_flag, sizeof(g_new_flag),
-			                                            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsUppercase |
-			                                            ImGuiInputTextFlags_CharsNoBlank);
-			ImGui::SameLine();
-			if ((ImGui::Button("Add flag") || enter) && g_new_flag[0])
-			{
-				if (const uint32_t mask = voxels::DeclareFlag(g_new_flag))
-				{
-					t.flags |= mask;
-					changed = true;
-					g_new_flag[0] = 0;
-				}
-				else
-				{
-					g_message = "Too many flags";
-					g_message_time = ImGui::GetTime();
-				}
-			}
-			ImGui::PushTextWrapPos(0.f);
-			ImGui::TextDisabled("Game code : lynx::voxels::GetFlagMask(\"NAME\").");
-			ImGui::PopTextWrapPos();
+			const uint32_t mask = voxels::GetFlagMask(kSides[i]);
+			ui::OnToggle(w.side[i], [mask](bool on) { Edit([mask, on](voxels::VoxelType& t) { t.flags = on ? (t.flags | mask) : (t.flags & ~mask); }); });
 		}
-
-		// Other properties
-		ImGui::SeparatorText("Properties");
-		if (ImGui::Checkbox("Emissive", &t.emissive))
-			changed = true;
-		if (t.emissive)
+		auto add_flag = []()
 		{
-			ImGui::SameLine();
-			if (ImGui::ColorEdit3("##emissive", t.emissive_color, ImGuiColorEditFlags_NoInputs))
-				changed = true;
-		}
-		// Texture : asset path (drop a .png from the Content Browser), repeated
-		// every `tile` voxels, multiplied by the color (white : raw texture).
-		{
-			char texture[260];
-			std::snprintf(texture, sizeof(texture), "%s", t.texture.c_str());
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-			if (ImGui::InputTextWithHint("Texture", "drop a .png here", texture, sizeof(texture)))
+			std::string name = Rtext_input_get_text(w.new_flag);
+			std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+			name.erase(std::remove(name.begin(), name.end(), ' '), name.end());
+			if (name.empty())
+				return;
+			if (const uint32_t mask = voxels::DeclareFlag(name.c_str()))
 			{
-				t.texture = texture;
-				changed = true;
-			}
-			if (ImGui::BeginDragDropTarget())
-			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LYNX_ASSET_FILE"))
-				{
-					std::string dropped(static_cast<const char*>(payload->Data), static_cast<size_t>(payload->DataSize));
-					if (!dropped.empty() && dropped.back() == '\0')
-						dropped.pop_back();
-					// Full path -> path inside assets/.
-					std::string generic = std::filesystem::path(dropped).generic_string();
-					const size_t at = generic.rfind("assets/");
-					if (at != std::string::npos)
-						generic = generic.substr(at + 7);
-					t.texture = generic;
-					changed = true;
-				}
-				ImGui::EndDragDropTarget();
-			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Image of assets/ (drag it from the Content Browser).\n"
-				                  "Multiplied by the color : white shows the raw texture.");
-			if (!t.texture.empty())
-			{
-				ImGui::SameLine();
-				if (ImGui::SmallButton("x##cleartexture"))
-				{
-					t.texture.clear();
-					changed = true;
-				}
-				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.f);
-				if (ImGui::DragFloat("Tile (voxels)", &t.texture_tile, 0.1f, 0.25f, 256.f, "%.2f"))
-				{
-					t.texture_tile = std::max(t.texture_tile, 0.01f);
-					changed = true;
-				}
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Voxels covered by one copy of the texture\n(1 : the whole image on each voxel).");
-			}
-		}
-
-		if (ImGui::Checkbox("Indestructible", &t.indestructible))
-			changed = true;
-		{
-			char event[128];
-			std::snprintf(event, sizeof(event), "%s", t.on_destroyed.c_str());
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-			if (ImGui::InputTextWithHint("On destroyed", "event name", event, sizeof(event)))
-			{
-				t.on_destroyed = event;
-				changed = true;
-			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Event of the game : lynx::voxels::RegisterDestroyedEvent(name, fn).");
-		}
-
-		// Physics (core/VoxelPhysics.h) : a preset, then the details.
-		ImGui::SeparatorText("Physics");
-		{
-			voxels::VoxelPhysicsProps& ph = t.physics;
-			const auto& presets = voxels::GetPhysicsPresets();
-
-			const char* preview = ph.preset.empty() ? (ph.IsDefault() ? "None (static)" : "Custom") : ph.preset.c_str();
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-			if (ImGui::BeginCombo("Preset", preview))
-			{
-				if (ImGui::Selectable("None (static)", ph.IsDefault()))
-				{
-					ph = voxels::VoxelPhysicsProps{};
-					changed = true;
-				}
-				const char* groups[] = { "Solid surfaces", "Powders", "Liquids", "Gases" };
-				for (int g = 0; g < 4; ++g)
-				{
-					ImGui::SeparatorText(groups[g]);
-					for (const auto& [name, props] : presets)
-					{
-						if (static_cast<int>(props.behavior) != g)
-							continue;
-						if (ImGui::Selectable(name.c_str(), ph.preset == name))
-						{
-							ph = props;
-							// Collision that goes with it : fluids do not block.
-							const uint32_t all = voxels::GetCollisionMask();
-							t.flags &= ~all;
-							if (props.behavior != voxels::VoxelBehavior::Liquid && props.behavior != voxels::VoxelBehavior::Gas)
-								t.flags |= voxels::GetSolidMask();
-							changed = true;
-						}
-					}
-				}
-				ImGui::EndCombo();
-			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Fills every value below (and the collision : liquids and gases do not block).");
-
-			bool edited = false;
-			int behavior = static_cast<int>(ph.behavior);
-			const char* behaviors[] = { "Static", "Powder (falls, piles up)", "Liquid (falls, spreads)", "Gas (rises)" };
-			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
-			if (ImGui::Combo("Behavior", &behavior, behaviors, 4))
-			{
-				ph.behavior = static_cast<voxels::VoxelBehavior>(behavior);
-				edited = true;
-			}
-
-			const float w = ImGui::GetFontSize() * 10.f;
-			auto slider = [&](const char* label, float* v, float min, float max, const char* tip)
-			{
-				ImGui::SetNextItemWidth(w);
-				if (ImGui::SliderFloat(label, v, min, max, "%.2f"))
-					edited = true;
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("%s", tip);
-			};
-
-			if (ph.behavior != voxels::VoxelBehavior::Static)
-			{
-				slider("Density", &ph.density, 0.05f, 5.f, "Heavier sinks in lighter liquids / gases (sand 1.6, water 1, oil 0.8).");
-				if (ph.behavior != voxels::VoxelBehavior::Powder)
-				{
-					ImGui::SetNextItemWidth(w);
-					if (ImGui::SliderInt("Dispersion", &ph.dispersion, 1, 16))
-						edited = true;
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Cells it can move sideways per step : how fast it spreads.");
-				}
-			}
-
-			if (ph.behavior == voxels::VoxelBehavior::Liquid || ph.behavior == voxels::VoxelBehavior::Gas)
-			{
-				slider("Drag", &ph.drag, 0.f, 1.f, "Slows down the actors inside (0 nothing, 1 very thick).");
-				slider("Buoyancy", &ph.buoyancy, 0.f, 2.f, "Pushes the actors inside up (1 cancels gravity, > 1 floats).");
+				Edit([mask](voxels::VoxelType& t) { t.flags |= mask; });
+				Rtext_input_set_text(w.new_flag, "");
+				g_editor_key.clear();
 			}
 			else
-			{
-				slider("Friction", &ph.friction, 0.f, 3.f, "Grip of the characters on it : 1 normal, 0.1 ice, 2.5 mud.");
-				slider("Bounciness", &ph.bounciness, 0.f, 1.f, "Bounce when landing on it (rubber 0.8).");
-			}
+				Message("Too many flags");
+		};
+		ui::OnClick(find("vt.add_flag"), add_flag);
+		ui::OnCommit(w.new_flag, [add_flag](const std::string&) { add_flag(); });
 
-			slider("Damage / s", &ph.damage, 0.f, 100.f, "Damageable.TakeDamage(amount, null) to the actors touching it (lava, spikes).");
-			if (ImGui::Checkbox("Contact events", &ph.contact_events))
-				edited = true;
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("VoxelEvents.OnVoxelContact(name, type) / OnVoxelContactEnd to the actors that implement it.");
-
-			if (edited)
-			{
-				ph.preset.clear();   // custom values now
-				changed = true;
-			}
-
-			ImGui::PushTextWrapPos(0.f);
-			ImGui::TextDisabled("Simulated while the game runs, around the cameras. The voxel world comes back after Play.");
-			ImGui::PopTextWrapPos();
-		}
-
-		if (changed)
-			Changed(id, t, scene);
-
-		// Save once the edit is finished (not on every move of the picker).
-		if (g_dirty && !ImGui::IsAnyItemActive())
-			Save();
-
-		// Buttons
-		ImGui::Spacing();
-		ImGui::Separator();
-		if (ImGui::Button("Duplicate"))
+		ui::OnToggle(w.emissive, [](bool on)
 		{
-			if (const int nid = Add(current, scene))
-				selected = nid;
-		}
-		ImGui::SameLine();
-		const bool last = selected == voxels::GetTypeCount();
-		ImGui::BeginDisabled(!last);
-		if (ImGui::Button("Delete"))
-			g_confirm_delete = true;
-		ImGui::EndDisabled();
-		if (!last && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Only the last type can be deleted :\nthe levels store the number of the types.");
-		ImGui::SameLine();
-		if (ImGui::Button("Reload file"))
+			Edit([on](voxels::VoxelType& t) { t.emissive = on; });
+			ui::SetVisible(w.emissive_color, on);
+		});
+		ui::OnColor(w.emissive_color, [](float r, float g, float b, float)
+		{
+			Edit([r, g, b](voxels::VoxelType& t) { t.emissive_color[0] = r; t.emissive_color[1] = g; t.emissive_color[2] = b; });
+		});
+		ui::OnText(w.texture, [](const std::string& text)
+		{
+			Edit([text](voxels::VoxelType& t) { t.texture = text; });
+			ui::SetVisible(w.tile_row, !text.empty());
+		});
+		// A .png dragged from the Content Browser : its path inside assets/.
+		ui::OnDrop(w.texture, [](const RDropEvent& event)
+		{
+			if (!event.drag_type || std::strcmp(event.drag_type, ui::kDragAsset) != 0 || !event.text)
+				return false;
+			if (event.phase == R_DROP_DROPPED)
+			{
+				std::string first = event.text;
+				first = first.substr(0, first.find('\n'));
+				std::string generic = std::filesystem::path(first).generic_string();
+				const size_t at = generic.rfind("assets/");
+				if (at != std::string::npos)
+					generic = generic.substr(at + 7);
+				ui::SetText(w.texture, generic);
+				Edit([generic](voxels::VoxelType& t) { t.texture = generic; });
+				ui::SetVisible(w.tile_row, true);
+			}
+			return true;
+		});
+		ui::OnClick(find("vt.texture.clear"), []()
+		{
+			ui::SetText(w.texture, "");
+			Edit([](voxels::VoxelType& t) { t.texture.clear(); });
+			ui::SetVisible(w.tile_row, false);
+		});
+		ui::OnValue(w.tile, [](double v) { Edit([v](voxels::VoxelType& t) { t.texture_tile = std::max(static_cast<float>(v), 0.01f); }); });
+		ui::OnToggle(w.indestructible, [](bool on) { Edit([on](voxels::VoxelType& t) { t.indestructible = on; }); });
+		ui::OnText(w.on_destroyed, [](const std::string& text) { Edit([text](voxels::VoxelType& t) { t.on_destroyed = text; }); });
+
+		ui::OnSelect(w.preset, [](int index)
+		{
+			if (g_filling)
+				return;
+			const auto& presets = voxels::GetPhysicsPresets();
+			if (index == 0)
+				Edit([](voxels::VoxelType& t) { t.physics = voxels::VoxelPhysicsProps{}; });
+			else if (index - 1 < static_cast<int>(presets.size()))
+			{
+				const voxels::VoxelPhysicsProps props = presets[index - 1].second;
+				Edit([props](voxels::VoxelType& t)
+				{
+					t.physics = props;
+					// Collision that goes with it : fluids do not block.
+					const uint32_t all = voxels::GetCollisionMask();
+					t.flags &= ~all;
+					if (props.behavior != voxels::VoxelBehavior::Liquid && props.behavior != voxels::VoxelBehavior::Gas)
+						t.flags |= voxels::GetSolidMask();
+				});
+			}
+			g_editor_key.clear();
+		});
+		ui::OnSelect(w.behavior, [](int behavior)
+		{
+			Edit([behavior](voxels::VoxelType& t) { t.physics.behavior = static_cast<voxels::VoxelBehavior>(behavior); }, true);
+			g_editor_key.clear();
+		});
+		BindSlider(w.density, w.density_value, 2, [](voxels::VoxelType& t, float v) { t.physics.density = v; });
+		BindSlider(w.dispersion, w.dispersion_value, 0, [](voxels::VoxelType& t, float v) { t.physics.dispersion = static_cast<int>(std::lround(v)); });
+		BindSlider(w.drag, w.drag_value, 2, [](voxels::VoxelType& t, float v) { t.physics.drag = v; });
+		BindSlider(w.buoyancy, w.buoyancy_value, 2, [](voxels::VoxelType& t, float v) { t.physics.buoyancy = v; });
+		BindSlider(w.friction, w.friction_value, 2, [](voxels::VoxelType& t, float v) { t.physics.friction = v; });
+		BindSlider(w.bounciness, w.bounciness_value, 2, [](voxels::VoxelType& t, float v) { t.physics.bounciness = v; });
+		BindSlider(w.damage, w.damage_value, 1, [](voxels::VoxelType& t, float v) { t.physics.damage = v; });
+		ui::OnToggle(w.contact, [](bool on) { Edit([on](voxels::VoxelType& t) { t.physics.contact_events = on; }, true); });
+
+		ui::OnClick(w.duplicate, []()
+		{
+			uint8_t id = 0;
+			voxels::VoxelType t;
+			if (Current(id, t))
+				if (const int nid = Add(voxels::GetType(id)))
+					Select(nid);
+		});
+		ui::OnClick(w.remove, []() { AskRemoveLast(); });
+		ui::OnClick(find("vt.reload"), []()
 		{
 			if (voxels::LoadFile("voxels.json"))
 			{
-				voxels::ApplyToScene(scene);
+				voxels::ApplyToScene(g_host.scene);
 				g_dirty = false;
-				g_message = "Reloaded";
+				Message("Reloaded");
 			}
 			else
-				g_message = voxels::GetLoadError();
-			g_message_time = ImGui::GetTime();
-		}
+				Message(voxels::GetLoadError());
+			g_editor_key.clear();
+		});
 
-		if (g_confirm_delete)
+		g_editor_type = -1;
+	}
+
+	void Update()
+	{
+		if (g_palette != R_INVALID_ID)
 		{
-			ImGui::OpenPopup("Delete voxel type");
-			g_confirm_delete = false;
-		}
-		if (ImGui::BeginPopupModal("Delete voxel type", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-		{
-			ImGui::Text("Delete \"%s\" ?", t.name.c_str());
-			ImGui::TextDisabled("Voxels of this type already painted keep its number :\nthey would take the next type added.");
-			if (ImGui::Button("Delete"))
+			const std::string key = PaletteKey();
+			if (key != g_palette_key)
 			{
-				voxels::RemoveLastType();
-				voxels::ApplyToScene(scene);
-				selected = voxels::GetTypeCount();
-				Save();
-				ImGui::CloseCurrentPopup();
+				// Only the selection moved : the swatches paint it themselves.
+				const bool same_types = key.substr(key.find(';')) == (g_palette_key.empty() ? std::string("\x01")
+				                                                                           : g_palette_key.substr(g_palette_key.find(';')));
+				if (!same_types)
+					RebuildPalette();
+				else
+					Rwidget_invalidate(g_palette);
+				g_palette_key = key;
 			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel"))
-				ImGui::CloseCurrentPopup();
-			ImGui::EndPopup();
 		}
 
-		if (!g_message.empty() && ImGui::GetTime() - g_message_time < 3.0)
-			ImGui::TextDisabled("%s", g_message.c_str());
+		if (g_editor != R_INVALID_ID)
+		{
+			const int selected = Selected();
+			const voxels::VoxelType* t = selected > 0 ? voxels::GetType(static_cast<uint8_t>(selected)) : nullptr;
+			const std::string key = t ? EditorKey(*t) : std::string();
+			// Another type, or the type changed by something else than the fields.
+			if (selected != g_editor_type || (key != g_editor_key && !g_filling && !input::Mouse(0) && !input::WantTextInput()))
+				FillEditor();
+		}
+
+		// Saved once the edit is finished (not on every move of the picker).
+		if (g_dirty && !input::Mouse(0) && Rget_time() - g_dirty_time > 0.6)
+			Save();
 	}
 }

@@ -1,0 +1,230 @@
+// =============================================================================
+// Lynx Editor (Raven) : modules whose window is not in Raven yet.
+// -----------------------------------------------------------------------------
+// The ImGui editor had these windows ; their Raven version comes with the next
+// phases of the port :
+//   phase 2 : Commands (Lynxie), Git, Input Settings, code editors, Profiler,
+//             Ship Game, Sprite -> voxels ;
+//   phase 3 : Widget Editor, Anim Graph / Behavior Tree, Particle Editor, the
+//             editor modules of the plugins (new Raven API).
+// Until then the editor keeps working without them : the files they would
+// open are opened with the program Windows associates with them, and their
+// menu entries say that the window is not available yet.
+// =============================================================================
+
+#include "../commands/CommandsWindow.h"
+#include "../EditorPlugins.h"
+#include "../GraphEditors.h"
+#include "../ParticleEditor.h"
+#include "../ProfilerWindow.h"
+#include "../ScriptEditors.h"
+#include "../ShipGame.h"
+#include "../SpriteVoxelizer.h"
+#include "../WidgetEditor.h"
+
+// The templates of the new files are the ones of the real editors.
+#include "../../core/Particles.h"
+#include "../../gameplay/AnimGraph.h"
+#include "../../gameplay/BehaviorTree.h"
+#include "../../widgets/Panels.h"
+#include "../../widgets/UserWidget.h"
+
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
+namespace
+{
+    std::string LowerExtension(const std::filesystem::path& path)
+    {
+        std::string ext = path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return ext;
+    }
+
+    // The program Windows associates with the file (Notepad, VS Code...).
+    void OpenWithSystem(const std::filesystem::path& path)
+    {
+#ifdef _WIN32
+        ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+        std::cout << "[EDITOR] Open " << path.string() << "\n";
+#endif
+    }
+
+    void NotYet(const char* window)
+    {
+        std::cout << "[EDITOR] The " << window << " window is not available in this version of the editor yet.\n";
+    }
+}
+
+
+// ---- Commands (Python / Lynxie) ---------------------------------------------
+namespace lynx::editor::commands_window
+{
+    void Update() {}
+    void Shutdown() {}
+    void Draw(bool*) {}
+    void ShowLynxie(int) { NotYet("Lynxie"); }
+    void AskLynxie(const std::string& prompt, const std::string&)
+    {
+        NotYet("Lynxie");
+        std::cout << prompt << "\n";
+    }
+    bool IsLynxieBusy() { return false; }
+}
+
+
+// ---- Code editors : the files open in the program of the system --------------
+namespace lynx::editor::script_editors
+{
+    void SetProjectRoot(const std::filesystem::path&) {}
+
+    bool CanOpen(const std::filesystem::path& path)
+    {
+        static const char* const kText[] = {
+            ".js", ".mjs", ".ts", ".json", ".txt", ".md", ".xml", ".py", ".ini", ".cfg", ".csv",
+            ".glsl", ".vert", ".frag", ".shader", ".lua", ".yaml", ".yml", ".html", ".css",
+        };
+        const std::string ext = LowerExtension(path);
+        return std::any_of(std::begin(kText), std::end(kText), [&](const char* e) { return ext == e; });
+    }
+
+    void Open(const std::filesystem::path& path, int) { OpenWithSystem(path); }
+    void DrawAll(unsigned int) {}
+    bool HasKeyboardFocus() { return false; }
+    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
+    void PathDeleted(const std::filesystem::path&) {}
+    bool HasUnsavedChanges() { return false; }
+    void SaveAll() {}
+}
+
+
+// ---- Widget Editor --------------------------------------------------------------
+namespace lynx::editor::widget_editor
+{
+    bool CanOpen(const std::filesystem::path&) { return false; }
+    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
+    void DrawAll(unsigned int) {}
+    bool HasFocus() { return false; }
+    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
+    void PathDeleted(const std::filesystem::path&) {}
+    bool HasUnsavedChanges() { return false; }
+    void SaveAll() {}
+    std::string NewFileTemplate()
+    {
+        lynx::UserWidget widget;
+        auto root = std::make_unique<lynx::CanvasPanel>();
+        root->SetName("Root");
+        widget.SetRoot(std::move(root));
+        return widget.SaveToString();
+    }
+    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
+}
+
+
+// ---- Anim Graph / Behavior Tree -------------------------------------------------
+namespace lynx::editor::graph_editors
+{
+    bool CanOpen(const std::filesystem::path&) { return false; }
+    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
+    void DrawAll(unsigned int) {}
+    bool HasFocus() { return false; }
+    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
+    void PathDeleted(const std::filesystem::path&) {}
+    bool HasUnsavedChanges() { return false; }
+    void SaveAll() {}
+    // [Locomotion (State Machine)] -> [Output Pose] ; Locomotion : Entry -> Idle (as GraphEditors.cpp).
+    std::string NewAnimGraphTemplate()
+    {
+        lynx::AnimGraphAsset g;
+        lynx::AnimGraphParameter speed;
+        speed.name = "speed";
+        g.parameters.push_back(speed);
+        lynx::AnimGraphAnimation idle;
+        idle.name = "Idle";
+        g.animations.push_back(idle);
+        lynx::AnimGraphStateMachine m;
+        m.id = 1;
+        m.name = "Locomotion";
+        lynx::AnimGraphState state;
+        state.id = 2;
+        state.name = "Idle";
+        state.motion = "Idle";
+        state.x = 260.f;
+        state.y = 0.f;
+        m.states.push_back(state);
+        m.entry_state = "Idle";
+        g.state_machines.push_back(m);
+        lynx::AnimGraphPoseNode node;
+        node.id = 3;
+        node.type = "statemachine";
+        node.source = "Locomotion";
+        g.pose_nodes.push_back(node);
+        g.output_source = node.id;
+        g.output_x = 360.f;
+        g.output_y = 0.f;
+        return g.SaveToString();
+    }
+    std::string NewBehaviorTreeTemplate() { return lynx::BehaviorTreeAsset::MakeDefault().SaveToString(); }
+    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
+    void Shutdown() {}
+}
+
+
+// ---- Particle Editor --------------------------------------------------------------
+namespace lynx::editor::particle_editor
+{
+    bool CanOpen(const std::filesystem::path&) { return false; }
+    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
+    void DrawAll(unsigned int) {}
+    bool HasFocus() { return false; }
+    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
+    void PathDeleted(const std::filesystem::path&) {}
+    bool HasUnsavedChanges() { return false; }
+    void SaveAll() {}
+    std::string NewFileTemplate() { return lynx::particles::NewTemplate(); }
+    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
+    void Shutdown() {}
+}
+
+
+// ---- Editor modules of the plugins (new Raven API : phase 3) ----------------------
+namespace lynx::editor::plugins
+{
+    namespace
+    {
+        Host g_host;
+        std::vector<NewFileKind> g_no_kinds;
+    }
+
+    void SetHost(const Host& host) { g_host = host; }
+
+    void LoadEditorModules()
+    {
+        std::cout << "[PLUGINS] Editor modules (<Name>.Editor.dll) are not loaded by this editor yet : "
+                     "the runtime part of the plugins works.\n";
+    }
+
+    void UnloadEditorModules() {}
+    void BeforeLevelSnapshot() {}
+    void Tick(float) {}
+    void DrawWindows() {}
+    bool HasFocus() { return false; }
+    void DrawWindowsMenuItems() {}
+    void DrawPluginsMenu(bool*) {}
+    bool HasMenuItems() { return false; }
+    bool OpenFile(const std::filesystem::path&) { return false; }
+    bool CanOpen(const std::filesystem::path&) { return false; }
+    const std::vector<NewFileKind>& GetNewFileKinds() { return g_no_kinds; }
+    void DrawManager(bool*) {}
+    void DrawManagerContent() {}
+}
+
+

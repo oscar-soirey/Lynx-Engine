@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - "Pixel" theme (the default) : the look of Aseprite, as the
+  ImGui editor had it (light grey faces, beige panels, blue-grey selection,
+  black 1 px outlines, square corners, the VCR pixel font).
+
+  Embedded in the editor. To change it while the editor runs : set the
+  environment variable LYNX_UI_DIR to src/editor/interface and edit this file.
+-->
+<Theme Name="Lynx Pixel" Base="Light" Dark="false" Accent="#7C919D" Font="../fonts/VCR-OSD-MONO.ttf">
+	<Colors
+		Window="#BDB5A8" Panel="#D3CBBE" Border="#000000"
+		Text="#000000" TextDisabled="#857F76" TextPlaceholder="#8A847A"
+		Accent="#7C919D" AccentHovered="#8CA4B3" AccentPressed="#54636C" AccentText="#FFFFFF"
+		Control="#C6C6C6" ControlHovered="#DEDEDE" ControlPressed="#A9A9A9" ControlBorder="#000000"
+		Input="#FFFFFF" Focus="#54636C" Selection="#ADCADE" RowHovered="#E3DCD0"
+		Track="#BDB5A8" Handle="#C6C6C6" HandleHovered="#DEDEDE"
+		Separator="#8C867C" Header="#BDB5A8" HeaderHovered="#C9C1B4" TabActive="#D3CBBE"
+		Popup="#D3CBBE" PopupBorder="#000000" Shadow="#00000040"
+		Tooltip="#FFFFE1" TooltipText="#000000" Switch="#7C919D"/>
+	<Metrics FontSize="16" CornerRadius="0" BorderWidth="1" ControlHeight="26" PaddingX="8" PaddingY="4"
+		Spacing="6" ScrollbarSize="12" RowHeight="22" Indent="16" SplitterSize="4" CheckSize="16"
+		SliderHandleSize="12" PopupRadius="0"/>
+	<Syntax Keyword="#0000AA" String="#AA0000" Comment="#5F7F5F" Number="#8B4513" Type="#007070" Function="#003C8F"/>
+
+	<Style Class="toolbar" Panel="#C6BEB1"/>
+	<Style Class="toolgroup" Panel="#D3CBBE" Border="#8C867C"/>
+	<Style Widget="Button" Class="tool" Control="#D3CBBE" ControlHovered="#E8E1D6" ControlPressed="#A9A9A9"/>
+	<Style Widget="Button" Class="active" Control="#ADCADE" ControlHovered="#BED6E7"/>
+	<Style Widget="Button" Class="play" Text="#1F6B2A"/>
+	<Style Widget="Button" Class="stop" Text="#9E2B25"/>
+	<Style Widget="Button" Class="simulate" Text="#2E5C8F"/>
+	<Style Class="statusbar" Panel="#C6BEB1"/>
+	<Style Widget="Label" Class="dim" Text="#6E685F"/>
+	<Style Widget="Label" Class="section" Text="#54636C"/>
+	<Style Widget="Label" Class="dialog-title" FontSize="20"/>
+	<Style Widget="Label" Class="error" Text="#B42318"/>
+	<Style Widget="Label" Class="warning" Text="#8A5A00"/>
+	<Style Widget="Label" Class="success" Text="#1F6B2A"/>
+	<Style Widget="Label" Class="axis-x" Text="#B42318"/>
+	<Style Widget="Label" Class="axis-y" Text="#1F6B2A"/>
+	<Style Widget="Label" Class="axis-z" Text="#2E5C8F"/>
+	<Style Widget="Label" Class="axis-w" Text="#6E685F"/>
+	<Style Widget="Label" Class="dirty" Text="#C26A00"/>
+	<Style Class="mode-tile" Control="#C6C6C6"/>
+	<Style Widget="Button" Class="mode-on" Control="#ADCADE" ControlHovered="#BED6E7" ControlBorder="#000000" BorderWidth="2"/>
+	<Style Class="viewport-bar" Panel="#D3CBBEDD"/>
+</Theme>

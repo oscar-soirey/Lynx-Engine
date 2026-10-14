@@ -1,20 +1,23 @@
 #include "ProfilerWindow.h"
 
-#include "EditorIcons.h"
+#include "raven/RavenUi.h"
 #include "../core/Profiler.h"
 #include "../host/GameProject.h"
 
-#include <imgui/imgui.h>
+#include <Raven.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
-#include <utility>
-#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -24,14 +27,25 @@
 #include <shellapi.h>
 #endif
 
+// =============================================================================
+// Profiler window (Raven : windows/profiler.xml). The tables of zones are
+// painted (Custom widgets) : they change every frame.
+// =============================================================================
+
 namespace fs = std::filesystem;
 
 namespace lynx::editor::profiler_window
 {
 	namespace
 	{
+		using lynx::profiler::ZoneStats;
+
 		bool g_paused = false;
 		bool g_sort_by_time = false;
+		bool g_hide_idle = true;
+		bool g_freeze_on_spike = false;
+		int g_seen_spikes = 0;
+		std::string g_filter;
 		lynx::profiler::Snapshot g_snapshot;
 
 		constexpr const char* kTracyReleases = "https://github.com/wolfpld/tracy/releases";
@@ -92,23 +106,6 @@ namespace lynx::editor::profiler_window
 #endif
 		}
 
-		ImVec4 Mix(const ImVec4& a, const ImVec4& b, float t)
-		{
-			return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
-		}
-
-
-		using lynx::profiler::ZoneStats;
-
-		bool g_hide_idle = true;
-		bool g_freeze_on_spike = false;
-		int g_seen_spikes = 0;
-		char g_filter[128] = "";
-
-		const ImVec4 kOk(0.25f, 0.62f, 0.28f, 1.f);
-		const ImVec4 kWarn(0.90f, 0.62f, 0.15f, 1.f);
-		const ImVec4 kBad(0.85f, 0.22f, 0.20f, 1.f);
-
 		bool ContainsNoCase(const std::string& text, const char* needle)
 		{
 			if (!needle || !*needle)
@@ -127,83 +124,10 @@ namespace lynx::editor::profiler_window
 			return path;
 		}
 
-		// Colour of a time : green below 1 ms, orange from 2 ms / 10 % of the
-		// frame, red from 5 ms / 30 %.
-		ImVec4 TimeColor(double ms, double frame)
+
+		bool Idle(const ZoneStats& z)
 		{
-			const double share = frame > 0.0 ? ms / frame : 0.0;
-			if (ms >= 5.0 || share >= 0.30) return kBad;
-			if (ms >= 2.0 || share >= 0.10) return kWarn;
-			return ImGui::GetStyleColorVec4(ImGuiCol_Text);
-		}
-
-		void TimeCell(double ms, double frame)
-		{
-			ImGui::TableNextColumn();
-			if (ms < 0.0005)
-				ImGui::TextDisabled("-");
-			else
-				ImGui::TextColored(TimeColor(ms, frame), "%.3f", ms);
-		}
-
-		// Frame time graph with the 60 fps (16.7 ms), 30 fps (33.3 ms) and
-		// spike threshold lines.
-		void DrawFrameGraph(const std::vector<float>& frames, float height, float spike_ms)
-		{
-			const ImVec2 size(ImGui::GetContentRegionAvail().x, height);
-			const ImVec2 min = ImGui::GetCursorScreenPos();
-			const ImVec2 max(min.x + size.x, min.y + size.y);
-			ImGui::Dummy(size);
-
-			ImDrawList* draw = ImGui::GetWindowDrawList();
-			draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_FrameBg));
-			draw->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_Border));
-			if (frames.empty())
-				return;
-
-			float top = 33.3f * 1.25f;
-			for (float f : frames)
-				top = std::max(top, f * 1.1f);
-			top = std::min(top, 250.f);
-
-			auto y_of = [&](float ms) { return max.y - std::min(ms, top) / top * size.y; };
-
-			const float bar = size.x / 300.f;
-			const float start_x = max.x - bar * static_cast<float>(frames.size());
-			for (size_t i = 0; i < frames.size(); ++i)
-			{
-				const float ms = frames[i];
-				const ImVec4 color = ms <= 16.8f ? kOk : ms <= 33.4f ? Mix(kOk, kWarn, (ms - 16.8f) / 16.6f) : kBad;
-				const float x = start_x + bar * static_cast<float>(i);
-				draw->AddRectFilled(ImVec2(x, y_of(ms)), ImVec2(x + std::max(1.f, bar - 0.5f), max.y),
-				                    ImGui::ColorConvertFloat4ToU32(color));
-			}
-
-			for (const auto& [ms, label] : { std::pair<float, const char*>{ 16.7f, "60 fps" }, { 33.3f, "30 fps" } })
-			{
-				if (ms > top)
-					continue;
-				const float y = y_of(ms);
-				draw->AddLine(ImVec2(min.x, y), ImVec2(max.x, y), ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.f);
-				draw->AddText(ImVec2(min.x + 4.f, y - ImGui::GetTextLineHeight()), ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
-			}
-			if (spike_ms > 0.f && spike_ms <= top)
-			{
-				const float y = y_of(spike_ms);
-				draw->AddLine(ImVec2(min.x, y), ImVec2(max.x, y), ImGui::ColorConvertFloat4ToU32(ImVec4(kBad.x, kBad.y, kBad.z, 0.6f)), 1.f);
-				draw->AddText(ImVec2(max.x - ImGui::CalcTextSize("spike").x - 4.f, y - ImGui::GetTextLineHeight()),
-				              ImGui::ColorConvertFloat4ToU32(kBad), "spike");
-			}
-
-			// Tooltip : the frame under the mouse.
-			if (ImGui::IsItemHovered())
-			{
-				const float mx = ImGui::GetIO().MousePos.x;
-				const int index = static_cast<int>((mx - start_x) / bar);
-				if (index >= 0 && index < static_cast<int>(frames.size()))
-					ImGui::SetTooltip("%.2f ms (%.0f fps)", frames[static_cast<size_t>(index)],
-					                  frames[static_cast<size_t>(index)] > 0.f ? 1000.f / frames[static_cast<size_t>(index)] : 0.f);
-			}
+			return z.calls == 0 && z.average_ms < 0.001;
 		}
 
 		// Children of each zone sorted by time (the biggest first), roots too.
@@ -234,142 +158,6 @@ namespace lynx::editor::profiler_window
 			return order;
 		}
 
-		bool Idle(const ZoneStats& z)
-		{
-			return z.calls == 0 && z.average_ms < 0.001;
-		}
-
-		// The zone tree in a table. `spike` : values of one frame (no average, no max).
-		void DrawTree(const char* id, const std::vector<ZoneStats>& zones, double frame, bool spike)
-		{
-			const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
-			                              ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Resizable;
-			if (!ImGui::BeginTable(id, spike ? 4 : 6, flags, ImVec2(0.f, ImGui::GetContentRegionAvail().y)))
-				return;
-
-			ImGui::TableSetupScrollFreeze(0, 1);
-			ImGui::TableSetupColumn("Zone", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableSetupColumn(spike ? "Time" : "Average");
-			ImGui::TableSetupColumn("Self");
-			if (!spike)
-			{
-				ImGui::TableSetupColumn("Last");
-				ImGui::TableSetupColumn("Max (2 s)");
-			}
-			ImGui::TableSetupColumn("Calls");
-			ImGui::TableHeadersRow();
-
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Self : time of the zone without its child zones.\n"
-				                  "The biggest Self values are where the time goes.");
-
-			const bool filtering = g_filter[0] != 0;
-			const std::vector<int> order = SortedTreeOrder(zones, g_sort_by_time && !filtering);
-			frame = std::max(frame, 0.001);
-
-			int open_depth = 0;          // tree nodes pushed
-			int skip_below = -1;         // depth of a closed node : its subtree is hidden
-			for (int index : order)
-			{
-				const ZoneStats& z = zones[static_cast<size_t>(index)];
-
-				if (filtering)
-				{
-					if (!ContainsNoCase(z.name, g_filter))
-						continue;
-				}
-				else
-				{
-					if (skip_below >= 0)
-					{
-						if (z.depth > skip_below)
-							continue;
-						skip_below = -1;
-					}
-					while (open_depth > z.depth)
-					{
-						ImGui::TreePop();
-						--open_depth;
-					}
-					if (!spike && g_hide_idle && Idle(z))
-					{
-						if (z.has_children)
-							skip_below = z.depth;
-						continue;
-					}
-				}
-
-				const double value = spike ? z.last_ms : z.average_ms;
-				const double self = spike ? z.self_last_ms : z.self_average_ms;
-
-				ImGui::TableNextRow();
-				ImGui::TableNextColumn();
-
-				// Share of the frame, drawn behind the name.
-				const ImVec2 cell = ImGui::GetCursorScreenPos();
-				const float width = ImGui::GetContentRegionAvail().x;
-				const float share = static_cast<float>(std::clamp(value / frame, 0.0, 1.0));
-				const float self_share = static_cast<float>(std::clamp(self / frame, 0.0, 1.0));
-				ImVec4 bar = ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram);
-				bar.w *= 0.22f;
-				ImGui::GetWindowDrawList()->AddRectFilled(
-					cell, ImVec2(cell.x + width * share, cell.y + ImGui::GetTextLineHeight()),
-					ImGui::ColorConvertFloat4ToU32(bar));
-				bar.w *= 2.f;
-				ImGui::GetWindowDrawList()->AddRectFilled(
-					cell, ImVec2(cell.x + width * self_share, cell.y + ImGui::GetTextLineHeight()),
-					ImGui::ColorConvertFloat4ToU32(bar));
-
-				if (filtering)
-				{
-					ImGui::TextUnformatted(z.name.c_str());
-				}
-				else
-				{
-					ImGuiTreeNodeFlags node_flags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-					if (!z.has_children)
-						node_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-					if (z.depth < 3)
-						node_flags |= ImGuiTreeNodeFlags_DefaultOpen;
-					// ID : the index (two zones can have the same name under one parent... not
-					// in practice, but the index is unique).
-					const bool node_open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(index)), node_flags, "%s", z.name.c_str());
-					if (z.has_children)
-					{
-						if (node_open)
-							++open_depth;
-						else
-							skip_below = z.depth;
-					}
-				}
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("%s\n%.0f %% of the frame (%.0f %% self)", PathOf(zones, index).c_str(),
-					                  share * 100.f, self_share * 100.f);
-
-				TimeCell(value, frame);
-				TimeCell(self, frame);
-				if (!spike)
-				{
-					TimeCell(z.last_ms, frame);
-					TimeCell(z.max_ms, frame);
-				}
-				ImGui::TableNextColumn();
-				ImGui::Text("%d", z.calls);
-			}
-			while (open_depth > 0)
-			{
-				ImGui::TreePop();
-				--open_depth;
-			}
-
-			if (zones.empty())
-			{
-				ImGui::TableNextRow();
-				ImGui::TableNextColumn();
-				ImGui::TextDisabled(spike ? "No spike yet." : "Recording... (zones appear after one frame)");
-			}
-			ImGui::EndTable();
-		}
 
 		// The same name under several parents (a JS class called from
 		// several places...) is added up : where the time goes, in one list.
@@ -402,76 +190,6 @@ namespace lynx::editor::profiler_window
 			}
 			std::sort(spots.begin(), spots.end(), [](const HotSpot& a, const HotSpot& b) { return a.self_ms > b.self_ms; });
 			return spots;
-		}
-
-		void DrawHotSpots(const std::vector<ZoneStats>& zones, double frame)
-		{
-			const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
-			                              ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Resizable;
-			if (!ImGui::BeginTable("##hotspots", 5, flags, ImVec2(0.f, ImGui::GetContentRegionAvail().y)))
-				return;
-			ImGui::TableSetupScrollFreeze(0, 1);
-			ImGui::TableSetupColumn("Zone (by self time)", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableSetupColumn("Self");
-			ImGui::TableSetupColumn("Total");
-			ImGui::TableSetupColumn("Max (2 s)");
-			ImGui::TableSetupColumn("Calls");
-			ImGui::TableHeadersRow();
-
-			frame = std::max(frame, 0.001);
-			for (const HotSpot& h : HotSpots(zones))
-			{
-				if (!ContainsNoCase(h.name, g_filter))
-					continue;
-				if (g_hide_idle && h.calls == 0 && h.self_ms < 0.001)
-					continue;
-
-				ImGui::TableNextRow();
-				ImGui::TableNextColumn();
-				const ImVec2 cell = ImGui::GetCursorScreenPos();
-				const float width = ImGui::GetContentRegionAvail().x;
-				const float share = static_cast<float>(std::clamp(h.self_ms / frame, 0.0, 1.0));
-				ImVec4 bar = ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram);
-				bar.w *= 0.45f;
-				ImGui::GetWindowDrawList()->AddRectFilled(
-					cell, ImVec2(cell.x + width * share, cell.y + ImGui::GetTextLineHeight()),
-					ImGui::ColorConvertFloat4ToU32(bar));
-				ImGui::TextUnformatted(h.name.c_str());
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("%s\n%.0f %% of the frame in this zone itself\n%d place(s) in the tree",
-					                  h.name.c_str(), share * 100.f, h.places);
-
-				TimeCell(h.self_ms, frame);
-				TimeCell(h.total_ms, frame);
-				TimeCell(h.max_ms, frame);
-				ImGui::TableNextColumn();
-				ImGui::Text("%d", h.calls);
-			}
-			ImGui::EndTable();
-		}
-
-		void DrawCounters(const std::vector<lynx::profiler::Counter>& counters)
-		{
-			if (counters.empty())
-				return;
-			bool first = true;
-			for (const auto& c : counters)
-			{
-				if (!first)
-					ImGui::SameLine(0.f, ImGui::GetStyle().ItemSpacing.x * 3.f);
-				first = false;
-				ImGui::TextDisabled("%s", c.name.c_str());
-				ImGui::SameLine();
-				if (c.value == static_cast<double>(static_cast<long long>(c.value)))
-					ImGui::Text("%lld%s", static_cast<long long>(c.value), c.per_frame ? "/f" : "");
-				else
-					ImGui::Text("%.2f%s", c.value, c.per_frame ? "/f" : "");
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip(c.per_frame ? "%s : during the last frame" : "%s", c.name.c_str());
-				// Wrap before the edge.
-				if (ImGui::GetItemRectMax().x > ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - 150.f)
-					first = true;
-			}
 		}
 
 		// Text for the clipboard : to paste in an issue or a chat.
@@ -522,25 +240,372 @@ namespace lynx::editor::profiler_window
 			}
 			return out;
 		}
+		// ---------------------------------------------------------------------
+		// Painted tables
+		// ---------------------------------------------------------------------
+
+		constexpr float kRowHeight = 20.f;
+		constexpr float kHeaderHeight = 22.f;
+
+		struct Rgba { float r, g, b, a; };
+		constexpr Rgba kOk{ 0.25f, 0.62f, 0.28f, 1.f };
+		constexpr Rgba kWarn{ 0.90f, 0.62f, 0.15f, 1.f };
+		constexpr Rgba kBad{ 0.85f, 0.22f, 0.20f, 1.f };
+		constexpr Rgba kText{ 0.90f, 0.90f, 0.90f, 1.f };
+		constexpr Rgba kDim{ 0.55f, 0.55f, 0.58f, 1.f };
+		constexpr Rgba kBar{ 0.88f, 0.63f, 0.19f, 1.f };
+
+		// Colour of a time : plain below 2 ms, orange from 2 ms / 10 % of the
+		// frame, red from 5 ms / 30 %.
+		Rgba TimeColor(double ms, double frame)
+		{
+			const double share = frame > 0.0 ? ms / frame : 0.0;
+			if (ms >= 5.0 || share >= 0.30) return kBad;
+			if (ms >= 2.0 || share >= 0.10) return kWarn;
+			return kText;
+		}
+
+		void Text(RPainter* p, float x, float y, const std::string& text, Rgba c)
+		{
+			Rdraw_text(p, R_INVALID_ID, 0.f, x, y, text.c_str(), c.r, c.g, c.b, c.a);
+		}
+
+		std::string Ms(double ms)
+		{
+			if (ms < 0.0005)
+				return "-";
+			char buffer[32];
+			std::snprintf(buffer, sizeof(buffer), "%.3f", ms);
+			return buffer;
+		}
+
+		struct Row
+		{
+			std::string name;
+			std::string key;        // path : the state of the node
+			int depth = 0;
+			bool has_children = false;
+			bool open = false;
+			double value[5] = {};   // the columns after the name
+			int calls = 0;
+			double share = 0.0, self_share = 0.0;
+		};
+
+		struct Table
+		{
+			Rid widget = R_INVALID_ID;
+			std::vector<const char*> columns;   // after the name ; the last one : Calls
+			std::vector<Row> rows;
+			double frame = 1.0;
+			std::string empty;
+			bool tree = true;
+		};
+
+		Table g_tree, g_hot, g_spike;
+		std::set<std::string> g_closed;   // nodes closed by the user
+		std::set<std::string> g_opened;   // nodes deeper than 3 opened by the user
+
+		bool IsOpen(const std::string& key, int depth)
+		{
+			if (g_closed.count(key))
+				return false;
+			return depth < 3 || g_opened.count(key);
+		}
+
+		void FillTree(Table& t, const std::vector<ZoneStats>& zones, double frame, bool spike)
+		{
+			t.rows.clear();
+			t.frame = std::max(frame, 0.001);
+			const bool filtering = !g_filter.empty();
+			int skip_below = -1;
+			for (int index : SortedTreeOrder(zones, g_sort_by_time && !filtering))
+			{
+				const ZoneStats& z = zones[static_cast<size_t>(index)];
+				if (filtering)
+				{
+					if (!ContainsNoCase(z.name, g_filter.c_str()))
+						continue;
+				}
+				else
+				{
+					if (skip_below >= 0)
+					{
+						if (z.depth > skip_below)
+							continue;
+						skip_below = -1;
+					}
+					if (!spike && g_hide_idle && Idle(z))
+					{
+						if (z.has_children)
+							skip_below = z.depth;
+						continue;
+					}
+				}
+				Row r;
+				r.name = z.name;
+				r.key = PathOf(zones, index);
+				r.depth = filtering ? 0 : z.depth;
+				r.has_children = !filtering && z.has_children;
+				r.open = r.has_children && IsOpen(r.key, z.depth);
+				const double value = spike ? z.last_ms : z.average_ms;
+				const double self = spike ? z.self_last_ms : z.self_average_ms;
+				r.value[0] = value;
+				r.value[1] = self;
+				r.value[2] = z.last_ms;
+				r.value[3] = z.max_ms;
+				r.calls = z.calls;
+				r.share = std::clamp(value / t.frame, 0.0, 1.0);
+				r.self_share = std::clamp(self / t.frame, 0.0, 1.0);
+				t.rows.push_back(std::move(r));
+				if (z.has_children && !filtering && !t.rows.back().open)
+					skip_below = z.depth;
+			}
+		}
+
+		void FillHotSpots(Table& t, const std::vector<ZoneStats>& zones, double frame)
+		{
+			t.rows.clear();
+			t.frame = std::max(frame, 0.001);
+			for (const HotSpot& h : HotSpots(zones))
+			{
+				if (!ContainsNoCase(h.name, g_filter.c_str()))
+					continue;
+				if (g_hide_idle && h.calls == 0 && h.self_ms < 0.001)
+					continue;
+				Row r;
+				r.name = h.name;
+				r.key = h.name;
+				r.value[0] = h.self_ms;
+				r.value[1] = h.total_ms;
+				r.value[2] = h.max_ms;
+				r.calls = h.calls;
+				r.self_share = r.share = std::clamp(h.self_ms / t.frame, 0.0, 1.0);
+				t.rows.push_back(std::move(r));
+			}
+		}
+
+		void PaintTable(const Table& t, RPainter* p, float width, float)
+		{
+			const int columns = static_cast<int>(t.columns.size());
+			const float col_w = 74.f;
+			const float name_w = std::max(120.f, width - col_w * static_cast<float>(columns));
+
+			Rdraw_rect(p, 0.f, 0.f, width, kHeaderHeight, 0.f, 0.f, 0.f, 0.f, 0.25f);
+			Text(p, 6.f, 3.f, t.tree ? "Zone" : "Zone (by self time)", kDim);
+			for (int c = 0; c < columns; ++c)
+				Text(p, name_w + col_w * static_cast<float>(c) + 4.f, 3.f, t.columns[static_cast<size_t>(c)], kDim);
+
+			if (t.rows.empty())
+				Text(p, 6.f, kHeaderHeight + 4.f, t.empty, kDim);
+
+			float y = kHeaderHeight;
+			bool odd = false;
+			for (const Row& r : t.rows)
+			{
+				if (odd)
+					Rdraw_rect(p, 0.f, y, width, kRowHeight, 0.f, 1.f, 1.f, 1.f, 0.03f);
+				odd = !odd;
+				// Share of the frame, behind the name (the self part darker).
+				Rdraw_rect(p, 0.f, y + 1.f, name_w * static_cast<float>(r.share), kRowHeight - 2.f, 0.f, kBar.r, kBar.g, kBar.b, 0.18f);
+				Rdraw_rect(p, 0.f, y + 1.f, name_w * static_cast<float>(r.self_share), kRowHeight - 2.f, 0.f, kBar.r, kBar.g, kBar.b, 0.35f);
+				const float indent = 6.f + 14.f * static_cast<float>(r.depth);
+				if (r.has_children)
+					Text(p, indent, y + 2.f, r.open ? "v" : ">", kDim);
+				Text(p, indent + 14.f, y + 2.f, r.name, kText);
+				for (int c = 0; c < columns - 1; ++c)
+				{
+					const double v = r.value[c];
+					Text(p, name_w + col_w * static_cast<float>(c) + 4.f, y + 2.f, Ms(v), v < 0.0005 ? kDim : TimeColor(v, t.frame));
+				}
+				Text(p, name_w + col_w * static_cast<float>(columns - 1) + 4.f, y + 2.f, std::to_string(r.calls), kText);
+				y += kRowHeight;
+			}
+		}
+
+		void BindTable(Table& t, Rid widget)
+		{
+			t.widget = widget;
+			Table* table = &t;
+			ui::OnPaint(widget, [table](RPainter* p, float w, float h) { PaintTable(*table, p, w, h); });
+			// A click on a node opens / closes it.
+			ui::OnEvent(widget, [table](const REvent& e)
+			{
+				if (e.type != R_EVENT_MOUSE_DOWN || e.button != R_MOUSE_LEFT || !table->tree)
+					return false;
+				const int row = static_cast<int>((e.local_y - kHeaderHeight) / kRowHeight);
+				if (row < 0 || row >= static_cast<int>(table->rows.size()))
+					return false;
+				const Row& r = table->rows[static_cast<size_t>(row)];
+				if (!r.has_children)
+					return false;
+				if (r.open)
+				{
+					g_closed.insert(r.key);
+					g_opened.erase(r.key);
+				}
+				else
+				{
+					g_closed.erase(r.key);
+					g_opened.insert(r.key);
+				}
+				return true;
+			});
+		}
+
+		void Resize(Table& t)
+		{
+			Rwidget_set_size(t.widget, -1.f, kHeaderHeight + kRowHeight * static_cast<float>(std::max<size_t>(1, t.rows.size())) + 4.f);
+			Rwidget_invalidate(t.widget);
+		}
+
+		// Frame time graph with the 60 fps / 30 fps / spike lines.
+		void PaintGraph(RPainter* p, float width, float height)
+		{
+			Rdraw_rect(p, 0.f, 0.f, width, height, 4.f, 0.f, 0.f, 0.f, 0.3f);
+			const std::vector<float>& frames = g_snapshot.frame_ms;
+			if (frames.empty())
+				return;
+			float top = 33.3f * 1.25f;
+			for (float f : frames)
+				top = std::max(top, f * 1.1f);
+			top = std::min(top, 250.f);
+			auto y_of = [&](float ms) { return height - std::min(ms, top) / top * height; };
+			const float bar = width / 300.f;
+			const float start_x = width - bar * static_cast<float>(frames.size());
+			for (size_t i = 0; i < frames.size(); ++i)
+			{
+				const float ms = frames[i];
+				const Rgba c = ms <= 16.8f ? kOk : ms <= 33.4f ? kWarn : kBad;
+				const float x = start_x + bar * static_cast<float>(i);
+				Rdraw_rect(p, x, y_of(ms), std::max(1.f, bar - 0.5f), height - y_of(ms), 0.f, c.r, c.g, c.b, c.a);
+			}
+			for (const auto& [ms, label] : { std::pair<float, const char*>{ 16.7f, "60 fps" }, { 33.3f, "30 fps" } })
+			{
+				if (ms > top)
+					continue;
+				const float y = y_of(ms);
+				Rdraw_line(p, 0.f, y, width, y, 1.f, kDim.r, kDim.g, kDim.b, 0.8f);
+				Text(p, 4.f, y - 16.f, label, kDim);
+			}
+			const float spike_ms = static_cast<float>(lynx::profiler::GetSpikeThreshold());
+			if (spike_ms > 0.f && spike_ms <= top)
+			{
+				const float y = y_of(spike_ms);
+				Rdraw_line(p, 0.f, y, width, y, 1.f, kBad.r, kBad.g, kBad.b, 0.6f);
+				Text(p, width - 46.f, y - 16.f, "spike", kBad);
+			}
+		}
+
+		// ---------------------------------------------------------------------
+		// Window
+		// ---------------------------------------------------------------------
+
+		Rid g_window = R_INVALID_ID;
+		bool g_shown = false;
+		Rid g_graph = R_INVALID_ID, g_fps = R_INVALID_ID, g_paused_label = R_INVALID_ID, g_pause = R_INVALID_ID;
+		Rid g_counters = R_INVALID_ID, g_tracy = R_INVALID_ID, g_tracy_open = R_INVALID_ID, g_tracy_get = R_INVALID_ID;
+		Rid g_spike_ms = R_INVALID_ID, g_spike_info = R_INVALID_ID, g_tabs = R_INVALID_ID;
+		fs::path g_tracy_path;
+
+		int OnClose(Rid window, void*)
+		{
+			Rwindow_hide(window);
+			g_shown = false;
+			lynx::profiler::SetEnabled(false);
+			return R_FALSE;
+		}
+
+		void Create()
+		{
+			if (g_window != R_INVALID_ID)
+				return;
+			g_window = ui::LoadWindow("windows/profiler.xml");
+			if (g_window == R_INVALID_ID)
+				return;
+			auto find = [](const char* n) { return ui::Find(g_window, n); };
+			g_graph = find("pf.graph");
+			g_fps = find("pf.fps");
+			g_paused_label = find("pf.paused");
+			g_pause = find("pf.pause");
+			g_counters = find("pf.counters");
+			g_tracy = find("pf.tracy");
+			g_tracy_open = find("pf.tracy.open");
+			g_tracy_get = find("pf.tracy.get");
+			g_spike_ms = find("pf.spike");
+			g_spike_info = find("pf.spike.info");
+			g_tabs = find("pf.tabs");
+
+			g_tree.columns = { "Average", "Self", "Last", "Max (2 s)", "Calls" };
+			g_tree.empty = "Recording... (zones appear after one frame)";
+			g_hot.columns = { "Self", "Total", "Max (2 s)", "Calls" };
+			g_hot.tree = false;
+			g_hot.empty = "Nothing yet.";
+			g_spike.columns = { "Time", "Self", "Calls" };
+			g_spike.empty = "No spike yet.";
+			BindTable(g_tree, find("pf.tree"));
+			BindTable(g_hot, find("pf.hot"));
+			BindTable(g_spike, find("pf.spike.table"));
+			ui::OnPaint(g_graph, PaintGraph);
+
+			g_tracy_path = FindTracy();
+			ui::OnClick(g_tracy_open, []() { Open(g_tracy_path); });
+			ui::OnClick(g_tracy_get, []()
+			{
+				g_tracy_path = FindTracy();
+				if (g_tracy_path.empty())
+					OpenUrl(kTracyReleases);
+			});
+			ui::OnClick(g_pause, []() { g_paused = !g_paused; });
+			ui::OnClick(find("pf.reset"), []()
+			{
+				lynx::profiler::Reset();
+				g_snapshot = {};
+				g_seen_spikes = 0;
+			});
+			ui::OnClick(find("pf.copy"), []() { Rclipboard_set_text(Report(g_snapshot).c_str()); });
+			ui::OnText(find("pf.filter"), [](const std::string& text) { g_filter = text; });
+			ui::OnToggle(find("pf.sort"), [](bool on) { g_sort_by_time = on; });
+			ui::OnToggle(find("pf.idle"), [](bool on) { g_hide_idle = on; });
+			ui::SetChecked(find("pf.idle"), g_hide_idle);
+			Rid fine = find("pf.fine");
+			ui::SetChecked(fine, lynx::profiler::IsDetailed());
+			ui::OnToggle(fine, [](bool on)
+			{
+				lynx::profiler::SetDetailed(on);
+				lynx::profiler::Reset();
+				g_snapshot = {};
+				g_seen_spikes = 0;
+			});
+			Rspin_box_set_value(g_spike_ms, lynx::profiler::GetSpikeThreshold());
+			ui::OnValue(g_spike_ms, [](double v) { lynx::profiler::SetSpikeThreshold(static_cast<float>(v)); });
+			ui::OnToggle(find("pf.freeze"), [](bool on) { g_freeze_on_spike = on; });
+			Rwindow_set_close_callback(g_window, OnClose, nullptr);
+		}
 	}
 
 
-	void Draw(bool* open)
+	void Show()
 	{
-		// The built-in profiler records only while the window is visible
-		// (open, and its tab selected when it is docked behind another one).
-		const bool open_now = !open || *open;
-		if (!open_now)
-		{
-			lynx::profiler::SetEnabled(false);
+		Create();
+		if (g_window == R_INVALID_ID)
 			return;
-		}
+		Rwindow_show(g_window);
+		g_shown = true;
+	}
 
-		ImGui::SetNextWindowSize(ImVec2(720.f, 620.f), ImGuiCond_FirstUseEver);
-		if (!ImGui::Begin("Profiler", open))
+
+	bool IsOpen()
+	{
+		return g_shown;
+	}
+
+
+	void Update()
+	{
+		// The built-in profiler records only while the window is open.
+		if (!g_shown || g_window == R_INVALID_ID)
 		{
 			lynx::profiler::SetEnabled(false);
-			ImGui::End();
 			return;
 		}
 		lynx::profiler::SetEnabled(!g_paused);
@@ -554,148 +619,55 @@ namespace lynx::editor::profiler_window
 			g_seen_spikes = g_snapshot.spike.count;
 		}
 
-		// --- Tracy -----------------------------------------------------------
-		{
-			const bool available = lynx::profiler::TracyAvailable();
-			const bool connected = lynx::profiler::TracyConnected();
+		// Tracy.
+		const bool available = lynx::profiler::TracyAvailable();
+		const bool connected = lynx::profiler::TracyConnected();
+		ui::SetText(g_tracy, !available ? "Tracy : not compiled in (CMake option LYNX_PROFILER_TRACY)"
+		                     : connected ? "Tracy : connected, recording"
+		                                 : "Tracy : waiting for a connection (on demand, no cost until then)");
+		ui::SetClass(g_tracy, "success", connected);
+		ui::SetVisible(g_tracy_open, available && !g_tracy_path.empty());
+		ui::SetTooltip(g_tracy_open, g_tracy_path.string() + "\nThen \"Connect\" to 127.0.0.1 in Tracy.");
+		ui::SetVisible(g_tracy_get, available && g_tracy_path.empty());
 
-			ImGui::AlignTextToFramePadding();
-			icons::Draw(icons::Icon::Profiler, 0.f,
-			            connected ? ImVec4(0.25f, 0.62f, 0.28f, 1.f) : icons::kThemeTint);
-			ImGui::SameLine();
-			if (!available)
-				ImGui::TextDisabled("Tracy : not compiled in (CMake option LYNX_PROFILER_TRACY)");
-			else if (connected)
-				ImGui::TextColored(ImVec4(0.25f, 0.62f, 0.28f, 1.f), "Tracy : connected, recording");
-			else
-				ImGui::TextDisabled("Tracy : waiting for a connection (on demand, no cost until then)");
-
-			if (available)
-			{
-				ImGui::SameLine();
-				static fs::path tracy = FindTracy();
-				if (!tracy.empty())
-				{
-					if (ImGui::Button("Open Tracy"))
-						Open(tracy);
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("%s\nThen \"Connect\" to 127.0.0.1 in Tracy.", tracy.string().c_str());
-				}
-				else
-				{
-					if (ImGui::Button("Get Tracy..."))
-						OpenUrl(kTracyReleases);
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("tracy-profiler.exe was not found (next to the editor, in the launcher's tools,\n"
-						                  "or in the PATH). Download the Windows release (Tracy 0.14.x : same version\n"
-						                  "as the client compiled in the engine).");
-					ImGui::SameLine();
-					if (ImGui::SmallButton("Search again"))
-						tracy = FindTracy();
-				}
-			}
-		}
-
-		ImGui::Separator();
-
-		// --- Frame -----------------------------------------------------------
+		// Frame.
 		const double average = g_snapshot.average_frame_ms;
-		ImGui::Text("%.1f fps", average > 0.0 ? 1000.0 / average : 0.0);
-		ImGui::SameLine();
-		ImGui::TextDisabled("frame %.2f ms (average)   worst %.2f ms", average, g_snapshot.max_frame_ms);
-		if (g_paused)
+		char fps[128];
+		std::snprintf(fps, sizeof(fps), "%.1f fps    frame %.2f ms (average)   worst %.2f ms",
+		              average > 0.0 ? 1000.0 / average : 0.0, average, g_snapshot.max_frame_ms);
+		ui::SetText(g_fps, fps);
+		ui::SetVisible(g_paused_label, g_paused);
+		ui::SetText(g_pause, g_paused ? "Resume" : "Pause");
+		Rwidget_invalidate(g_graph);
+
+		std::string counters;
+		for (const auto& c : g_snapshot.counters)
 		{
-			ImGui::SameLine();
-			ImGui::TextColored(kWarn, "PAUSED");
+			char line[160];
+			if (c.value == static_cast<double>(static_cast<long long>(c.value)))
+				std::snprintf(line, sizeof(line), "%s %lld%s     ", c.name.c_str(), static_cast<long long>(c.value), c.per_frame ? "/f" : "");
+			else
+				std::snprintf(line, sizeof(line), "%s %.2f%s     ", c.name.c_str(), c.value, c.per_frame ? "/f" : "");
+			counters += line;
 		}
+		ui::SetText(g_counters, counters);
+		ui::SetVisible(g_counters, !counters.empty());
 
-		ImGui::SameLine(std::max(ImGui::GetCursorPosX(),
-		                         ImGui::GetWindowContentRegionMax().x -
-		                         ImGui::CalcTextSize("Resume").x - ImGui::CalcTextSize("Reset").x - ImGui::CalcTextSize("Copy").x -
-		                         ImGui::GetStyle().FramePadding.x * 6.f - ImGui::GetStyle().ItemSpacing.x * 2.f -
-		                         ImGui::GetTextLineHeight() * 3.f - ImGui::GetStyle().ItemInnerSpacing.x * 3.f));
-		if (icons::ButtonWithLabel(g_paused ? "Resume" : "Pause", g_paused ? icons::Icon::Play : icons::Icon::Pause))
-			g_paused = !g_paused;
-		ImGui::SameLine();
-		if (icons::ButtonWithLabel("Reset", icons::Icon::Clear))
-		{
-			lynx::profiler::Reset();
-			g_snapshot = {};
-			g_seen_spikes = 0;
-		}
-		ImGui::SameLine();
-		if (icons::ButtonWithLabel("Copy", icons::Icon::Copy))
-			ImGui::SetClipboardText(Report(g_snapshot).c_str());
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Copy the measures as text (zones, hot spots, last spike, counters).");
-
-		float spike_ms = static_cast<float>(lynx::profiler::GetSpikeThreshold());
-		DrawFrameGraph(g_snapshot.frame_ms, ImGui::GetTextLineHeight() * 5.f, spike_ms);
-
-		DrawCounters(g_snapshot.counters);
-
-		// --- Options ---------------------------------------------------------
-		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9.f);
-		ImGui::InputTextWithHint("##filter", "Filter zones", g_filter, sizeof(g_filter));
-		ImGui::SameLine();
-		ImGui::Checkbox("Sort by time", &g_sort_by_time);
-		ImGui::SameLine();
-		ImGui::Checkbox("Hide idle", &g_hide_idle);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Hide the zones not called lately (destroyed actors, finished effects...).");
-		ImGui::SameLine();
-		bool detailed = lynx::profiler::IsDetailed();
-		if (ImGui::Checkbox("Fine zones", &detailed))
-		{
-			lynx::profiler::SetDetailed(detailed);
-			lynx::profiler::Reset();
-			g_snapshot = {};
-			g_seen_spikes = 0;
-		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("One zone per component type, per JS class method (Lueur.Update...) and per script.\n"
-			                  "Costs a little while recording : turn it off to measure the frame time alone.");
-
-		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.f);
-		if (ImGui::DragFloat("Spike (ms)", &spike_ms, 0.5f, 0.f, 1000.f, "%.0f"))
-			lynx::profiler::SetSpikeThreshold(spike_ms);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("A frame slower than this is kept (tab \"Last spike\"). 0 : off.");
-		ImGui::SameLine();
-		ImGui::Checkbox("Pause on spike", &g_freeze_on_spike);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("The window pauses on the next spike : read it calmly, then Resume.");
-
-		// --- Zones -----------------------------------------------------------
+		// Tables : only the tab shown.
 		const lynx::profiler::Spike& spike = g_snapshot.spike;
-		char spike_label[96];
+		char spike_info[160];
 		if (spike.valid)
-			std::snprintf(spike_label, sizeof(spike_label), "Last spike (%.0f ms, %.0f s ago)###spike", spike.frame_ms, spike.seconds_ago);
+			std::snprintf(spike_info, sizeof(spike_info), "Last spike : %.0f ms, %.0f s ago (%d spikes since Reset).",
+			              spike.frame_ms, spike.seconds_ago, spike.count);
 		else
-			std::snprintf(spike_label, sizeof(spike_label), "Last spike###spike");
+			std::snprintf(spike_info, sizeof(spike_info), "No frame slower than %.0f ms yet.", lynx::profiler::GetSpikeThreshold());
+		ui::SetText(g_spike_info, spike_info);
 
-		if (ImGui::BeginTabBar("##profiler_tabs"))
+		switch (Rtab_view_get_active(g_tabs))
 		{
-			if (ImGui::BeginTabItem("Tree"))
-			{
-				DrawTree("##zones", g_snapshot.zones, average, false);
-				ImGui::EndTabItem();
-			}
-			if (ImGui::BeginTabItem("Hot spots"))
-			{
-				DrawHotSpots(g_snapshot.zones, average);
-				ImGui::EndTabItem();
-			}
-			if (ImGui::BeginTabItem(spike_label))
-			{
-				if (spike.valid)
-					ImGui::TextDisabled("The zones of the last frame slower than %.0f ms (%d spikes since Reset).", spike_ms, spike.count);
-				DrawTree("##spike", spike.zones, spike.frame_ms, true);
-				ImGui::EndTabItem();
-			}
-			ImGui::EndTabBar();
+		case 0: FillTree(g_tree, g_snapshot.zones, average, false); Resize(g_tree); break;
+		case 1: FillHotSpots(g_hot, g_snapshot.zones, average); Resize(g_hot); break;
+		default: FillTree(g_spike, spike.zones, spike.frame_ms, true); Resize(g_spike); break;
 		}
-
-		ImGui::End();
 	}
 }

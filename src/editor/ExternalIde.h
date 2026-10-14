@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 // =============================================================================
 // "Open with" : opens the game folder in a code editor
 // -----------------------------------------------------------------------------
@@ -48,4 +51,10 @@ namespace lynx::editor::external_ide
 	 * textures are stored bottom-up : draw with uv0 = (0, 1), uv1 = (1, 0).
 	 */
 	unsigned int IconTexture(Ide ide);
+
+	/**
+	 * Pixels of the icon of the program (RGBA, top row first, size x size),
+	 * empty while searching or when there is none. For the Raven interface.
+	 */
+	bool IconPixels(Ide ide, std::vector<uint8_t>& rgba, int& size);
 }

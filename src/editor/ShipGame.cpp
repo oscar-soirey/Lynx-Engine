@@ -4,7 +4,8 @@
 #include "../host/GameProject.h"
 #include "../core/Plugins.h"
 
-#include <imgui/imgui.h>
+#include "raven/RavenUi.h"
+#include <Raven.h>
 
 // Implementation compiled in EditorMain.cpp (STB_IMAGE_IMPLEMENTATION).
 #include "../../third-party/stb/stb_image.h"
@@ -1063,11 +1064,135 @@ namespace lynx::editor::ship_game
 		}
 	}
 
+	namespace
+	{
+		// Raven window (windows/ship_game.xml).
+		Rid g_window = R_INVALID_ID;
+		Rid w_form = R_INVALID_ID, w_name = R_INVALID_ID, w_folder = R_INVALID_ID, w_icon = R_INVALID_ID;
+		Rid w_icon_error = R_INVALID_ID, w_engine_none = R_INVALID_ID, w_engine_choice = R_INVALID_ID;
+		Rid w_release = R_INVALID_ID, w_editor_build = R_INVALID_ID, w_outdated = R_INVALID_ID;
+		Rid w_compile = R_INVALID_ID, w_console = R_INVALID_ID, w_ship = R_INVALID_ID;
+		Rid w_state = R_INVALID_ID, w_progress = R_INVALID_ID, w_status = R_INVALID_ID, w_log = R_INVALID_ID;
+		Rid w_open_folder = R_INVALID_ID;
+		size_t g_log_shown = 0;
+		std::function<void()> g_save_level;
+
+		int OnClose(Rid window, void*)
+		{
+			Rwindow_hide(window);
+			g_open = false;
+			return R_FALSE;
+		}
+
+		void StartShip()
+		{
+			{
+				std::lock_guard<std::mutex> lock(g_mutex);
+				g_log.clear();
+			}
+			g_progress = 0.f;
+			SaveSettings();
+			Status("Saving the level...");
+			if (g_save_level)
+				g_save_level();
+			Log("Shipping " + SafeFileName(g_game_name) + " to " + g_output);
+
+			// Nothing to compile in a project without C++.
+			if (g_compile && host::CanBuildProject(g_root))
+			{
+				Status("Compiling the game...");
+				g_build_started = false;
+				g_state = State::Building;
+			}
+			else
+			{
+				StartPacking();
+			}
+		}
+
+		void Create()
+		{
+			if (g_window != R_INVALID_ID)
+				return;
+			g_window = ui::LoadWindow("windows/ship_game.xml");
+			if (g_window == R_INVALID_ID)
+				return;
+			auto find = [](const char* n) { return ui::Find(g_window, n); };
+			w_form = find("sg.form");
+			w_name = find("sg.name");
+			w_folder = find("sg.folder");
+			w_icon = find("sg.icon");
+			w_icon_error = find("sg.icon.error");
+			w_engine_none = find("sg.engine.none");
+			w_engine_choice = find("sg.engine.choice");
+			w_release = find("sg.release");
+			w_editor_build = find("sg.editor_build");
+			w_outdated = find("sg.outdated");
+			w_compile = find("sg.compile");
+			w_console = find("sg.console");
+			w_ship = find("sg.ship");
+			w_state = find("sg.state");
+			w_progress = find("sg.progress");
+			w_status = find("sg.status");
+			w_log = find("sg.log");
+			w_open_folder = find("sg.open_folder");
+
+			ui::OnText(w_name, [](const std::string& t) { std::snprintf(g_game_name, sizeof(g_game_name), "%s", t.c_str()); });
+			ui::OnText(w_folder, [](const std::string& t) { std::snprintf(g_output, sizeof(g_output), "%s", t.c_str()); });
+			ui::OnText(w_icon, [](const std::string& t) { std::snprintf(g_icon, sizeof(g_icon), "%s", t.c_str()); });
+			ui::OnClick(find("sg.folder.browse"), []()
+			{
+				std::string path;
+				if (BrowseFolder(path))
+				{
+					std::snprintf(g_output, sizeof(g_output), "%s", path.c_str());
+					Rtext_input_set_text(w_folder, g_output);
+				}
+			});
+			ui::OnClick(find("sg.icon.browse"), []()
+			{
+				std::string path;
+				if (BrowseIcon(path))
+				{
+					std::snprintf(g_icon, sizeof(g_icon), "%s", path.c_str());
+					Rtext_input_set_text(w_icon, g_icon);
+				}
+			});
+			ui::OnClick(find("sg.icon.clear"), []()
+			{
+				g_icon[0] = '\0';
+				Rtext_input_set_text(w_icon, "");
+			});
+			ui::OnToggle(w_release, [](bool on) { if (on) g_use_release = true; });
+			ui::OnToggle(w_editor_build, [](bool on) { if (on) g_use_release = false; });
+			ui::OnToggle(w_compile, [](bool on) { g_compile = on; });
+			ui::OnToggle(w_console, [](bool on) { g_hide_console = on; });
+			ui::OnClick(w_ship, []() { StartShip(); });
+			ui::OnClick(w_open_folder, []() { OpenFolder(FromUtf8(g_output)); });
+			Rwindow_set_close_callback(g_window, OnClose, nullptr);
+		}
+
+		// The fields follow the settings (project change, settings loaded).
+		void ShowSettings()
+		{
+			if (!Rwidget_is_focused(w_name)) Rtext_input_set_text(w_name, g_game_name);
+			if (!Rwidget_is_focused(w_folder)) Rtext_input_set_text(w_folder, g_output);
+			if (!Rwidget_is_focused(w_icon)) Rtext_input_set_text(w_icon, g_icon);
+			ui::SetChecked(w_compile, g_compile);
+			ui::SetChecked(w_console, g_hide_console);
+		}
+	}
+
 	void Open()
 	{
 		g_open = true;
 		if (g_state == State::Done || g_state == State::Failed)
 			g_state = State::Idle;
+		Create();
+		if (g_window == R_INVALID_ID)
+			return;
+		ShowSettings();
+		Rwindow_show(g_window);
 	}
 
 	bool IsBusy()
@@ -1112,132 +1237,33 @@ namespace lynx::editor::ship_game
 			g_state = g_worker_ok ? State::Done : State::Failed;
 		}
 
-		if (!g_open)
+		g_save_level = save_level;
+		if (!g_open || g_window == R_INVALID_ID)
 			return;
-
-		ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30.f, 0.f), ImGuiCond_FirstUseEver);
-		if (!ImGui::Begin("Ship Game", &g_open, ImGuiWindowFlags_NoDocking))
-		{
-			ImGui::End();
-			return;
-		}
 
 		const bool busy = IsBusy();
-		ImGui::BeginDisabled(busy);
-
-		ImGui::TextWrapped("Makes a game that runs without the editor : one executable (the assets packed inside) "
-		                   "and its DLLs, in the folder below.");
-		ImGui::Spacing();
-
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextUnformatted("Game name");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(-FLT_MIN);
-		ImGui::InputText("##ShipName", g_game_name, sizeof(g_game_name));
-
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextUnformatted("Folder");
-		ImGui::SameLine();
-		const float browse_width = ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.f;
-		ImGui::SetNextItemWidth(std::max(50.f, ImGui::GetContentRegionAvail().x - browse_width - ImGui::GetStyle().ItemSpacing.x));
-		ImGui::InputText("##ShipFolder", g_output, sizeof(g_output));
-		ImGui::SameLine();
-		if (ImGui::Button("Browse..."))
-		{
-			std::string path;
-			if (BrowseFolder(path))
-				std::snprintf(g_output, sizeof(g_output), "%s", path.c_str());
-		}
-
-		// Icon of the executable (Explorer, taskbar, window).
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextUnformatted("Icon");
-		ImGui::SameLine();
-		const float icon_buttons = browse_width * 2.f + ImGui::GetStyle().ItemSpacing.x;
-		ImGui::SetNextItemWidth(std::max(50.f, ImGui::GetContentRegionAvail().x - icon_buttons - ImGui::GetStyle().ItemSpacing.x));
-		ImGui::InputTextWithHint("##ShipIcon", "(icon of LynxRuntime.exe)", g_icon, sizeof(g_icon));
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip(".ico (used as it is) or an image : png, jpg, bmp, tga\n(converted to 16 - 256 px, centered on a square).");
-		ImGui::SameLine();
-		if (ImGui::Button("Browse...##Icon"))
-		{
-			std::string path;
-			if (BrowseIcon(path))
-				std::snprintf(g_icon, sizeof(g_icon), "%s", path.c_str());
-		}
-		ImGui::SameLine();
-		ImGui::BeginDisabled(g_icon[0] == '\0');
-		if (ImGui::Button("Clear", ImVec2(browse_width, 0.f)))
-			g_icon[0] = '\0';
-		ImGui::EndDisabled();
+		ui::SetEnabled(w_form, !busy);
 
 		// Icon file checked right away (the error is shown here, not at the end).
-		if (g_icon[0] != '\0')
-		{
-			std::error_code ec;
-			if (!fs::is_regular_file(FromUtf8(g_icon), ec))
-				ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.15f, 1.f), "Icon file not found");
-		}
+		std::error_code ec;
+		ui::SetVisible(w_icon_error, g_icon[0] != '\0' && !fs::is_regular_file(FromUtf8(g_icon), ec));
 
 		// Engine : Release (build-release.bat) or the editor's (Debug).
-		const fs::path release_dir = FindReleaseEngineDir();
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextUnformatted("Engine");
-		ImGui::SameLine();
-		if (release_dir.empty())
+		static double engine_checked = -10.0;
+		static fs::path release_dir;
+		if (Rget_time() - engine_checked > 2.0)
 		{
-			ImGui::TextDisabled("editor build (no build-release : run build-release.bat for an optimized game)");
+			engine_checked = Rget_time();
+			release_dir = FindReleaseEngineDir();
 		}
-		else
-		{
-			if (ImGui::RadioButton("Release", g_use_release))
-				g_use_release = true;
-			ImGui::SameLine();
-			if (ImGui::RadioButton("Editor build", !g_use_release))
-				g_use_release = false;
+		ui::SetVisible(w_engine_none, release_dir.empty());
+		ui::SetVisible(w_engine_choice, !release_dir.empty());
+		ui::SetChecked(w_release, g_use_release);
+		ui::SetChecked(w_editor_build, !g_use_release);
+		ui::SetVisible(w_outdated, !release_dir.empty() && g_use_release && ReleaseEngineOutdated(release_dir));
 
-			if (g_use_release && ReleaseEngineOutdated(release_dir))
-			{
-				ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.2f, 1.f),
-				                   "The Release engine is older than the editor's : the editor build will be shipped.\n"
-				                   "Run build-release.bat again for an optimized game.");
-			}
-		}
-
-		ImGui::Checkbox("Compile the game first", &g_compile);
-		ImGui::SameLine();
-		ImGui::Checkbox("No console window", &g_hide_console);
-
-		ImGui::Spacing();
 		const bool can_ship = g_output[0] != '\0' && g_game_name[0] != '\0' && !g_root.empty();
-		ImGui::BeginDisabled(!can_ship);
-		if (ImGui::Button("Ship", ImVec2(-FLT_MIN, 0.f)))
-		{
-			{
-				std::lock_guard<std::mutex> lock(g_mutex);
-				g_log.clear();
-			}
-			g_progress = 0.f;
-			SaveSettings();
-			Status("Saving the level...");
-			if (save_level)
-				save_level();
-			Log("Shipping " + SafeFileName(g_game_name) + " to " + g_output);
-
-			// Nothing to compile in a project without C++.
-			if (g_compile && host::CanBuildProject(g_root))
-			{
-				Status("Compiling the game...");
-				g_build_started = false;
-				g_state = State::Building;
-			}
-			else
-			{
-				StartPacking();
-			}
-		}
-		ImGui::EndDisabled();
-		ImGui::EndDisabled();
+		ui::SetEnabled(w_ship, can_ship && !busy);
 
 		// --- State ------------------------------------------------------------
 		std::string status;
@@ -1247,27 +1273,28 @@ namespace lynx::editor::ship_game
 			status = g_status;
 			log = g_log;
 		}
-
-		if (g_state != State::Idle || !log.empty())
+		const bool show_state = g_state != State::Idle || !log.empty();
+		ui::SetVisible(w_state, show_state);
+		if (!show_state)
+			return;
+		const float progress = g_state == State::Building ? 0.05f : g_progress.load();
+		Rprogress_bar_set_value(w_progress, g_state == State::Done ? 1.f : progress);
+		ui::SetText(w_status, status);
+		if (log.size() < g_log_shown)
 		{
-			ImGui::Separator();
-			const float progress = g_state == State::Building ? 0.05f : g_progress.load();
-			ImGui::ProgressBar(g_state == State::Done ? 1.f : progress, ImVec2(-FLT_MIN, 0.f), status.c_str());
-
-			ImGui::BeginChild("##ShipLog", ImVec2(0.f, ImGui::GetTextLineHeightWithSpacing() * 6.f), true);
-			for (const std::string& line : log)
-			{
-				if (line.rfind("FAILED", 0) == 0)
-					ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.15f, 1.f), "%s", line.c_str());
-				else
-					ImGui::TextUnformatted(line.c_str());
-			}
-			ImGui::EndChild();
-
-			if (g_state == State::Done && ImGui::Button("Open the folder"))
-				OpenFolder(FromUtf8(g_output));
+			Rtree_view_clear_items(w_log);
+			g_log_shown = 0;
 		}
-
-		ImGui::End();
+		Rid last = R_INVALID_ID;
+		for (size_t i = g_log_shown; i < log.size(); ++i)
+		{
+			last = Rtree_view_add_item(w_log, R_INVALID_ID, log[i].c_str());
+			if (log[i].rfind("FAILED", 0) == 0)
+				Rtree_item_set_text_color(last, 0.9f, 0.3f, 0.25f, 1.f);
+		}
+		g_log_shown = log.size();
+		if (last != R_INVALID_ID)
+			Rtree_view_scroll_to_item(w_log, last);
+		ui::SetVisible(w_open_folder, g_state == State::Done);
 	}
 }

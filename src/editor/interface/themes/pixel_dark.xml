@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - "Pixel Dark" theme : flat dark greys, one warm accent, black
+  1 px outlines, square corners, the VCR pixel font.
+-->
+<Theme Name="Lynx Pixel Dark" Base="Dark" Dark="true" Accent="#D99A2B" Font="../fonts/VCR-OSD-MONO.ttf">
+	<Colors
+		Window="#252525" Panel="#2E2E2E" Border="#0F0F0F"
+		Text="#E6E6E6" TextDisabled="#808080" TextPlaceholder="#6E6E6E"
+		Accent="#D99A2B" AccentHovered="#F0B94A" AccentPressed="#78561A" AccentText="#1E1E1E"
+		Control="#3D3D3D" ControlHovered="#505050" ControlPressed="#222222" ControlBorder="#0F0F0F"
+		Input="#1E1E1E" Focus="#D99A2B" Selection="#78561A" RowHovered="#3A3A3A"
+		Track="#1E1E1E" Handle="#3D3D3D" HandleHovered="#505050"
+		Separator="#0F0F0F" Header="#252525" HeaderHovered="#333333" TabActive="#2E2E2E"
+		Popup="#252525" PopupBorder="#0F0F0F" Shadow="#00000080"
+		Tooltip="#1E1E1E" TooltipText="#E6E6E6" Switch="#D99A2B"/>
+	<Metrics FontSize="16" CornerRadius="0" BorderWidth="1" ControlHeight="26" PaddingX="8" PaddingY="4"
+		Spacing="6" ScrollbarSize="12" RowHeight="22" Indent="16" SplitterSize="4" CheckSize="16"
+		SliderHandleSize="12" PopupRadius="0"/>
+
+	<Style Class="toolbar" Panel="#262626"/>
+	<Style Class="toolgroup" Panel="#2E2E2E" Border="#0F0F0F"/>
+	<Style Widget="Button" Class="tool" Control="#2E2E2E" ControlHovered="#454545" ControlPressed="#222222"/>
+	<Style Widget="Button" Class="active" Control="#78561A" ControlHovered="#8C6520"/>
+	<Style Widget="Button" Class="play" Text="#6BCB77"/>
+	<Style Widget="Button" Class="stop" Text="#F0645A"/>
+	<Style Widget="Button" Class="simulate" Text="#6BA6F0"/>
+	<Style Class="statusbar" Panel="#262626"/>
+	<Style Widget="Label" Class="dim" Text="#8C8C8C"/>
+	<Style Widget="Label" Class="section" Text="#D99A2B"/>
+	<Style Widget="Label" Class="dialog-title" FontSize="20"/>
+	<Style Widget="Label" Class="error" Text="#F0726B"/>
+	<Style Widget="Label" Class="warning" Text="#F0CC59"/>
+	<Style Widget="Label" Class="success" Text="#72D97E"/>
+	<Style Widget="Label" Class="axis-x" Text="#F0726B"/>
+	<Style Widget="Label" Class="axis-y" Text="#72D97E"/>
+	<Style Widget="Label" Class="axis-z" Text="#6BA6F0"/>
+	<Style Widget="Label" Class="axis-w" Text="#A0A0A0"/>
+	<Style Widget="Label" Class="dirty" Text="#F0A028"/>
+	<Style Widget="Button" Class="mode-on" Control="#78561A" ControlHovered="#8C6520" ControlBorder="#F0A028" BorderWidth="2"/>
+	<Style Class="viewport-bar" Panel="#1E1E1EDD"/>
+</Theme>

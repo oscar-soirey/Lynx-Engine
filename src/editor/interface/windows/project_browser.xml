@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project browser : shown when the editor starts without a project
+  (ProjectBrowser.cpp). Recent projects, the folder of the project to open,
+  "New project...". A folder dropped on the window fills the path.
+-->
+<Window Title="Lynx Engine - Projects" Width="960" Height="600" MinWidth="640" MinHeight="420" Hidden="true">
+	<VBox Spacing="6" Slot.Padding="20,16">
+		<HBox Spacing="10">
+			<Image Name="pb.logo" Width="38" Height="33" Stretch="Fit" TintText="true" Slot.VAlign="Center"/>
+			<VBox Slot.VAlign="Center">
+				<Label Text="Lynx Engine" Class="dialog-title"/>
+				<Label Text="Open a game project : a folder with &quot;assets&quot; and the game DLL in &quot;build&quot;, or create a new one." Class="dim" Wrap="true"/>
+			</VBox>
+		</HBox>
+		<Label Name="pb.message" Text="" Class="warning" Wrap="true" Visibility="Collapsed"/>
+
+		<Section Text="Recent projects"/>
+		<TileView Name="pb.recent" Layout="Rows" TileHeight="46" IconSize="32" Spacing="2" Slot.Fill="1"
+		          EmptyText="No recent project. Use &quot;New project...&quot;, &quot;Browse...&quot;, or drop a project folder on this window."/>
+
+		<Section Text="Project folder"/>
+		<HBox Spacing="6">
+			<TextInput Name="pb.path" Placeholder="C:/Games/MyGame" Slot.Fill="1"/>
+			<Button Name="pb.browse" Text="Browse..."/>
+		</HBox>
+		<HBox Spacing="6">
+			<Label Name="pb.status" Text="Select a project folder." Class="dim" Wrap="true" Slot.Fill="1" Slot.VAlign="Center"/>
+			<Label Name="pb.module.label" Text="Game DLL :" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<ComboBox Name="pb.module" Width="320" Visibility="Collapsed"/>
+		</HBox>
+
+		<HBox Spacing="6" Slot.Padding="0,6,0,0">
+			<Button Name="pb.new" Text="New project..."/>
+			<Spacer Slot.Fill="1"/>
+			<Button Name="pb.quit" Text="Quit"/>
+			<Button Name="pb.open" Text="Open project" Style="Primary"/>
+		</HBox>
+	</VBox>
+</Window>

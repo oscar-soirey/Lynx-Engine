@@ -148,73 +148,89 @@ target_compile_features(Lynx INTERFACE cxx_std_20)
 
 
 ## Lynx Editor (engine executable : opens a game project, see src/editor/README.md)
+#
+# The interface is Raven (C11, Vulkan), a folder next to Lynx
+# (S:/Horizon/Raven beside S:/Horizon/Lynx), or RAVEN_DIR. The XML files of the
+# interface (src/editor/interface) are embedded in the executable ; set the
+# environment variable LYNX_UI_DIR=<Lynx>/src/editor/interface to edit them
+# while the editor runs (live reload).
 
-file(GLOB ImGUI_SOURCE
-		"${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp"
+set(RAVEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Raven" CACHE PATH "Raven (interface of the editor)")
+if(NOT EXISTS "${RAVEN_DIR}/CMakeLists.txt")
+	message(FATAL_ERROR "Raven not found in ${RAVEN_DIR} : clone it next to Lynx, or set RAVEN_DIR.")
+endif()
+set(RAVEN_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(RAVEN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAVEN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(RAVEN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(RAVEN_BUILD_WEB OFF CACHE BOOL "" FORCE)
+add_subdirectory("${RAVEN_DIR}" "${CMAKE_BINARY_DIR}/raven" EXCLUDE_FROM_ALL)
+
+# Interface of the editor, embedded : the XML files, the icon atlases, the font.
+include(cmake/LynxEmbedFiles.cmake)
+set(LYNX_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/interface")
+file(GLOB_RECURSE LYNX_UI_FILES CONFIGURE_DEPENDS "${LYNX_UI_ROOT}/*.xml")
+set(LYNX_UI_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/EditorUiFiles.h")
+lynx_embed_files("${LYNX_UI_HEADER}" "${LYNX_UI_ROOT}"
+		${LYNX_UI_FILES}
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/editor_icons.png=icons/editor_icons.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/file_icons.png=icons/file_icons.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/lynxie.png=icons/lynxie.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/fonts/VCR-OSD-MONO.ttf=fonts/VCR-OSD-MONO.ttf"
 )
 
 add_executable(LynxEditor src/editor_icon.rc
-		${ImGUI_SOURCE}
-		third-party/imgui_textedit/TextEditor.cpp
-		third-party/imgui_node/imnodes.cpp
 		third-party/glad/glad.c
+		"${LYNX_UI_HEADER}"
 
 		src/host/GameProject.cpp
 
 		src/editor/EditorMain.cpp
 		src/editor/ProjectBrowser.cpp
-		src/editor/InputSettingsEditor.cpp
 		src/editor/GameBuild.cpp
 		src/editor/StartupBuild.cpp
 		src/editor/OutputConsole.cpp
 		src/editor/CommandPalette.cpp
-		src/editor/ParticleEditor.cpp
 		src/editor/EditorOptions.cpp
 		src/editor/ExternalIde.cpp
 		src/editor/ShellIntegration.cpp
-		src/editor/EditorPlugins.cpp
 		src/editor/ProjectTemplates.cpp
-		src/editor/LynxieIcon.cpp
 		src/editor/EditorIcons.cpp
-		src/editor/PropertyWidgets.cpp
-		src/editor/ProfilerWindow.cpp
-		src/editor/ScriptEditors.cpp
-		src/editor/MarkdownText.cpp
-		src/editor/EditorFonts.cpp
-		src/editor/ShipGame.cpp
 		src/editor/SplashScreen.cpp
-		src/editor/WidgetEditor.cpp
-		src/editor/GraphEditors.cpp
 		src/editor/VoxelTypeEditor.cpp
-		src/editor/TitleBar.cpp
 		src/editor/FileIcons.cpp
-		src/editor/SpriteVoxelizer.cpp
-		src/editor/TextSelection.cpp
-		src/editor/WindowIcon.cpp
-		src/editor/JsonEditor.cpp
 		src/editor/JsLanguage.cpp
 		src/editor/ProjectInfo.cpp
+		src/editor/InputSettingsEditor.cpp
+		src/editor/ProfilerWindow.cpp
+		src/editor/ShipGame.cpp
+		src/editor/SpriteVoxelizer.cpp
+
+		# Raven : bridge with OpenGL (HRL), widgets of the editor, the modules
+		# whose window is not in Raven yet.
+		src/editor/raven/RavenUi.cpp
+		src/editor/raven/GlBridge.cpp
+		src/editor/raven/Phase2Stubs.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp
 		src/editor/commands/CommandUtils.cpp
-		src/editor/commands/CommandsWindow.cpp
 		src/editor/commands/ScriptRunner.cpp
 		src/editor/commands/FileEdits.cpp
 )
 
-# imnodes includes <imgui.h> / <imgui_internal.h> directly.
-target_include_directories(LynxEditor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third-party/imgui")
+target_include_directories(LynxEditor PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 target_link_libraries(LynxEditor PRIVATE
+		raven::raven
 		${HRL_LIB}
-		${GLFW_LIB}
+		${GLFW_LIB}   # gamepads (no window)
 		Lynx
 		opengl32
 		ws2_32      # command server (Python scripts / MCP)
 		winhttp     # local Ollama chat API
 		shell32
-		ole32       # Ship Game : folder picker
+		ole32       # project browser : folder picker
 		user32 gdi32  # Open with : icons of the code editors
 		advapi32      # registry : "Open with Lynx" in the Explorer menu
 )
@@ -317,6 +333,9 @@ target_link_libraries(LynxRuntime PRIVATE
 ## Lynx launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models,
 ## then the engine versions from the GitHub releases, see launcher/README.md)
 # Independent from lynx.dll : it must start on a computer where nothing is installed yet.
+
+# The launcher keeps its ImGui interface (only the editor uses Raven).
+file(GLOB ImGUI_SOURCE "${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp")
 
 add_executable(LynxLauncher src/editor_icon.rc
 		${ImGUI_SOURCE}

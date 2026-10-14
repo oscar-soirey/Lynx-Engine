@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx editor - the main window.
+
+  Header (title of the project, engine version), toolbar (every button has a
+  shortcut that keeps working), the docked panels, the status bar.
+  The panels are named : their arrangement is saved per project
+  (editor_layout.txt) and Windows shows / hides them (editor_windows.txt).
+
+  The content of the panels that changes with the level (Outliner, Details,
+  Content Browser...) is filled by the C++ (src/editor/raven/Panel*.inl) ;
+  their frame is here and in panels/*.xml.
+-->
+<Window Title="Lynx" Width="1600" Height="900" MinWidth="960" MinHeight="600" CustomHeader="true" Hidden="true">
+	<VBox>
+		<HeaderBar Name="header" TitleAlign="Left">
+			<Image Name="header.icon" Width="18" Height="18" Stretch="Fit" Slot.VAlign="Center" Slot.Padding="6,0,0,0"/>
+			<Label Name="header.version" Text="" Class="dim" Slot.HAlign="Right" Slot.VAlign="Center" Slot.Padding="0,0,10,0"/>
+			<Button Name="header.lynxie" Class="tool" Slot.HAlign="Right" Tooltip="Lynxie : ask a question about the engine, or what to change in the level" Focusable="false">
+				<Image Name="header.lynxie.icon" Width="22" Height="19" Stretch="Fit" TintText="true"/>
+			</Button>
+		</HeaderBar>
+
+		<!-- Toolbar -->
+		<Border Name="toolbar" Class="toolbar" Padding="6,4">
+			<HBox Spacing="10">
+				<ToolGroup>
+					<ToolButton Name="tb.project" Glyph="Project" Text="Project" Tip="Project : open another one, code editors, Ship Game"/>
+					<ToolArrow Name="tb.project.menu" Tip="Project menu"/>
+					<Button Name="tb.ide" Class="tool" Focusable="false" Tooltip="Open the game folder in the code editor">
+						<Image Name="tb.ide.icon" Width="16" Height="16" Stretch="Fit"/>
+					</Button>
+				</ToolGroup>
+
+				<ToolGroup>
+					<Overlay>
+						<ToolButton Name="tb.save" Glyph="Save" Tip="Save the level (Ctrl+S)"/>
+						<Label Name="tb.save.dirty" Text="*" Class="dirty" Slot.HAlign="Right" Slot.VAlign="Top" Slot.Padding="0,0,3,0" HitTestable="false" Visibility="Collapsed"/>
+					</Overlay>
+					<ToolButton Name="tb.undo" Glyph="Undo" Tip="Undo (Ctrl+Z)"/>
+				</ToolGroup>
+
+				<ToolGroup>
+					<ToolButton Name="tb.translate" Glyph="Translate" Tip="Translate (Space cycles the gizmo modes)"/>
+					<ToolButton Name="tb.rotate" Glyph="Rotate" Tip="Rotate (Space cycles the gizmo modes)"/>
+					<ToolButton Name="tb.scale" Glyph="Scale" Tip="Scale (Space cycles the gizmo modes)"/>
+				</ToolGroup>
+
+				<ToolGroup>
+					<ToolButton Name="tb.play" Glyph="Play" Text="Play" Tip="Play the game in the editor (F3)" Class="tool play"/>
+					<ToolButton Name="tb.simulate" Glyph="Eye" Text="Simulate" Tip="Simulate : run the game without possessing any actor, keep the editor camera and its movements (Alt+S)"/>
+					<Label Name="tb.simulating" Text="Simulating" Class="section" Slot.VAlign="Center" Slot.Padding="6,0" Visibility="Collapsed"/>
+				</ToolGroup>
+
+				<ToolGroup>
+					<ToolButton Name="tb.compile" Glyph="Compile" Text="Compile" Tip="Compile the game (Build.bat of the project)"/>
+					<ToolArrow Name="tb.game.menu" Tip="Reload Game, build output, build options"/>
+					<Button Name="tb.status" Class="tool" Style="Flat" Focusable="false" Visibility="Collapsed">
+						<Label Name="tb.status.text" Text=""/>
+					</Button>
+				</ToolGroup>
+
+				<Spacer Slot.Fill="1"/>
+
+				<ToolGroup>
+					<Button Name="tb.view" Class="tool" Focusable="false" Tooltip="Editor camera speed and master volume">
+						<Label Name="tb.view.text" Text="Speed 50  Vol 50%"/>
+					</Button>
+					<ToolButton Name="tb.windows" Glyph="Windows" Text="Windows" Tip="Show or hide editor windows"/>
+					<ToolButton Name="tb.options" Glyph="Settings" Text="Options" Tip="Options : interface, project settings, plugins"/>
+				</ToolGroup>
+			</HBox>
+		</Border>
+
+		<!-- Panels -->
+		<DockArea Name="dock" Slot.Fill="1" CloseHides="true">
+			<Include Source="panels/viewport.xml"/>
+			<Include Source="panels/outliner.xml"/>
+			<Include Source="panels/paint.xml"/>
+			<Include Source="panels/content_browser.xml"/>
+			<Include Source="panels/details.xml"/>
+			<Include Source="panels/place_actors.xml"/>
+			<Include Source="panels/color_picking.xml"/>
+			<Include Source="panels/console.xml"/>
+			<Include Source="panels/build.xml"/>
+		</DockArea>
+
+		<!-- Status bar -->
+		<Border Name="statusbar" Class="statusbar" Padding="8,2">
+			<HBox Spacing="16">
+				<Label Name="status.level" Text="" Class="dim"/>
+				<Label Name="status.mode" Text=""/>
+				<Spacer Slot.Fill="1"/>
+				<Label Name="status.hint" Text="" Class="dim"/>
+				<Label Name="status.fps" Text="" Class="dim"/>
+			</HBox>
+		</Border>
+	</VBox>
+</Window>

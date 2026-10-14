@@ -39,9 +39,6 @@ namespace lynx::editor::command_palette
 
 	bool IsOpen();
 
-	/** Every frame (draws nothing when closed). */
-	void Draw();
-
 	/**
 	 * Score of `query` in `text` (fuzzy, case insensitive) ; < 0 : no match.
 	 * Consecutive letters, word starts and an early match score higher.

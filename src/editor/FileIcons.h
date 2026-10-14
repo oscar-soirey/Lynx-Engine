@@ -3,16 +3,14 @@
 // =============================================================================
 // File icons of the Content Browser
 // -----------------------------------------------------------------------------
-// 18 colored pixel-art icons (32x32) in one atlas embedded in the editor
-// (resources/file_icons.png, made by resources/file_icons_gen.py ->
-// file_icons_png.inl). A file_icons.png next to the editor executable is used
-// instead when present (same layout : 8 icons per row, in the order of Kind).
-// Created on first use (needs the HRL renderer : inside an editor frame).
+// 18 colored pixel-art icons (32x32, drawn at 128x128 in the atlas) :
+// resources/file_icons.png (made by resources/file_icons_gen.py), embedded in
+// the editor as ui/icons/file_icons.png (8 icons per row, in the order of Kind).
+// In the interface files : <FileIcon Kind="Folder" Size="32"/> (raven/RavenUi.h).
 // =============================================================================
 
 #include <filesystem>
 
-#include <imgui/imgui.h>
 
 namespace lynx::editor::file_icons
 {
@@ -43,10 +41,4 @@ namespace lynx::editor::file_icons
 
 	/** Short name of the kind ("Folder", "JavaScript"...) : tooltips. */
 	const char* Describe(Kind kind);
-
-	/** At a position of a draw list. Sharpest at 32, 64, 96... pixels. */
-	void DrawAt(ImDrawList* draw_list, Kind kind, const ImVec2& min, float size, ImU32 tint = IM_COL32_WHITE);
-
-	/** In the layout. */
-	void Draw(Kind kind, float size);
 }

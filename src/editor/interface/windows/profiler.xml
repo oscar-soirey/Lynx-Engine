@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Profiler (ProfilerWindow.cpp) : the tables are painted, they change every frame. -->
+<Window Title="Lynx - Profiler" Width="760" Height="680" MinWidth="480" MinHeight="320" Hidden="true">
+	<VBox Spacing="6" Slot.Padding="10">
+		<HBox Spacing="8">
+			<Label Name="pf.tracy" Text="" Class="dim" Slot.VAlign="Center" Slot.Fill="1"/>
+			<Button Name="pf.tracy.open" Text="Open Tracy" Visibility="Collapsed"/>
+			<Button Name="pf.tracy.get" Text="Get Tracy..." Visibility="Collapsed" Tooltip="tracy-profiler.exe was not found (next to the editor, in the launcher's tools, or in the PATH). Download the Windows release (Tracy 0.14.x)."/>
+		</HBox>
+		<Separator/>
+		<HBox Spacing="8">
+			<Label Name="pf.fps" Text="" Slot.VAlign="Center" Slot.Fill="1"/>
+			<Label Name="pf.paused" Text="PAUSED" Class="warning" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Button Name="pf.pause" Text="Pause"/>
+			<Button Name="pf.reset" Text="Reset"/>
+			<Button Name="pf.copy" Text="Copy" Tooltip="Copy the measures as text (zones, hot spots, last spike, counters)."/>
+		</HBox>
+		<Custom Name="pf.graph" Height="90"/>
+		<Label Name="pf.counters" Text="" Class="dim" Wrap="true" Visibility="Collapsed"/>
+		<HBox Spacing="10">
+			<TextInput Name="pf.filter" Placeholder="Filter zones" Width="180"/>
+			<Checkbox Name="pf.sort" Text="Sort by time"/>
+			<Checkbox Name="pf.idle" Text="Hide idle" Tooltip="Hide the zones not called lately (destroyed actors, finished effects...)."/>
+			<Checkbox Name="pf.fine" Text="Fine zones" Tooltip="One zone per component type, per JS class method and per script. Costs a little while recording."/>
+		</HBox>
+		<HBox Spacing="10">
+			<Label Text="Spike (ms)" Slot.VAlign="Center"/>
+			<SpinBox Name="pf.spike" Min="0" Max="1000" Step="1" Decimals="0" Width="90" Tooltip="A frame slower than this is kept (tab Last spike). 0 : off."/>
+			<Checkbox Name="pf.freeze" Text="Pause on spike" Tooltip="The window pauses on the next spike : read it calmly, then Resume."/>
+		</HBox>
+		<TabView Name="pf.tabs" Slot.Fill="1">
+			<ScrollBox Slot.Title="Tree"><Custom Name="pf.tree"/></ScrollBox>
+			<ScrollBox Slot.Title="Hot spots"><Custom Name="pf.hot"/></ScrollBox>
+			<VBox Slot.Title="Last spike" Spacing="4">
+				<Label Name="pf.spike.info" Text="" Class="dim"/>
+				<ScrollBox Slot.Fill="1"><Custom Name="pf.spike.table"/></ScrollBox>
+			</VBox>
+		</TabView>
+	</VBox>
+</Window>

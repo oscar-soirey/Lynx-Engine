@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A window of its own (not docked) : opened by the editor, closing it hides it. -->
+<Window Title="Lynx - Post Process" Width="460" Height="640" MinWidth="320" MinHeight="240" Hidden="true">
+<!-- Post process of every player (lynx::postprocess), saved in assets/postprocess.json. Rows built by raven/PanelTools.inl. -->
+<VBox Name="post_process" Spacing="4" Slot.Padding="6">
+	<HBox Spacing="6">
+		<Button Name="pp.save" Text="Save"/>
+		<Button Name="pp.revert" Text="Revert"/>
+		<Button Name="pp.reset" Text="Reset all"/>
+		<Label Name="pp.file" Text="assets/postprocess.json" Class="dim" Slot.VAlign="Center"/>
+	</HBox>
+	<Separator/>
+	<ScrollBox Slot.Fill="1">
+		<VBox Name="pp.body" Spacing="3" Slot.Padding="0,0,8,0"/>
+	</ScrollBox>
+</VBox>
+</Window>

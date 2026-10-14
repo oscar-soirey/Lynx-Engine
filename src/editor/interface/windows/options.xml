@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A window of its own (not docked) : opened by the editor, closing it hides it. -->
+<Window Title="Lynx - Options" Width="560" Height="660" MinWidth="320" MinHeight="240" Hidden="true">
+<!-- Options : interface (every project), project settings (settings.cfg), plugins. -->
+<TabView Name="options">
+	<ScrollBox Slot.Title="Interface">
+		<VBox Spacing="6" Slot.Padding="10">
+			<Section Text="UI scale"/>
+			<Label Text="Size of the text and of every widget of the editor." Class="dim"/>
+			<HBox Spacing="6">
+				<Slider Name="options.scale" Min="50" Max="200" Step="5" Value="100" Width="220"/>
+				<Label Name="options.scale.value" Text="100 %" Width="56" Slot.VAlign="Center"/>
+			</HBox>
+			<HBox Spacing="4">
+				<Button Name="options.scale.75" Text="75%"/>
+				<Button Name="options.scale.100" Text="100%"/>
+				<Button Name="options.scale.125" Text="125%"/>
+				<Button Name="options.scale.150" Text="150%"/>
+				<Button Name="options.scale.200" Text="200%"/>
+			</HBox>
+
+			<Section Text="Theme"/>
+			<ComboBox Name="options.theme" Width="240"/>
+			<Checkbox Name="options.rounded" Text="Rounded corners"/>
+			<Label Text="Theme files : src/editor/interface/themes (set LYNX_UI_DIR to edit them while the editor runs)." Class="dim" Wrap="true"/>
+
+			<Separator Slot.Padding="0,8"/>
+			<Button Name="options.reset" Text="Reset interface"/>
+		</VBox>
+	</ScrollBox>
+
+	<ScrollBox Slot.Title="Project">
+		<VBox Spacing="6" Slot.Padding="10">
+			<Label Text="Settings of this project (settings.cfg)." Class="dim"/>
+			<Section Text="Game DLL"/>
+			<Checkbox Name="project.reload_after_build" Text="Reload the game after &quot;Compile&quot;"/>
+			<Checkbox Name="project.auto_reload" Text="Reload the game when its DLL is rebuilt" Tooltip="Build.bat or CLion rebuilt build/&lt;game&gt;.dll while the editor runs. While playing, the reload waits for Stop."/>
+			<Section Text="Display"/>
+			<Checkbox Name="project.vsync" Text="VSync" Tooltip="The editor waits for the screen between two frames."/>
+			<Section Text="Audio"/>
+			<PropertyRow Label="Master volume">
+				<Slider Name="project.volume" Min="0" Max="2" Step="0.01" Slot.Fill="1"/>
+				<Label Name="project.volume.value" Width="44" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<Section Text="Editor camera"/>
+			<PropertyRow Label="Camera speed">
+				<Slider Name="project.camera_speed" Min="1" Max="400" Step="1" Slot.Fill="1"/>
+				<Label Name="project.camera_speed.value" Width="44" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<Section Text="Voxels"/>
+			<PropertyRow Label="Render mode">
+				<ComboBox Name="project.render_mode" Items="Flat|Smooth|Blocky" Slot.Fill="1"/>
+			</PropertyRow>
+			<Label Text="Units : 1 = 1 voxel (positions, sizes, speeds)" Class="dim"/>
+			<Separator Slot.Padding="0,8"/>
+			<Button Name="project.reset" Text="Reset project settings"/>
+		</VBox>
+	</ScrollBox>
+
+	<ScrollBox Slot.Title="Plugins">
+		<VBox Name="plugins.page" Spacing="6" Slot.Padding="10">
+			<Label Text="Plugins of the engine and of the project (plugins.json)." Class="dim" Wrap="true"/>
+			<VBox Name="plugins.list" Spacing="4"/>
+		</VBox>
+	</ScrollBox>
+</TabView>
+</Window>

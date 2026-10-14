@@ -19,14 +19,16 @@ struct GLFWwindow;
 
 namespace lynx::editor::input_settings
 {
-	// `file` : the project's input.json (it may not exist yet).
+	// `file` : the project's input.json (it may not exist yet). The window is
+	// unused (the editor is Raven : nullptr).
 	void Init(GLFWwindow* window, const std::filesystem::path& file);
 
 	// Once per frame, before the editor shortcuts (gamepad capture...).
 	void Update();
 
-	// Draws the window. `open` : visibility flag (window close button).
-	void Draw(bool* open);
+	// Opens the window (windows/input_settings.xml) ; closing it hides it.
+	void Show();
+	bool IsOpen();
 
 	// GLFW events, from the editor callbacks. true = used by a key capture :
 	// the event must not reach the editor / the game.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Actors of the level, in folders (Actor::outliner_folder). -->
+<VBox Name="outliner" Slot.Title="Outliner" Slot.Dock="Left" Slot.DockSize="0.2" Spacing="4" Slot.Padding="4">
+	<HBox Spacing="6">
+		<Button Name="outliner.new_folder" Text="+ Folder" Tooltip="New folder (drag actors onto a folder to put them in)" Focusable="false"/>
+		<TextInput Name="outliner.search" Placeholder="Search actors..." Slot.Fill="1"/>
+	</HBox>
+	<Label Name="outliner.count" Text="" Class="dim"/>
+	<TreeView Name="outliner.tree" Slot.Fill="1"/>
+</VBox>

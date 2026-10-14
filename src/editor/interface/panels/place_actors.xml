@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Classes of actors : click to place one at the pointer, or drag one into the viewport. -->
+<VBox Name="place_actors" Slot.Title="Place Actors" Slot.Dock="Bottom" Slot.DockTo="details" Slot.DockSize="0.32" Spacing="4" Slot.Padding="4">
+	<TextInput Name="place.search" Placeholder="Search actors..."/>
+	<TreeView Name="place.list" Slot.Fill="1"/>
+	<Label Text="Click : place at the pointer.  Drag : drop it in the viewport." Class="dim" Wrap="true"/>
+</VBox>

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Voxel brush. Tab switches Paint / Select anywhere in the editor. -->
+<ScrollBox Name="paint" Slot.Title="Paint" Slot.Dock="Tab" Slot.DockTo="outliner">
+	<VBox Spacing="6" Slot.Padding="8">
+		<Section Text="Mode"/>
+		<HBox Spacing="6">
+			<Button Name="paint.mode.paint" Class="mode-tile" Slot.Fill="1" Focusable="false" Tooltip="Paint (Tab : switch)">
+				<HBox Spacing="8">
+					<Custom Name="paint.mode.paint.icon" Width="30" Height="30" Slot.VAlign="Center"/>
+					<VBox Slot.VAlign="Center">
+						<Label Text="Paint"/>
+						<Label Text="draw voxels" Class="dim"/>
+					</VBox>
+				</HBox>
+			</Button>
+			<Button Name="paint.mode.select" Class="mode-tile" Slot.Fill="1" Focusable="false" Tooltip="Select (Tab : switch)">
+				<HBox Spacing="8">
+					<Custom Name="paint.mode.select.icon" Width="30" Height="30" Slot.VAlign="Center"/>
+					<VBox Slot.VAlign="Center">
+						<Label Text="Select"/>
+						<Label Text="pick actors" Class="dim"/>
+					</VBox>
+				</HBox>
+			</Button>
+		</HBox>
+		<Label Text="Tab : switch mode" Class="dim"/>
+
+		<VBox Name="paint.brush" Spacing="6">
+			<Section Text="Brush"/>
+			<PropertyRow Label="Radius">
+				<Slider Name="paint.radius" Min="1" Max="50" Step="1" Value="3" Slot.Fill="1"/>
+				<Label Name="paint.radius.value" Text="3" Width="30" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<WrapBox Name="paint.shapes" Spacing="4"/>
+			<Label Name="paint.shape.name" Text="" Class="dim"/>
+			<Checkbox Name="paint.empty" Text="Paint empty voxels" Checked="true"/>
+			<PropertyRow Label="Density">
+				<Slider Name="paint.density" Min="0" Max="1" Step="0.01" Value="1" Slot.Fill="1"/>
+				<Label Name="paint.density.value" Text="1.00" Width="44" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+
+			<Section Text="Voxel Type"/>
+			<WrapBox Name="paint.palette" Spacing="4"/>
+			<Label Name="paint.palette.hint" Text="" Class="dim" Wrap="true"/>
+		</VBox>
+	</VBox>
+</ScrollBox>

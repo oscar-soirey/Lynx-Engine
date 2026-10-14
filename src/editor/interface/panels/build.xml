@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Output of the build of the game (Build.bat / cmake). -->
+<VBox Name="build" Slot.Title="Build" Slot.Dock="Tab" Slot.DockTo="console" Spacing="4" Slot.Padding="4">
+	<HBox Spacing="6">
+		<Button Name="build.compile" Text="Compile"/>
+		<Button Name="build.cancel" Text="Cancel"/>
+		<Button Name="build.copy" Text="Copy"/>
+		<Label Name="build.status" Text="" Class="dim" Slot.VAlign="Center"/>
+	</HBox>
+	<TreeView Name="build.lines" Slot.Fill="1"/>
+</VBox>

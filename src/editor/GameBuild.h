@@ -12,6 +12,7 @@
 //   editor) so it can be reloaded.
 // =============================================================================
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -50,12 +51,9 @@ namespace lynx::editor::game_build
 	// Short text for the toolbar ("Building...", "Build failed"...), "" = none.
 	std::string ToolbarStatus();
 
-	// "Build" window (output). Opened by Start().
-	void DrawWindow();
-
-	// Only the output log (scrolling child filling the space left), for other
-	// windows (ex : the build done before the editor opens).
-	void DrawOutput();
+	// Every line of the output (the last one may be incomplete). `version`
+	// changes when the output changes : the views redraw only then.
+	std::vector<std::string> OutputAll(uint64_t* version = nullptr);
 
 	// Last `max_lines` lines of the build output.
 	std::vector<std::string> OutputTail(size_t max_lines);

@@ -1,6 +1,5 @@
 #include "ProjectInfo.h"
 
-#include <imgui/imgui.h>
 
 #include <algorithm>
 #include <atomic>
@@ -32,7 +31,7 @@ namespace lynx::editor::project_info
 		Stats g_stats;
 		bool g_has_stats = false;
 		std::future<Stats> g_scan;
-		double g_scan_time = -1000.0;   // ImGui time of the last scan start
+		double g_scan_time = -1000.0;   // time of the last scan start (seconds)
 
 		std::string Lower(std::string s)
 		{
@@ -86,13 +85,21 @@ namespace lynx::editor::project_info
 			return true;
 		}
 
-		void Row(const char* label, const std::string& value)
+		void Row(std::string& out, const char* label, const std::string& value)
 		{
-			ImGui::TableNextRow();
-			ImGui::TableSetColumnIndex(0);
-			ImGui::TextDisabled("%s", label);
-			ImGui::TableSetColumnIndex(1);
-			ImGui::TextUnformatted(value.c_str());
+			if (!out.empty())
+				out += "\n";
+			if (label[0])
+				out += std::string(label) + " : ";
+			else
+				out += "   ";
+			out += value;
+		}
+
+		double NowSeconds()
+		{
+			using namespace std::chrono;
+			return duration<double>(steady_clock::now().time_since_epoch()).count();
 		}
 	}
 
@@ -224,16 +231,14 @@ namespace lynx::editor::project_info
 	}
 
 
-	void DrawTooltip()
+	std::string TooltipText()
 	{
 		if (!g_has_project)
-		{
-			ImGui::TextDisabled("No project");
-			return;
-		}
+			return "No project";
+		std::string out;
 
 		// Background scan : started when the tooltip shows up (again after 20 s).
-		const double time = ImGui::GetTime();
+		const double time = NowSeconds();
 		if (g_scan.valid() && g_scan.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 		{
 			g_stats = g_scan.get();
@@ -248,36 +253,32 @@ namespace lynx::editor::project_info
 		}
 
 		const Project& p = g_project;
-		ImGui::TextUnformatted(p.name.c_str());
-		ImGui::SameLine();
-		ImGui::TextDisabled("Lynx project");
-		ImGui::Separator();
+		out = p.name + "  (Lynx project)\n";
 
 		const long long now = std::chrono::duration_cast<std::chrono::seconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count();
 
-		if (ImGui::BeginTable("##project_info", 2, ImGuiTableFlags_SizingFixedFit))
 		{
-			Row("Folder", p.root.string());
+			Row(out, "Folder", p.root.string());
 			if (g_has_stats)
 			{
 				const Stats& s = g_stats;
-				Row("Created", FormatDate(s.created, now));
-				Row("Modified", FormatDate(s.modified, now) + (s.last_file.empty() ? "" : "  - " + s.last_file));
-				Row("Size", FormatBytes(s.bytes) + "   (assets " + FormatBytes(s.assets_bytes) + ", build " +
+				Row(out, "Created", FormatDate(s.created, now));
+				Row(out, "Modified", FormatDate(s.modified, now) + (s.last_file.empty() ? "" : "  - " + s.last_file));
+				Row(out, "Size", FormatBytes(s.bytes) + "   (assets " + FormatBytes(s.assets_bytes) + ", build " +
 				            FormatBytes(s.build_bytes) + ")");
-				Row("Content", std::to_string(s.files) + (s.files == 1 ? " file in " : " files in ") + std::to_string(s.folders) +
+				Row(out, "Content", std::to_string(s.files) + (s.files == 1 ? " file in " : " files in ") + std::to_string(s.folders) +
 				               (s.folders == 1 ? " folder" : " folders"));
 				auto count = [](int n, const char* one, const char* many)
 				{
 					return std::to_string(n) + " " + (n == 1 ? one : many);
 				};
-				Row("", count(s.scripts, "script", "scripts") + ", " + count(s.levels, "level", "levels") + ", " +
+				Row(out, "", count(s.scripts, "script", "scripts") + ", " + count(s.levels, "level", "levels") + ", " +
 				        count(s.images, "image", "images") + ", " + count(s.sounds, "sound", "sounds") + ", " +
 				        count(s.graphs, "graph / widget", "graphs / widgets"));
 			}
 			else
-				Row("", "Reading the folder...");
+				Row(out, "", "Reading the folder...");
 			std::error_code ec;
 			if (!p.module_path.empty())
 			{
@@ -285,14 +286,14 @@ namespace lynx::editor::project_info
 				const auto t = fs::last_write_time(p.module_path, ec);
 				if (!ec)
 					module += "  - built " + FormatDate(ToUnix(t), now);
-				Row("Game module", module);
+				Row(out, "Game module", module);
 			}
 			else
-				Row("Game module", "not built yet");
+				Row(out, "Game module", "not built yet");
 			if (!p.engine_version.empty())
-				Row("Engine", "Lynx " + p.engine_version);
-			ImGui::EndTable();
+				Row(out, "Engine", "Lynx " + p.engine_version);
 		}
+		return out;
 	}
 
 

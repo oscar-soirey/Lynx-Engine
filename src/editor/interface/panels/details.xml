@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Properties of the selected actor ; the rows are built by raven/PanelDetails.inl (panels/details_rows.xml). -->
+<VBox Name="details" Slot.Title="Details" Slot.Dock="Right" Slot.DockSize="0.24" Spacing="4" Slot.Padding="6">
+	<HBox Spacing="8">
+		<Image Name="details.icon" Width="20" Height="20" Stretch="Fit" Slot.VAlign="Center" Visibility="Collapsed"/>
+		<Label Name="details.type" Text="No actor selected" Class="section" Slot.VAlign="Center" Slot.Fill="1"/>
+	</HBox>
+	<ScrollBox Name="details.scroll" Slot.Fill="1">
+		<VBox Name="details.body" Spacing="4" Slot.Padding="0,0,8,0"/>
+	</ScrollBox>
+</VBox>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Output of the editor and of the game (stdout / stderr), errors in red. -->
+<VBox Name="console" Slot.Title="Console" Slot.Dock="Bottom" Slot.DockTo="viewport.panel" Slot.DockSize="0.3" Spacing="4" Slot.Padding="4">
+	<HBox Spacing="6">
+		<TextInput Name="console.filter" Placeholder="Filter..." Width="220"/>
+		<Checkbox Name="console.errors" Text="Errors only"/>
+		<Checkbox Name="console.follow" Text="Follow" Checked="true"/>
+		<Spacer Slot.Fill="1"/>
+		<Button Name="console.fix" Text="Fix with Lynxie" Visibility="Collapsed" Tooltip="Send the last error (stack, script, line) to Lynxie"/>
+		<Button Name="console.copy" Text="Copy"/>
+		<Button Name="console.clear" Text="Clear"/>
+	</HBox>
+	<TreeView Name="console.lines" Slot.Fill="1"/>
+</VBox>

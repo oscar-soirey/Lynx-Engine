@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sprite -> voxels (SpriteVoxelizer.cpp) : options on the left, previews on the right. -->
+<VBox Name="sv" Spacing="8" Width="760">
+	<Label Text="Convert to voxels" Class="dialog-title"/>
+	<Label Name="sv.title" Text="" Class="dim"/>
+	<Separator/>
+	<HBox Spacing="16">
+		<VBox Spacing="4" Slot.Fill="1">
+			<PropertyRow Label="Size">
+				<ComboBox Name="sv.size" Items="Same size as the sprite|1 voxel = 1 pixel|Custom width" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Name="sv.width.row" Label="Width (voxels)">
+				<SpinBox Name="sv.width" Min="1" Max="256" Step="1" Decimals="0" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Label="Sampling" Tip="Nearest : the pixel at the center of each voxel (pixel art). Dominant : the most frequent color of the pixels of each voxel (better when the image is reduced a lot).">
+				<ComboBox Name="sv.sampling" Items="Nearest pixel|Dominant color" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Label="Alpha threshold">
+				<Slider Name="sv.alpha" Min="0.01" Max="1" Step="0.01" Slot.Fill="1"/>
+				<Label Name="sv.alpha.value" Width="48" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<Section Text="Colors"/>
+			<PropertyRow Label="Voxel types">
+				<ComboBox Name="sv.palette" Items="Palette + new types|Palette only|New types only" Slot.Fill="1"/>
+			</PropertyRow>
+			<PropertyRow Name="sv.tolerance.row" Label="Tolerance" Tip="A color takes an existing type when it is this close (CIELAB distance). Lower : more new types, closer to the image.">
+				<Slider Name="sv.tolerance" Min="1" Max="50" Step="1" Slot.Fill="1"/>
+				<Label Name="sv.tolerance.value" Width="48" TextAlign="Right" Slot.VAlign="Center"/>
+			</PropertyRow>
+			<VBox Name="sv.new_types" Spacing="4">
+				<PropertyRow Label="Max new types">
+					<Slider Name="sv.max_new" Min="1" Max="64" Step="1" Slot.Fill="1"/>
+					<Label Name="sv.max_new.value" Width="48" TextAlign="Right" Slot.VAlign="Center"/>
+				</PropertyRow>
+				<Checkbox Name="sv.solid" Text="New types are solid"/>
+			</VBox>
+			<Section Text="Placement"/>
+			<Checkbox Name="sv.only_empty" Text="Only fill empty voxels"/>
+			<PropertyRow Label="Then">
+				<ComboBox Name="sv.after" Items="Keep the sprite|Hide the sprite|Delete the sprite" Slot.Fill="1"/>
+			</PropertyRow>
+		</VBox>
+		<VBox Spacing="4" Width="240">
+			<Label Text="Sprite" Class="dim"/>
+			<Image Name="sv.sprite" Width="160" Height="160" Stretch="Fit"/>
+			<Label Name="sv.voxels.label" Text="Voxels" Class="dim"/>
+			<Custom Name="sv.voxels" Width="230" Height="230"/>
+		</VBox>
+	</HBox>
+	<Separator/>
+	<Label Name="sv.error" Text="" Class="warning" Wrap="true" Visibility="Collapsed"/>
+	<Label Name="sv.summary" Text=""/>
+	<WrapBox Name="sv.swatches" Spacing="3"/>
+	<HBox Spacing="6">
+		<Button Name="sv.convert" Text="Convert" Style="Primary"/>
+		<Button Name="sv.cancel" Text="Cancel"/>
+		<Label Text="Ctrl+Z undoes it" Class="dim" Slot.VAlign="Center"/>
+	</HBox>
+</VBox>

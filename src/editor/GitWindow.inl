@@ -689,17 +689,19 @@ namespace git_window
     // UI
     // -------------------------------------------------------------------------
 
-    static ImVec4 StatusColor(const FileChange& change)
+    struct GitColor { float r, g, b; };
+
+    static GitColor StatusColor(const FileChange& change)
     {
-        if (change.Conflict())          return ImVec4(1.00f, 0.35f, 0.35f, 1.f);
-        if (change.Untracked())         return ImVec4(0.55f, 0.85f, 0.55f, 1.f);
+        if (change.Conflict())          return { 1.00f, 0.35f, 0.35f };
+        if (change.Untracked())         return { 0.55f, 0.85f, 0.55f };
 
         const char c = change.Staged() ? change.index : change.worktree;
 
-        if (c == 'D')                   return ImVec4(0.95f, 0.50f, 0.45f, 1.f);
-        if (c == 'A')                   return ImVec4(0.55f, 0.85f, 0.55f, 1.f);
-        if (c == 'R' || c == 'C')       return ImVec4(0.60f, 0.75f, 1.00f, 1.f);
-        return ImVec4(0.95f, 0.80f, 0.40f, 1.f);
+        if (c == 'D')                   return { 0.95f, 0.50f, 0.45f };
+        if (c == 'A')                   return { 0.55f, 0.85f, 0.55f };
+        if (c == 'R' || c == 'C')       return { 0.60f, 0.75f, 1.00f };
+        return { 0.95f, 0.80f, 0.40f };
     }
 
     static const char* StatusWord(const FileChange& change)
@@ -719,436 +721,529 @@ namespace git_window
         }
     }
 
-    static void DrawDetails()
+
+
+    // -------------------------------------------------------------------------
+    // Interface (Raven : windows/git.xml)
+    // -------------------------------------------------------------------------
+
+    namespace view
     {
-        std::lock_guard<std::mutex> lock(state.mutex);
+        static Rid window = R_INVALID_ID;
+        static bool shown = false;
+        static Rid loading, not_found, not_repo, main, path_label;
+        static Rid branch, fetch, pull, push, sync_label, busy_label, tabs;
+        static Rid files, files_count, stage_all, unstage_all, unsaved, message, commit, amend, commit_all;
+        static Rid details_title, details, history, history_title, history_details;
+        static Rid remote, user_name, user_email, version_label, gitignore_label, gitignore_button, log;
+        static std::unordered_map<Rid, std::string> file_items;     // item -> path
+        static std::unordered_map<Rid, std::string> commit_items;   // item -> hash
+        static std::vector<std::string> branch_names;
+        static std::string files_signature = "\x01";
+        static std::string history_signature = "\x01";
+        static std::string branches_signature = "\x01";
+        static std::string details_shown = "\x01";
+        static size_t log_shown = 0;
+        static std::unique_ptr<lynx::editor::ui::Menu> menu;
+        static std::function<void()> save_level;
+    }
 
-        ImGui::TextUnformatted(state.details_title.empty() ? "Select a file or a commit" : state.details_title.c_str());
-        ImGui::BeginChild("##GitDetails", ImVec2(0.f, 0.f), true, ImGuiWindowFlags_HorizontalScrollbar);
+    namespace gui = lynx::editor::ui;
 
+    static void FillDetails(Rid tree)
+    {
+        Rtree_view_clear_items(tree);
         const std::string& text = state.details;
-        const std::vector<size_t>& lines = state.details_lines;
-
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(lines.size()));
-
-        while (clipper.Step())
-        for (int line = clipper.DisplayStart; line < clipper.DisplayEnd; ++line)
+        for (size_t start : state.details_lines)
         {
-            const size_t start = lines[static_cast<size_t>(line)];
             size_t end = text.find('\n', start);
             if (end == std::string::npos)
                 end = text.size();
             if (end > start && text[end - 1] == '\r')
                 --end;
-
-            const char* begin = text.c_str() + start;
-            const char* finish = text.c_str() + end;
-            ImVec4 color(0.85f, 0.85f, 0.85f, 1.f);
-
-            if (state.details_is_diff && end > start)
+            const std::string line = text.substr(start, end - start);
+            const Rid item = Rtree_view_add_item(tree, R_INVALID_ID, line.empty() ? " " : line.c_str());
+            if (state.details_is_diff && !line.empty())
             {
-                if (*begin == '+' && !(end - start >= 3 && std::strncmp(begin, "+++", 3) == 0))
-                    color = ImVec4(0.50f, 0.85f, 0.50f, 1.f);
-                else if (*begin == '-' && !(end - start >= 3 && std::strncmp(begin, "---", 3) == 0))
-                    color = ImVec4(0.95f, 0.50f, 0.50f, 1.f);
-                else if (*begin == '@')
-                    color = ImVec4(0.55f, 0.75f, 1.00f, 1.f);
-                else if (std::strncmp(begin, "diff ", 5) == 0 || std::strncmp(begin, "index ", 6) == 0)
-                    color = ImVec4(0.60f, 0.60f, 0.60f, 1.f);
+                if (line[0] == '+' && line.rfind("+++", 0) != 0)
+                    Rtree_item_set_text_color(item, 0.50f, 0.85f, 0.50f, 1.f);
+                else if (line[0] == '-' && line.rfind("---", 0) != 0)
+                    Rtree_item_set_text_color(item, 0.95f, 0.50f, 0.50f, 1.f);
+                else if (line[0] == '@')
+                    Rtree_item_set_text_color(item, 0.55f, 0.75f, 1.00f, 1.f);
+                else if (line.rfind("diff ", 0) == 0 || line.rfind("index ", 0) == 0)
+                    Rtree_item_set_text_color(item, 0.60f, 0.60f, 0.60f, 1.f);
             }
-
-            ImGui::PushStyleColor(ImGuiCol_Text, color);
-            ImGui::TextUnformatted(begin, finish);
-            ImGui::PopStyleColor();
         }
-
-        ImGui::EndChild();
     }
 
-    static void DrawChanges(const RepositoryState& repo, bool level_unsaved, const std::function<void()>& save_level)
+    static void ToggleStage(const RepositoryState& repo, const FileChange& change)
     {
-        // --- Left : files + commit ----------------------------------------
-        ImGui::BeginChild("##GitLeft", ImVec2(ImGui::GetContentRegionAvail().x * 0.45f, 0.f), false);
-
-        int staged = 0;
-        for (const FileChange& change : repo.changes)
-            staged += change.Staged() ? 1 : 0;
-
-        ImGui::Text("%d changed file(s), %d staged", static_cast<int>(repo.changes.size()), staged);
-
-        ImGui::BeginDisabled(state.busy || repo.changes.empty());
-        if (ImGui::SmallButton("Stage all"))
-            RunJob("Staging", { { "add", "-A" } });
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Unstage all"))
-        {
-            if (repo.no_commits)
-                RunJob("Unstaging", { { "rm", "-r", "--cached", "-q", "--ignore-unmatch", "." } });
-            else
-                RunJob("Unstaging", { { "reset", "-q" } });
-        }
-        ImGui::EndDisabled();
-
-        const float commit_height = ImGui::GetTextLineHeightWithSpacing() * 6.5f;
-        ImGui::BeginChild("##GitFiles", ImVec2(0.f, -commit_height), true);
-
-        if (repo.changes.empty())
-            ImGui::TextDisabled("Nothing to commit, the folder is clean.");
-
-        for (const FileChange& change : repo.changes)
-        {
-            ImGui::PushID(change.path.c_str());
-
-            bool is_staged = change.Staged() && !change.Unstaged();
-            const bool partly = change.Staged() && change.Unstaged();
-
-            ImGui::BeginDisabled(state.busy);
-            if (partly)
-                ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.95f, 0.80f, 0.40f, 1.f));
-
-            if (ImGui::Checkbox("##stage", &is_staged))
-            {
-                if (is_staged || partly)
-                    RunJob("Staging", { { "add", "-A", "--", change.path } });
-                else if (repo.no_commits)
-                    RunJob("Unstaging", { { "rm", "--cached", "-q", "--", change.path } });
-                else
-                    RunJob("Unstaging", { { "restore", "--staged", "--", change.path } });
-            }
-
-            if (partly)
-                ImGui::PopStyleColor();
-            ImGui::EndDisabled();
-
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip(partly ? "Partly staged : click to stage the rest" :
-                                  is_staged ? "Staged : click to unstage" : "Click to stage");
-
-            ImGui::SameLine();
-            ImGui::TextColored(StatusColor(change), "%-8s", StatusWord(change));
-            ImGui::SameLine();
-
-            std::string label = change.path;
-            if (!change.original.empty())
-                label = change.original + " -> " + change.path;
-
-            if (ImGui::Selectable(label.c_str(), state.selected_file == change.path))
-            {
-                state.selected_file = change.path;
-
-                if (change.Untracked())
-                    ShowDetails(change.path + "  (new)", {}, true, change.path);
-                else if (change.Staged() && !change.Unstaged())
-                    ShowDetails(change.path + "  (staged)", { "diff", "--cached", "--", change.path }, true);
-                else
-                    ShowDetails(change.path, { "diff", "--", change.path }, true);
-            }
-
-            if (ImGui::BeginPopupContextItem("##FileMenu"))
-            {
-                if (ImGui::MenuItem("Stage", nullptr, false, change.Unstaged() && !state.busy))
-                    RunJob("Staging", { { "add", "-A", "--", change.path } });
-
-                if (ImGui::MenuItem("Unstage", nullptr, false, change.Staged() && !state.busy && !repo.no_commits))
-                    RunJob("Unstaging", { { "restore", "--staged", "--", change.path } });
-
-                if (ImGui::MenuItem("Staged diff", nullptr, false, change.Staged() && !state.busy))
-                    ShowDetails(change.path + "  (staged)", { "diff", "--cached", "--", change.path }, true);
-
-                ImGui::Separator();
-
-                if (ImGui::MenuItem("Discard changes...", nullptr, false, !state.busy && !change.Conflict()))
-                {
-                    state.discard_target = change.path;
-                    state.discard_untracked = change.Untracked() || change.index == 'A';
-                    state.open_discard_popup = true;
-                }
-
-                if (ImGui::MenuItem("Copy path"))
-                    ImGui::SetClipboardText(change.path.c_str());
-
-                ImGui::EndPopup();
-            }
-
-            ImGui::PopID();
-        }
-
-        ImGui::EndChild();
-
-        // Commit.
-        if (level_unsaved)
-        {
-            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.f), "The level has unsaved changes.");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Save level"))
-                save_level();
-        }
-
-        ImGui::InputTextMultiline("##CommitMessage", state.message.data(), state.message.size(),
-                                  ImVec2(-1.f, ImGui::GetTextLineHeight() * 3.2f));
-
-        if (state.message[0] == '\0' && !ImGui::IsItemActive())
-        {
-            const ImVec2 min = ImGui::GetItemRectMin();
-            ImGui::GetWindowDrawList()->AddText(ImVec2(min.x + 6.f, min.y + 4.f),
-                                                ImGui::GetColorU32(ImGuiCol_TextDisabled), "Commit message");
-        }
-
-        const bool has_message = Trim(state.message.data()) != "";
-        const bool can_commit = !state.busy && has_message && (staged > 0 || state.amend);
-
-        ImGui::BeginDisabled(!can_commit);
-        if (ImGui::Button(state.amend ? "Amend last commit" : "Commit"))
-        {
-            // The message goes through a file : no quoting problem.
-            std::error_code error;
-            stdfs::create_directories(".lynx", error);
-            {
-                std::ofstream file(".lynx/git_commit_message.txt", std::ios::binary | std::ios::trunc);
-                file << state.message.data();
-            }
-
-            std::vector<std::string> commit = { "commit", "-F", ".lynx/git_commit_message.txt" };
-            if (state.amend)
-                commit.push_back("--amend");
-
-            RunJob("Committing", { commit });
-            state.message[0] = '\0';
-            state.amend = false;
-        }
-        ImGui::EndDisabled();
-
-        if (!has_message && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Write a commit message.");
-        else if (staged == 0 && !state.amend && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Stage files first (checkboxes).");
-
-        ImGui::SameLine();
-        ImGui::BeginDisabled(repo.no_commits);
-        ImGui::Checkbox("Amend", &state.amend);
-        ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        ImGui::BeginDisabled(state.busy || repo.changes.empty() || !has_message);
-        if (ImGui::Button("Stage all + Commit"))
-        {
-            std::error_code error;
-            stdfs::create_directories(".lynx", error);
-            {
-                std::ofstream file(".lynx/git_commit_message.txt", std::ios::binary | std::ios::trunc);
-                file << state.message.data();
-            }
-
-            RunJob("Committing", { { "add", "-A" }, { "commit", "-F", ".lynx/git_commit_message.txt" } });
-            state.message[0] = '\0';
-        }
-        ImGui::EndDisabled();
-
-        ImGui::EndChild();
-        ImGui::SameLine();
-
-        // --- Right : diff ------------------------------------------------------
-        ImGui::BeginChild("##GitRight", ImVec2(0.f, 0.f), false);
-        DrawDetails();
-        ImGui::EndChild();
+        const bool is_staged = change.Staged() && !change.Unstaged();
+        const bool partly = change.Staged() && change.Unstaged();
+        if (!is_staged || partly)
+            RunJob("Staging", { { "add", "-A", "--", change.path } });
+        else if (repo.no_commits)
+            RunJob("Unstaging", { { "rm", "--cached", "-q", "--", change.path } });
+        else
+            RunJob("Unstaging", { { "restore", "--staged", "--", change.path } });
     }
 
-    static void DrawHistory(const RepositoryState& repo)
+    static void SelectFile(const FileChange& change)
     {
-        ImGui::BeginChild("##GitHistory", ImVec2(ImGui::GetContentRegionAvail().x * 0.45f, 0.f), true);
-
-        if (repo.history.empty())
-            ImGui::TextDisabled(repo.no_commits ? "No commit yet." : "No history.");
-
-        std::string shown;
-        {
-            std::lock_guard<std::mutex> lock(state.mutex);
-            shown = state.details_title;
-        }
-
-        for (const CommitEntry& commit : repo.history)
-        {
-            ImGui::PushID(commit.hash.c_str());
-
-            if (ImGui::Selectable("##commit", shown.rfind(commit.hash, 0) == 0, 0,
-                                  ImVec2(0.f, ImGui::GetTextLineHeight() * 2.f + 2.f)))
-            {
-                ShowDetails(commit.hash + "  " + commit.subject,
-                            { "show", "--stat", "--patch", "--format=%H%nAuthor : %an <%ae>%nDate   : %ad%n%n%B", commit.hash }, true);
-            }
-
-            if (ImGui::BeginPopupContextItem("##CommitMenu"))
-            {
-                if (ImGui::MenuItem("Copy hash"))
-                    ImGui::SetClipboardText(commit.hash.c_str());
-                ImGui::EndPopup();
-            }
-
-            ImGui::SameLine(6.f);
-            ImGui::BeginGroup();
-            ImGui::TextUnformatted(commit.subject.c_str());
-            ImGui::TextDisabled("%s  ·  %s  ·  %s", commit.hash.c_str(), commit.author.c_str(), commit.when.c_str());
-            ImGui::EndGroup();
-
-            ImGui::PopID();
-        }
-
-        ImGui::EndChild();
-        ImGui::SameLine();
-
-        ImGui::BeginChild("##GitHistoryDetails", ImVec2(0.f, 0.f), false);
-        DrawDetails();
-        ImGui::EndChild();
+        state.selected_file = change.path;
+        if (change.Untracked())
+            ShowDetails(change.path + "  (new)", {}, true, change.path);
+        else if (change.Staged() && !change.Unstaged())
+            ShowDetails(change.path + "  (staged)", { "diff", "--cached", "--", change.path }, true);
+        else
+            ShowDetails(change.path, { "diff", "--", change.path }, true);
     }
 
-    static void DrawSettings(const RepositoryState& repo)
+    static RepositoryState CopyRepo()
     {
-        if (!state.settings_loaded)
-        {
-            std::snprintf(state.remote_url, sizeof(state.remote_url), "%s", repo.remote_url.c_str());
-            std::snprintf(state.user_name, sizeof(state.user_name), "%s", repo.user_name.c_str());
-            std::snprintf(state.user_email, sizeof(state.user_email), "%s", repo.user_email.c_str());
-            state.settings_loaded = true;
-        }
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return state.repo;
+    }
 
-        ImGui::TextDisabled("%s", repo.git_version.c_str());
-        ImGui::Spacing();
+    static const FileChange* FindChange(const RepositoryState& repo, const std::string& path)
+    {
+        for (const FileChange& c : repo.changes)
+            if (c.path == path)
+                return &c;
+        return nullptr;
+    }
 
-        ImGui::TextUnformatted("Remote \"origin\" (GitHub, GitLab... URL)");
-        ImGui::SetNextItemWidth(-90.f);
-        ImGui::InputTextWithHint("##Remote", "https://github.com/me/my-game.git", state.remote_url, sizeof(state.remote_url));
-        ImGui::SameLine();
-        ImGui::BeginDisabled(state.busy || Trim(state.remote_url).empty());
-        if (ImGui::Button("Set##remote"))
-        {
-            const std::string url = Trim(state.remote_url);
-            RunJob("Setting the remote", { { "remote", repo.remote_url.empty() ? "add" : "set-url", "origin", url } });
-            state.settings_loaded = false;
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::TextUnformatted("Author of the commits (this repository)");
-        ImGui::SetNextItemWidth(220.f);
-        ImGui::InputTextWithHint("##UserName", "Name", state.user_name, sizeof(state.user_name));
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-90.f);
-        ImGui::InputTextWithHint("##UserEmail", "email", state.user_email, sizeof(state.user_email));
-        ImGui::SameLine();
-        ImGui::BeginDisabled(state.busy || Trim(state.user_name).empty() || Trim(state.user_email).empty());
-        if (ImGui::Button("Set##user"))
-        {
-            RunJob("Setting the author", { { "config", "user.name", Trim(state.user_name) },
-                                          { "config", "user.email", Trim(state.user_email) } });
-            state.settings_loaded = false;
-        }
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
+    static void WriteMessageFile(const std::string& message)
+    {
         std::error_code error;
-        const bool has_gitignore = stdfs::exists(".gitignore", error);
-
-        ImGui::TextUnformatted(".gitignore");
-        ImGui::SameLine();
-        ImGui::TextDisabled(has_gitignore ? "(present)" : "(missing : build/ and .lynx/ would be committed)");
-
-        ImGui::BeginDisabled(has_gitignore);
-        if (ImGui::Button("Create the Lynx .gitignore"))
-        {
-            WriteDefaultGitignore();
-            Refresh();
-        }
-        ImGui::EndDisabled();
+        stdfs::create_directories(".lynx", error);
+        std::ofstream file(".lynx/git_commit_message.txt", std::ios::binary | std::ios::trunc);
+        file << message;
     }
 
-    static void DrawNotRepository()
+    static std::string MessageText()
     {
-        ImGui::TextWrapped("This project is not a Git repository yet.");
-        ImGui::TextDisabled("%s", stdfs::current_path().generic_string().c_str());
-        ImGui::Spacing();
+        const char* text = Rtext_editor_get_text(view::message);
+        return text ? text : "";
+    }
 
-        ImGui::BeginDisabled(state.busy);
-        if (ImGui::Button("Initialize a repository"))
+    static void DiscardDialog(const FileChange& change)
+    {
+        const std::string target = change.path;
+        const bool untracked = change.Untracked() || change.index == 'A';
+        gui::Ask(view::window, "Discard changes?", target + "\n\n" +
+                 (untracked ? "This new file will be DELETED (it was never committed)."
+                            : "The file goes back to its last committed version."),
+                 { "Discard", "Cancel" }, [target, untracked](int choice)
+        {
+            if (choice != 0)
+                return;
+            if (untracked)
+                RunJob("Discarding", { { "rm", "--cached", "-q", "--ignore-unmatch", "--", target },
+                                       { "clean", "-f", "-q", "--", target } });
+            else
+                RunJob("Discarding", { { "restore", "--staged", "--worktree", "--source=HEAD", "--", target } });
+        });
+    }
+
+    static void NewBranchDialog()
+    {
+        gui::AskText(view::window, "New branch", "Created from the current branch, then checked out.", "",
+            [](const std::string& typed)
+            {
+                const std::string name = Trim(typed);
+                RunJob("Creating the branch", { { "switch", "-c", name } });
+            },
+            [](const std::string& typed) -> std::string
+            {
+                const std::string name = Trim(typed);
+                if (name.empty())
+                    return "Type a name.";
+                if (name.find_first_of(" ~^:?*[\\") != std::string::npos)
+                    return "No space nor ~ ^ : ? * [ \\ in a branch name.";
+                return "";
+            });
+    }
+
+    static int OnGitWindowClose(Rid window, void*)
+    {
+        Rwindow_hide(window);
+        view::shown = false;
+        return R_FALSE;
+    }
+
+    static void CreateView()
+    {
+        using namespace view;
+        if (window != R_INVALID_ID)
+            return;
+        window = gui::LoadWindow("windows/git.xml");
+        if (window == R_INVALID_ID)
+            return;
+        auto find = [](const char* n) { return gui::Find(view::window, n); };
+        loading = find("git.loading");
+        not_found = find("git.not_found");
+        not_repo = find("git.not_repo");
+        main = find("git.main");
+        path_label = find("git.path");
+        branch = find("git.branch");
+        fetch = find("git.fetch");
+        pull = find("git.pull");
+        push = find("git.push");
+        sync_label = find("git.sync");
+        busy_label = find("git.busy");
+        tabs = find("git.tabs");
+        files = find("git.files");
+        files_count = find("git.files.count");
+        stage_all = find("git.stage_all");
+        unstage_all = find("git.unstage_all");
+        unsaved = find("git.unsaved");
+        message = find("git.message");
+        commit = find("git.commit");
+        amend = find("git.amend");
+        commit_all = find("git.commit_all");
+        details_title = find("git.details.title");
+        details = find("git.details");
+        history = find("git.history");
+        history_title = find("git.history.title");
+        history_details = find("git.history.details");
+        remote = find("git.remote");
+        user_name = find("git.user_name");
+        user_email = find("git.user_email");
+        version_label = find("git.version");
+        gitignore_label = find("git.gitignore");
+        gitignore_button = find("git.gitignore.create");
+        log = find("git.log");
+
+        Rtext_editor_set_placeholder(message, "Commit message");
+        Rtext_editor_set_word_wrap(message, R_TRUE);
+        Rtext_editor_set_line_numbers(message, R_FALSE);
+
+        gui::OnClick(find("git.retry"), []() { Refresh(); });
+        gui::OnClick(find("git.init"), []()
         {
             RunJob("Initializing", { { "init", "-b", "main" } }, []() { WriteDefaultGitignore(); });
             state.settings_loaded = false;
-        }
-        ImGui::EndDisabled();
+        });
+        gui::OnSelect(branch, [](int index)
+        {
+            if (index < 0 || index >= static_cast<int>(view::branch_names.size()))
+                return;
+            const std::string name = view::branch_names[static_cast<size_t>(index)];
+            const RepositoryState repo = CopyRepo();
+            if (name != repo.branch)
+                RunJob("Switching branch", { { "switch", name } });
+        });
+        gui::OnClick(find("git.new_branch"), []() { NewBranchDialog(); });
+        gui::OnClick(fetch, []() { RunJob("Fetching", { { "fetch", "--prune" } }); });
+        gui::OnClick(pull, []() { RunJob("Pulling", { { "pull", "--ff-only" } }); });
+        gui::OnClick(push, []()
+        {
+            const RepositoryState repo = CopyRepo();
+            if (repo.no_commits)
+                return;
+            if (repo.upstream.empty())
+                RunJob("Pushing", { { "push", "-u", "origin", repo.branch } });
+            else
+                RunJob("Pushing", { { "push" } });
+        });
 
-        ImGui::TextDisabled("Creates .git/ and a .gitignore (build/, .lynx/, editor layout files).");
+        gui::OnClick(stage_all, []() { RunJob("Staging", { { "add", "-A" } }); });
+        gui::OnClick(unstage_all, []()
+        {
+            if (CopyRepo().no_commits)
+                RunJob("Unstaging", { { "rm", "-r", "--cached", "-q", "--ignore-unmatch", "." } });
+            else
+                RunJob("Unstaging", { { "reset", "-q" } });
+        });
+        gui::OnClick(find("git.save_level"), []() { if (view::save_level) view::save_level(); });
+        gui::OnTreeSelect(files, [](Rid item)
+        {
+            auto it = view::file_items.find(item);
+            if (it == view::file_items.end())
+                return;
+            const RepositoryState repo = CopyRepo();
+            if (const FileChange* change = FindChange(repo, it->second))
+                SelectFile(*change);
+        });
+        // Double click : stage / unstage.
+        gui::OnTreeActivate(files, [](Rid item)
+        {
+            auto it = view::file_items.find(item);
+            if (it == view::file_items.end() || state.busy)
+                return;
+            const RepositoryState repo = CopyRepo();
+            if (const FileChange* change = FindChange(repo, it->second))
+                ToggleStage(repo, *change);
+        });
+        gui::OnTreeContext(files, [](Rid item, float, float)
+        {
+            auto it = view::file_items.find(item);
+            if (it == view::file_items.end())
+                return;
+            const RepositoryState repo = CopyRepo();
+            const FileChange* found = FindChange(repo, it->second);
+            if (!found)
+                return;
+            const FileChange change = *found;
+            const bool no_commits = repo.no_commits;
+            view::menu = std::make_unique<gui::Menu>(view::window);
+            view::menu->Item("Stage", [change]() { RunJob("Staging", { { "add", "-A", "--", change.path } }); },
+                             change.Unstaged() && !state.busy);
+            view::menu->Item("Unstage", [change]() { RunJob("Unstaging", { { "restore", "--staged", "--", change.path } }); },
+                             change.Staged() && !state.busy && !no_commits);
+            view::menu->Item("Staged diff", [change]()
+            {
+                ShowDetails(change.path + "  (staged)", { "diff", "--cached", "--", change.path }, true);
+            }, change.Staged() && !state.busy);
+            view::menu->Separator();
+            view::menu->Item("Discard changes...", [change]() { DiscardDialog(change); }, !state.busy && !change.Conflict());
+            view::menu->Item("Copy path", [change]() { Rclipboard_set_text(change.path.c_str()); });
+            view::menu->Open();
+        });
+
+        auto do_commit = [](bool stage_everything)
+        {
+            const std::string text = MessageText();
+            if (Trim(text).empty())
+                return;
+            WriteMessageFile(text);
+            if (stage_everything)
+                RunJob("Committing", { { "add", "-A" }, { "commit", "-F", ".lynx/git_commit_message.txt" } });
+            else
+            {
+                std::vector<std::string> args = { "commit", "-F", ".lynx/git_commit_message.txt" };
+                if (state.amend)
+                    args.push_back("--amend");
+                RunJob("Committing", { args });
+            }
+            Rtext_editor_set_text(view::message, "");
+            state.amend = false;
+            gui::SetChecked(view::amend, false);
+        };
+        gui::OnClick(commit, [do_commit]() { do_commit(false); });
+        gui::OnClick(commit_all, [do_commit]() { do_commit(true); });
+        gui::OnToggle(amend, [](bool on) { state.amend = on; });
+
+        gui::OnTreeSelect(history, [](Rid item)
+        {
+            auto it = view::commit_items.find(item);
+            if (it == view::commit_items.end())
+                return;
+            const RepositoryState repo = CopyRepo();
+            for (const CommitEntry& c : repo.history)
+                if (c.hash == it->second)
+                    ShowDetails(c.hash + "  " + c.subject,
+                                { "show", "--stat", "--patch", "--format=%H%nAuthor : %an <%ae>%nDate   : %ad%n%n%B", c.hash }, true);
+        });
+        gui::OnTreeContext(history, [](Rid item, float, float)
+        {
+            auto it = view::commit_items.find(item);
+            if (it == view::commit_items.end())
+                return;
+            const std::string hash = it->second;
+            view::menu = std::make_unique<gui::Menu>(view::window);
+            view::menu->Item("Copy hash", [hash]() { Rclipboard_set_text(hash.c_str()); });
+            view::menu->Open();
+        });
+
+        gui::OnClick(find("git.remote.set"), []()
+        {
+            const char* text = Rtext_input_get_text(view::remote);
+            const std::string url = Trim(text ? text : "");
+            if (url.empty())
+                return;
+            RunJob("Setting the remote", { { "remote", CopyRepo().remote_url.empty() ? "add" : "set-url", "origin", url } });
+            state.settings_loaded = false;
+        });
+        gui::OnClick(find("git.user.set"), []()
+        {
+            const char* n = Rtext_input_get_text(view::user_name);
+            const char* e = Rtext_input_get_text(view::user_email);
+            const std::string name = Trim(n ? n : ""), email = Trim(e ? e : "");
+            if (name.empty() || email.empty())
+                return;
+            RunJob("Setting the author", { { "config", "user.name", name }, { "config", "user.email", email } });
+            state.settings_loaded = false;
+        });
+        gui::OnClick(gitignore_button, []()
+        {
+            WriteDefaultGitignore();
+            Refresh();
+        });
+        Rwindow_set_close_callback(window, OnGitWindowClose, nullptr);
     }
 
-    static void DrawPopups()
+    static void UpdateView(const RepositoryState& repo, bool level_unsaved)
     {
-        if (state.open_discard_popup)
-        {
-            ImGui::OpenPopup("Discard changes?##Git");
-            state.open_discard_popup = false;
-        }
+        using namespace view;
+        const bool reading = !state.refreshed_once || (!repo.git_found && state.worker_running);
+        gui::SetVisible(loading, reading);
+        gui::SetVisible(not_found, !reading && !repo.git_found);
+        gui::SetVisible(not_repo, !reading && repo.git_found && !repo.is_repository);
+        gui::SetVisible(main, !reading && repo.git_found && repo.is_repository);
+        gui::SetText(path_label, stdfs::current_path().generic_string());
+        if (reading || !repo.git_found || !repo.is_repository)
+            return;
 
-        if (ImGui::BeginPopupModal("Discard changes?##Git", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            ImGui::TextUnformatted(state.discard_target.c_str());
-            ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.f),
-                               state.discard_untracked
-                                   ? "This new file will be DELETED (it was never committed)."
-                                   : "The file goes back to its last committed version.");
+        const bool busy = state.busy;
+        const bool has_remote = !repo.remote_url.empty();
 
-            if (ImGui::Button("Discard", ImVec2(110.f, 0.f)))
+        // Branches.
+        std::string bs = repo.branch + "|";
+        for (const std::string& b : repo.branches)
+            bs += b + "|";
+        if (bs != branches_signature)
+        {
+            branches_signature = bs;
+            branch_names = repo.branches;
+            if (std::find(branch_names.begin(), branch_names.end(), repo.branch) == branch_names.end())
+                branch_names.insert(branch_names.begin(), repo.branch.empty() ? "(detached)" : repo.branch);
+            Rcombo_box_clear_items(branch);
+            int current = 0;
+            for (size_t i = 0; i < branch_names.size(); ++i)
             {
-                if (state.discard_untracked)
-                    RunJob("Discarding", { { "rm", "--cached", "-q", "--ignore-unmatch", "--", state.discard_target },
-                                           { "clean", "-f", "-q", "--", state.discard_target } });
-                else
-                    RunJob("Discarding", { { "restore", "--staged", "--worktree", "--source=HEAD", "--", state.discard_target } });
+                Rcombo_box_add_item(branch, branch_names[i].c_str());
+                if (branch_names[i] == repo.branch)
+                    current = static_cast<int>(i);
+            }
+            Rcombo_box_set_selected(branch, current);
+        }
+        gui::SetEnabled(branch, !busy);
+        gui::SetEnabled(fetch, !busy && has_remote);
+        gui::SetEnabled(pull, !busy && has_remote);
+        gui::SetEnabled(push, !busy && has_remote && !repo.no_commits);
+        gui::SetText(pull, repo.behind > 0 ? "Pull (" + std::to_string(repo.behind) + ")" : std::string("Pull"));
+        gui::SetText(push, repo.ahead > 0 ? "Push (" + std::to_string(repo.ahead) + ")" : std::string("Push"));
+        std::string sync;
+        if (!has_remote)
+            sync = "no remote (Settings tab)";
+        else if (repo.upstream.empty())
+            sync = "not pushed yet";
+        else if (repo.ahead == 0 && repo.behind == 0)
+            sync = "up to date with " + repo.upstream;
+        else
+            sync = repo.upstream + " : " + std::to_string(repo.ahead) + " ahead, " + std::to_string(repo.behind) + " behind";
+        gui::SetText(sync_label, sync);
+        gui::SetText(busy_label, busy ? state.busy_label + "..." : std::string());
 
-                ImGui::CloseCurrentPopup();
+        // Files.
+        int staged = 0;
+        std::string fs_sig;
+        for (const FileChange& c : repo.changes)
+        {
+            staged += c.Staged() ? 1 : 0;
+            fs_sig += c.index;
+            fs_sig += c.worktree;
+            fs_sig += c.path + "|";
+        }
+        if (fs_sig != files_signature)
+        {
+            files_signature = fs_sig;
+            Rtree_view_clear_items(files);
+            file_items.clear();
+            for (const FileChange& c : repo.changes)
+            {
+                const bool is_staged = c.Staged() && !c.Unstaged();
+                const bool partly = c.Staged() && c.Unstaged();
+                char word[16];
+                std::snprintf(word, sizeof(word), "%-9s", StatusWord(c));
+                const std::string label = std::string(is_staged ? "[x] " : partly ? "[-] " : "[ ] ") + word +
+                                          (c.original.empty() ? c.path : c.original + " -> " + c.path);
+                const Rid item = Rtree_view_add_item(files, R_INVALID_ID, label.c_str());
+                const GitColor color = StatusColor(c);
+                Rtree_item_set_text_color(item, color.r, color.g, color.b, 1.f);
+                file_items[item] = c.path;
+                if (c.path == state.selected_file)
+                    Rtree_view_set_selected_item(files, item);
             }
 
-            ImGui::SameLine();
-
-            if (ImGui::Button("Cancel", ImVec2(110.f, 0.f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-                ImGui::CloseCurrentPopup();
-
-            ImGui::EndPopup();
         }
+        char count[96];
+        std::snprintf(count, sizeof(count), "%d changed file(s), %d staged   (double click : stage / unstage)",
+                      static_cast<int>(repo.changes.size()), staged);
+        gui::SetText(files_count, repo.changes.empty() ? "Nothing to commit, the folder is clean." : count);
+        gui::SetEnabled(stage_all, !busy && !repo.changes.empty());
+        gui::SetEnabled(unstage_all, !busy && !repo.changes.empty());
+        gui::SetVisible(unsaved, level_unsaved);
 
-        if (state.open_new_branch_popup)
+        const bool has_message = !Trim(MessageText()).empty();
+        gui::SetEnabled(commit, !busy && has_message && (staged > 0 || state.amend));
+        gui::SetText(commit, state.amend ? "Amend last commit" : "Commit");
+        gui::SetTooltip(commit, !has_message ? "Write a commit message." :
+                                (staged == 0 && !state.amend) ? "Stage files first (double click on a file)." : "");
+        gui::SetEnabled(amend, !repo.no_commits);
+        gui::SetEnabled(commit_all, !busy && !repo.changes.empty() && has_message);
+
+        // History.
+        std::string hs;
+        for (const CommitEntry& c : repo.history)
+            hs += c.hash;
+        if (hs != history_signature)
         {
-            ImGui::OpenPopup("New branch##Git");
-            state.open_new_branch_popup = false;
-        }
-
-        if (ImGui::BeginPopupModal("New branch##Git", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            ImGui::TextDisabled("Created from the current branch, then checked out.");
-            ImGui::SetNextItemWidth(260.f);
-
-            if (ImGui::IsWindowAppearing())
-                ImGui::SetKeyboardFocusHere();
-
-            const bool enter = ImGui::InputText("##BranchName", state.new_branch, sizeof(state.new_branch),
-                                                ImGuiInputTextFlags_EnterReturnsTrue);
-            const std::string name = Trim(state.new_branch);
-            const bool valid = !name.empty() && name.find_first_of(" ~^:?*[\\") == std::string::npos;
-
-            ImGui::BeginDisabled(!valid);
-            if (ImGui::Button("Create", ImVec2(110.f, 0.f)) || (enter && valid))
+            history_signature = hs;
+            Rtree_view_clear_items(history);
+            commit_items.clear();
+            for (const CommitEntry& c : repo.history)
             {
-                RunJob("Creating the branch", { { "switch", "-c", name } });
-                state.new_branch[0] = '\0';
-                ImGui::CloseCurrentPopup();
+                const Rid item = Rtree_view_add_item(history, R_INVALID_ID, c.subject.c_str());
+                const std::string sub = c.hash + "  -  " + c.author + "  -  " + c.when;
+                const Rid detail = Rtree_view_add_item(history, item, sub.c_str());
+                Rtree_item_set_text_color(detail, 0.6f, 0.6f, 0.62f, 1.f);
+                commit_items[item] = c.hash;
+                commit_items[detail] = c.hash;
             }
-            ImGui::EndDisabled();
-
-            ImGui::SameLine();
-
-            if (ImGui::Button("Cancel", ImVec2(110.f, 0.f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-                ImGui::CloseCurrentPopup();
-
-            ImGui::EndPopup();
+            if (repo.history.empty())
+                Rtree_view_add_item(history, R_INVALID_ID, repo.no_commits ? "No commit yet." : "No history.");
         }
+
+        // Details (diff or commit) : both tabs show them.
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            const std::string sig = state.details_title + "#" + std::to_string(state.details.size()) + "#" +
+                                    std::to_string(state.details.empty() ? 0 : static_cast<unsigned char>(state.details[0]));
+            if (sig != details_shown)
+            {
+                details_shown = sig;
+                const std::string title = state.details_title.empty() ? "Select a file or a commit" : state.details_title;
+                gui::SetText(details_title, title);
+                gui::SetText(history_title, title);
+                FillDetails(details);
+                FillDetails(history_details);
+            }
+            // Output of the commands.
+            if (state.log.size() < log_shown)
+            {
+                Rtree_view_clear_items(log);
+                log_shown = 0;
+            }
+            if (state.log.size() > log_shown)
+            {
+                const std::string fresh = state.log.substr(log_shown);
+                log_shown = state.log.size();
+                Rid last = R_INVALID_ID;
+                for (const std::string& line : SplitLines(fresh))
+                    last = Rtree_view_add_item(log, R_INVALID_ID, line.empty() ? " " : line.c_str());
+                if (last != R_INVALID_ID)
+                    Rtree_view_scroll_to_item(log, last);
+            }
+        }
+
+        // Settings.
+        if (!state.settings_loaded)
+        {
+            Rtext_input_set_text(remote, repo.remote_url.c_str());
+            Rtext_input_set_text(user_name, repo.user_name.c_str());
+            Rtext_input_set_text(user_email, repo.user_email.c_str());
+            state.settings_loaded = true;
+        }
+        gui::SetText(version_label, repo.git_version);
+        std::error_code error;
+        const bool has_gitignore = stdfs::exists(".gitignore", error);
+        gui::SetText(gitignore_label, has_gitignore ? ".gitignore (present)"
+                                                    : ".gitignore (missing : build/ and .lynx/ would be committed)");
+        gui::SetEnabled(gitignore_button, !has_gitignore);
     }
 
 
@@ -1184,173 +1279,34 @@ namespace git_window
         }
     }
 
-    // `level_unsaved` / `save_level` : the commit area offers to save first.
-    static void Draw(bool* open, bool level_unsaved, const std::function<void()>& save_level)
+    static void Show()
     {
-        if (open && !*open)
+        CreateView();
+        if (view::window == R_INVALID_ID)
             return;
+        Rwindow_show(view::window);
+        view::shown = true;
+    }
 
-        ImGui::SetNextWindowSize(ImVec2(980.f, 560.f), ImGuiCond_FirstUseEver);
+    static bool IsOpen()
+    {
+        return view::shown;
+    }
 
-        if (!ImGui::Begin("Git", open))
-        {
-            ImGui::End();
+    // Every frame while the window is open. `level_unsaved` / `save_level` :
+    // the commit area offers to save the level first.
+    static void Frame(bool level_unsaved, const std::function<void()>& save_level)
+    {
+        if (!view::shown)
             return;
-        }
+        view::save_level = save_level;
 
         // Status : at the first frame, then every 4 s while visible.
         if (!state.worker_running &&
             (!state.refreshed_once || GitClock::now() - state.last_refresh > std::chrono::seconds(4)))
             Refresh();
 
-        RepositoryState repo;
-        {
-            std::lock_guard<std::mutex> lock(state.mutex);
-            repo = state.repo;
-        }
-
-        if (!state.refreshed_once || (!repo.git_found && state.worker_running))
-        {
-            ImGui::TextDisabled("Reading the repository...");
-        }
-        else if (!repo.git_found)
-        {
-            ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f), "Git was not found.");
-            ImGui::TextWrapped("Install Git (https://git-scm.com) and make sure \"git\" works in a terminal, "
-                               "then restart the editor.");
-            if (ImGui::Button("Retry"))
-                Refresh();
-        }
-        else if (!repo.is_repository)
-        {
-            DrawNotRepository();
-        }
-        else
-        {
-            // --- Toolbar : branch, sync ----------------------------------------
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted("Branch");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(200.f);
-
-            ImGui::BeginDisabled(state.busy);
-            if (ImGui::BeginCombo("##Branch", repo.branch.empty() ? "(detached)" : repo.branch.c_str()))
-            {
-                for (const std::string& branch : repo.branches)
-                {
-                    if (ImGui::Selectable(branch.c_str(), branch == repo.branch) && branch != repo.branch)
-                        RunJob("Switching branch", { { "switch", branch } });
-                }
-
-                ImGui::Separator();
-
-                if (ImGui::Selectable("New branch..."))
-                    state.open_new_branch_popup = true;
-
-                ImGui::EndCombo();
-            }
-
-            ImGui::SameLine();
-
-            const bool has_remote = !repo.remote_url.empty();
-
-            if (ImGui::Button("Fetch") && has_remote)
-                RunJob("Fetching", { { "fetch", "--prune" } });
-
-            ImGui::SameLine();
-
-            std::string pull_label = "Pull";
-            if (repo.behind > 0)
-                pull_label += " (" + std::to_string(repo.behind) + ")";
-
-            if (ImGui::Button((pull_label + "##pull").c_str()) && has_remote)
-                RunJob("Pulling", { { "pull", "--ff-only" } });
-
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("git pull --ff-only : refuses to merge if both sides changed (do it in a terminal then).");
-
-            ImGui::SameLine();
-
-            std::string push_label = "Push";
-            if (repo.ahead > 0)
-                push_label += " (" + std::to_string(repo.ahead) + ")";
-
-            if (ImGui::Button((push_label + "##push").c_str()) && has_remote && !repo.no_commits)
-            {
-                if (repo.upstream.empty())
-                    RunJob("Pushing", { { "push", "-u", "origin", repo.branch } });
-                else
-                    RunJob("Pushing", { { "push" } });
-            }
-            ImGui::EndDisabled();
-
-            ImGui::SameLine();
-
-            if (!has_remote)
-                ImGui::TextDisabled("no remote (Settings tab)");
-            else if (repo.upstream.empty())
-                ImGui::TextDisabled("not pushed yet");
-            else if (repo.ahead == 0 && repo.behind == 0)
-                ImGui::TextDisabled("up to date with %s", repo.upstream.c_str());
-            else
-                ImGui::TextDisabled("%s : %d ahead, %d behind", repo.upstream.c_str(), repo.ahead, repo.behind);
-
-            ImGui::SameLine();
-
-            if (state.busy)
-                ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.f), "  %s...", state.busy_label.c_str());
-
-            // --- Tabs ------------------------------------------------------------
-            const float log_height = ImGui::GetTextLineHeightWithSpacing() * 5.f;
-
-            ImGui::BeginChild("##GitMain", ImVec2(0.f, -log_height), false);
-
-            if (ImGui::BeginTabBar("##GitTabs"))
-            {
-                std::string changes_label = "Changes";
-                if (!repo.changes.empty())
-                    changes_label += " (" + std::to_string(repo.changes.size()) + ")";
-
-                if (ImGui::BeginTabItem((changes_label + "###GitChanges").c_str()))
-                {
-                    DrawChanges(repo, level_unsaved, save_level);
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("History"))
-                {
-                    DrawHistory(repo);
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Settings"))
-                {
-                    DrawSettings(repo);
-                    ImGui::EndTabItem();
-                }
-
-                ImGui::EndTabBar();
-            }
-
-            ImGui::EndChild();
-
-            // --- Output of the commands ------------------------------------------
-            ImGui::BeginChild("##GitLog", ImVec2(0.f, 0.f), true, ImGuiWindowFlags_HorizontalScrollbar);
-            {
-                std::lock_guard<std::mutex> lock(state.mutex);
-                ImGui::TextUnformatted(state.log.c_str(), state.log.c_str() + state.log.size());
-
-                if (state.log_scroll)
-                {
-                    ImGui::SetScrollHereY(1.f);
-                    state.log_scroll = false;
-                }
-            }
-            ImGui::EndChild();
-        }
-
-        DrawPopups();
-        ImGui::End();
+        UpdateView(CopyRepo(), level_unsaved);
     }
 
     static void Shutdown()

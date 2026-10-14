@@ -30,8 +30,13 @@ namespace lynx::editor::project_info
 	/** The project of the editor (once it is opened). */
 	void SetProject(const Project& project);
 
-	/** Content of the tooltip (between BeginTooltip / EndTooltip). */
-	void DrawTooltip();
+	/**
+	 * Text of the tooltip of the project (header of the editor) : folder,
+	 * dates, size, content, game module, engine. The first call starts a
+	 * background scan of the folder (again after 20 s) : "Reading the
+	 * folder..." until it is done.
+	 */
+	std::string TooltipText();
 
 	/** Waits for the background scan (end of the editor). */
 	void Shutdown();

@@ -1,6 +1,5 @@
 #include "GameBuild.h"
 
-#include <imgui/imgui.h>
 
 #include <atomic>
 #include <cctype>
@@ -43,6 +42,7 @@ namespace lynx::editor::game_build
 
 			std::mutex mutex;
 			std::vector<std::string> lines;   // output, complete lines
+			uint64_t generation = 0;          // a new build (OutputAll)
 			std::string partial;              // last line, not finished yet
 
 			bool running = false;
@@ -229,6 +229,7 @@ namespace lynx::editor::game_build
 			std::lock_guard<std::mutex> lock(g_build.mutex);
 			g_build.lines.clear();
 			g_build.partial.clear();
+			++g_build.generation;
 		}
 
 		g_build.has_result = false;
@@ -483,56 +484,16 @@ namespace lynx::editor::game_build
 	}
 
 
-	void DrawOutput()
+	std::vector<std::string> OutputAll(uint64_t* version)
 	{
-		ImGui::BeginChild("##BuildOutput", ImVec2(0.f, 0.f), true, ImGuiWindowFlags_HorizontalScrollbar);
-
-		{
-			std::lock_guard<std::mutex> lock(g_build.mutex);
-
-			const bool at_bottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.f;
-			const int count = static_cast<int>(g_build.lines.size());
-
-			ImGuiListClipper clipper;
-			clipper.Begin(count + (g_build.partial.empty() ? 0 : 1));
-
-			while (clipper.Step())
-			{
-				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-				{
-					const std::string& line = i < count ? g_build.lines[i] : g_build.partial;
-
-					ImVec4 color;
-					bool colored = true;
-
-					if (ContainsNoCase(line, "error") || ContainsNoCase(line, "failed"))
-						color = ImVec4(0.95f, 0.45f, 0.45f, 1.f);
-					else if (ContainsNoCase(line, "warning"))
-						color = ImVec4(0.95f, 0.80f, 0.35f, 1.f);
-					else if (ContainsNoCase(line, "succeeded"))
-						color = ImVec4(0.45f, 0.85f, 0.45f, 1.f);
-					else
-						colored = false;
-
-					if (colored)
-						ImGui::PushStyleColor(ImGuiCol_Text, color);
-
-					ImGui::TextUnformatted(line.c_str());
-
-					if (colored)
-						ImGui::PopStyleColor();
-				}
-			}
-
-			// Follow the output while the view is at the bottom.
-			if (g_scroll_to_bottom || (at_bottom && g_build.running))
-			{
-				ImGui::SetScrollHereY(1.f);
-				g_scroll_to_bottom = false;
-			}
-		}
-
-		ImGui::EndChild();
+		std::lock_guard<std::mutex> lock(g_build.mutex);
+		std::vector<std::string> lines = g_build.lines;
+		if (!g_build.partial.empty())
+			lines.push_back(g_build.partial);
+		if (version)
+			*version = g_build.lines.size() * 1000003ull + g_build.partial.size() + (g_build.running ? 7ull : 0ull) +
+			           g_build.generation * 0x9E3779B97F4A7C15ull;
+		return lines;
 	}
 
 
@@ -560,62 +521,7 @@ namespace lynx::editor::game_build
 	}
 
 
-	void DrawWindow()
-	{
-		if (!g_window_open)
-			return;
 
-		ImGui::SetNextWindowSize(ImVec2(820.f, 420.f), ImGuiCond_FirstUseEver);
-
-		if (!ImGui::Begin("Build", &g_window_open))
-		{
-			ImGui::End();
-			return;
-		}
-
-		ImGui::BeginDisabled(g_build.running);
-
-		if (ImGui::Button("Compile"))
-			Start();
-
-		ImGui::EndDisabled();
-
-		ImGui::SameLine();
-		ImGui::BeginDisabled(!g_build.running);
-
-		if (ImGui::Button("Cancel"))
-			Cancel();
-
-		ImGui::EndDisabled();
-
-		ImGui::SameLine();
-
-		if (ImGui::Button("Copy"))
-		{
-			std::string all;
-			{
-				std::lock_guard<std::mutex> lock(g_build.mutex);
-
-				for (const std::string& line : g_build.lines)
-					all += line + "\n";
-
-				all += g_build.partial;
-			}
-
-			ImGui::SetClipboardText(all.c_str());
-		}
-
-		ImGui::SameLine();
-
-		const std::string status = ToolbarStatus();
-		ImGui::TextDisabled("%s", status.c_str());
-
-		ImGui::Separator();
-
-		DrawOutput();
-
-		ImGui::End();
-	}
 
 
 	// =========================================================================

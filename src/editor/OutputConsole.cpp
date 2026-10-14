@@ -1,8 +1,4 @@
 #include "OutputConsole.h"
-#include "EditorIcons.h"
-#include "TextSelection.h"
-
-#include <imgui/imgui.h>
 #include <hrl/hrl.h>
 
 #include <algorithm>
@@ -39,7 +35,10 @@ namespace lynx::editor::output_console
 		{
 			std::string text;
 			Kind kind = Kind::Normal;
+			uint64_t sequence = 0;   // 1, 2, 3... (GetSince)
 		};
+
+		uint64_t g_sequence = 0;
 
 		constexpr size_t kMaxLines = 20000;
 
@@ -83,13 +82,6 @@ namespace lynx::editor::output_console
 
 		FixHandler g_fix_handler;
 
-		// UI
-		bool g_auto_scroll = true;
-		bool g_show_normal = true;
-		bool g_show_warnings = true;
-		bool g_show_errors = true;
-		char g_filter[128] = {};
-
 		std::string Lower(std::string text)
 		{
 			std::transform(text.begin(), text.end(), text.begin(),
@@ -127,10 +119,10 @@ namespace lynx::editor::output_console
 					g_screen_queue.pop_front();
 					++g_screen_dropped;
 				}
-				g_screen_queue.push_back({ text, kind });
+				g_screen_queue.push_back({ text, kind, 0 });
 			}
 
-			g_lines.push_back({ std::move(text), kind });
+			g_lines.push_back({ std::move(text), kind, ++g_sequence });
 			while (g_lines.size() > kMaxLines)
 				g_lines.pop_front();
 			g_scroll = true;
@@ -380,183 +372,83 @@ namespace lynx::editor::output_console
 			HRL_SetScreenMessageTextColor(scene, 1.f, 1.f, 1.f, 1.f);
 	}
 
-	void Draw(bool* open)
+	uint64_t LastSequence()
 	{
-		if (open && !*open)
-			return;
-
-		ImGui::SetNextWindowSize(ImVec2(760.f, 320.f), ImGuiCond_FirstUseEver);
-		if (!ImGui::Begin("Console", open))
-		{
-			ImGui::End();
-			return;
-		}
-
 		std::lock_guard<std::mutex> lock(g_mutex);
+		return g_sequence;
+	}
 
-		int warnings = 0;
-		int errors = 0;
+	void GetSince(uint64_t after, std::vector<ConsoleLine>& out, size_t max_lines)
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		size_t first = g_lines.size();
+		while (first > 0 && g_lines[first - 1].sequence > after && g_lines.size() - first < max_lines)
+			--first;
+		for (size_t i = first; i < g_lines.size(); ++i)
+			out.push_back({ g_lines[i].text, static_cast<int>(g_lines[i].kind), g_lines[i].sequence });
+	}
+
+	std::vector<std::string> AllText()
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		std::vector<std::string> lines;
+		lines.reserve(g_lines.size());
 		for (const Line& line : g_lines)
+			lines.push_back(line.text);
+		return lines;
+	}
+
+	void Clear()
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		g_lines.clear();
+	}
+
+	bool OnScreen()
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		if (!g_settings_loaded)
+			LoadSettings();
+		return g_on_screen;
+	}
+
+	bool OnScreenErrorsOnly()
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		if (!g_settings_loaded)
+			LoadSettings();
+		return g_on_screen_errors_only;
+	}
+
+	void SetOnScreen(bool on, bool errors_only)
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		g_settings_loaded = true;
+		g_on_screen = on;
+		g_on_screen_errors_only = errors_only;
+		SaveSettings();
+	}
+
+	bool AskFix(const std::vector<std::string>& lines, size_t error_index)
+	{
+		FixHandler handler;
 		{
-			warnings += line.kind == Kind::Warning;
-			errors += line.kind == Kind::Error;
+			std::lock_guard<std::mutex> lock(g_mutex);
+			handler = g_fix_handler;
 		}
+		if (!handler)
+			return false;
+		std::string display;
+		const std::string prompt = BuildFixPrompt(lines, error_index, &display);
+		if (prompt.empty())
+			return false;
+		handler(prompt, display);
+		return true;
+	}
 
-		if (icons::ButtonWithLabel("Clear", icons::Icon::Clear))
-		{
-			g_lines.clear();
-			g_partial.clear();
-		}
-		ImGui::SameLine();
-		if (icons::ButtonWithLabel("Copy", icons::Icon::Copy))
-		{
-			std::string all;
-			for (const Line& line : g_lines)
-				all += line.text + "\n";
-			ImGui::SetClipboardText(all.c_str());
-		}
-		// Ask Lynxie (the AI assistant) to fix the last error.
-		size_t last_error = g_lines.size();
-		for (size_t i = g_lines.size(); i > 0; --i)
-			if (g_lines[i - 1].kind == Kind::Error)
-			{
-				last_error = i - 1;
-				break;
-			}
-		std::vector<std::string> fix_lines;   // filled when a fix is asked
-		size_t fix_index = g_lines.size();
-		if (g_fix_handler)
-		{
-			ImGui::SameLine();
-			ImGui::BeginDisabled(last_error >= g_lines.size());
-			if (ImGui::Button("Fix with Lynxie"))
-				fix_index = last_error;
-			ImGui::EndDisabled();
-			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-				ImGui::SetTooltip(last_error < g_lines.size()
-					? "Sends the last error (with its stack and script) to Lynxie, who fixes the code.\n"
-					  "Hover an error line for its own button."
-					: "No error in the Console.");
-		}
-		ImGui::SameLine();
-		ImGui::Checkbox("Auto-scroll", &g_auto_scroll);
-		ImGui::SameLine();
-		if (ImGui::Checkbox("On screen", &g_on_screen))
-			SaveSettings();
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Also show the new lines over the scene (viewport and game), for a few seconds.");
-		if (g_on_screen)
-		{
-			ImGui::SameLine();
-			if (ImGui::Checkbox("Errors only", &g_on_screen_errors_only))
-				SaveSettings();
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("On screen : only the warnings and the errors.");
-		}
-		ImGui::SameLine();
-		ImGui::Checkbox("Log", &g_show_normal);
-		ImGui::SameLine();
-		const std::string warnings_label = "Warnings (" + std::to_string(warnings) + ")";
-		ImGui::Checkbox(warnings_label.c_str(), &g_show_warnings);
-		ImGui::SameLine();
-		const std::string errors_label = "Errors (" + std::to_string(errors) + ")";
-		ImGui::Checkbox(errors_label.c_str(), &g_show_errors);
-		ImGui::SameLine();
-		ImGui::AlignTextToFramePadding();
-		icons::Draw(icons::Icon::Search, 0.f, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ImGui::SameLine(0.f, ImGui::GetStyle().ItemInnerSpacing.x);
-		ImGui::SetNextItemWidth(std::max(80.f, ImGui::GetContentRegionAvail().x));
-		ImGui::InputTextWithHint("##ConsoleFilter", "Filter", g_filter, sizeof(g_filter));
-
-		ImGui::BeginChild("##ConsoleLines", ImVec2(0.f, 0.f), true, ImGuiWindowFlags_HorizontalScrollbar);
-
-		const std::string filter = Lower(g_filter);
-		const bool filtered = !filter.empty() || !g_show_normal || !g_show_warnings || !g_show_errors;
-
-		auto visible = [&](const Line& line)
-		{
-			if ((line.kind == Kind::Normal && !g_show_normal) ||
-			    (line.kind == Kind::Warning && !g_show_warnings) ||
-			    (line.kind == Kind::Error && !g_show_errors))
-				return false;
-			return filter.empty() || Lower(line.text).find(filter) != std::string::npos;
-		};
-
-		// Selectable text (drag, double-click : a word, Ctrl+C, Ctrl+A, right
-		// click : Copy). Every visible line is recorded ; only the ones in the
-		// view are drawn (a Dummy keeps the place of the others).
-		text_selection::Begin("##ConsoleSelection");
-		const float line_h = ImGui::GetTextLineHeightWithSpacing();
-		const float view_top = ImGui::GetScrollY() - line_h;
-		const float view_bottom = ImGui::GetScrollY() + ImGui::GetWindowHeight() + line_h;
-
-		const bool console_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
-		auto draw_line = [&](const Line& line, size_t index)
-		{
-			const ImVec2 local = ImGui::GetCursorPos();
-			const ImVec2 screen = ImGui::GetCursorScreenPos();
-			if (local.y < view_top || local.y > view_bottom)
-			{
-				ImGui::Dummy(ImVec2(1.f, ImGui::GetTextLineHeight()));
-				text_selection::Record(ImGui::GetFont(), ImGui::GetFontSize(), screen, line.text.c_str());
-				return;
-			}
-			if (line.kind == Kind::Error)
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
-			else if (line.kind == Kind::Warning)
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.f));
-			ImGui::TextUnformatted(line.text.c_str());
-			if (line.kind != Kind::Normal)
-				ImGui::PopStyleColor();
-			text_selection::Record(ImGui::GetFont(), ImGui::GetFontSize(), screen, line.text.c_str());
-
-			// Error line under the mouse : "Fix with Lynxie" at the right of the view.
-			if (g_fix_handler && line.kind == Kind::Error && console_hovered)
-			{
-				const float mouse_y = ImGui::GetIO().MousePos.y;
-				if (mouse_y >= screen.y && mouse_y < screen.y + line_h)
-				{
-					const ImVec2 after = ImGui::GetCursorPos();
-					const char* label = "Fix with Lynxie";
-					const float w = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.f;
-					ImGui::SetCursorPos(ImVec2(ImGui::GetScrollX() + ImGui::GetWindowContentRegionMax().x - w, local.y));
-					ImGui::PushID(static_cast<int>(index));
-					if (ImGui::SmallButton(label))
-						fix_index = index;
-					ImGui::PopID();
-					ImGui::SetCursorPos(after);
-				}
-			}
-		};
-
-		for (size_t i = 0; i < g_lines.size(); ++i)
-			if (!filtered || visible(g_lines[i]))
-				draw_line(g_lines[i], i);
-
-		text_selection::End();
-
-		if (g_lines.empty())
-			ImGui::TextDisabled("Editor output (printf, std::cout, errors...) appears here.");
-
-		// No auto-scroll while text is selected (the selection would run away).
-		const char* selected = text_selection::GetSelectedText();
-		if (g_scroll && g_auto_scroll && !(selected && *selected))
-			ImGui::SetScrollHereY(1.f);
-		g_scroll = false;
-
-		ImGui::EndChild();
-
-		if (fix_index < g_lines.size() && g_fix_handler)
-		{
-			for (const Line& line : g_lines)
-				fix_lines.push_back(line.text);
-			std::string display;
-			const std::string prompt = BuildFixPrompt(fix_lines, fix_index, &display);
-			FixHandler handler = g_fix_handler;
-			if (!prompt.empty())
-				handler(prompt, display);   // under g_mutex : the handler must not print
-		}
-
-		ImGui::End();
+	bool CanFix()
+	{
+		std::lock_guard<std::mutex> lock(g_mutex);
+		return static_cast<bool>(g_fix_handler);
 	}
 }

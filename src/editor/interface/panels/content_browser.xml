@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Files of assets/ : folders, breadcrumbs, search, tiles (raven/PanelContentBrowser.inl). -->
+<VBox Name="content_browser" Slot.Title="Content Browser" Slot.Dock="Bottom" Slot.DockTo="outliner" Slot.DockSize="0.48" Spacing="4" Slot.Padding="4">
+	<HBox Spacing="6">
+		<Button Name="cb.lynxie" Class="tool" Focusable="false" Tooltip="Lynxie : ask about your assets, the engine, the level...">
+			<Image Name="cb.lynxie.icon" Width="34" Height="30" Stretch="Fit" TintText="true"/>
+		</Button>
+		<VBox Spacing="4" Slot.Fill="1">
+			<HBox Spacing="2">
+				<Button Name="cb.root" Class="tool" Focusable="false">
+					<HBox Spacing="4"><Icon Glyph="Folder" Size="16" Slot.VAlign="Center"/><Label Text="Assets" Slot.VAlign="Center"/></HBox>
+				</Button>
+				<HBox Name="cb.breadcrumbs" Spacing="2" Slot.Fill="1"/>
+				<Label Name="cb.count" Text="" Class="dim" Slot.VAlign="Center"/>
+			</HBox>
+			<HBox Spacing="2">
+				<Button Name="cb.back" Class="tool" Text="&lt;" Width="26" Tooltip="Back (mouse back button)" Focusable="false"/>
+				<Button Name="cb.forward" Class="tool" Text="&gt;" Width="26" Tooltip="Forward (mouse forward button)" Focusable="false"/>
+				<Button Name="cb.up" Class="tool" Text="^" Width="26" Tooltip="Parent folder" Focusable="false"/>
+				<Icon Glyph="Search" Size="16" Slot.VAlign="Center" Slot.Padding="6,0,2,0"/>
+				<TextInput Name="cb.search" Placeholder="Search in this folder" Slot.Fill="1"/>
+				<Slider Name="cb.size" Min="50" Max="250" Step="1" Value="100" Width="90" Tooltip="Size of the thumbnails (Ctrl + mouse wheel in the grid)"/>
+				<Button Name="cb.new" Text="+ New" Focusable="false"/>
+			</HBox>
+		</VBox>
+	</HBox>
+	<Separator/>
+	<TileView Name="cb.tiles" Slot.Fill="1" DragType="lynx.asset.path" EmptyText="Empty folder  (right click : new folder / new file)"/>
+</VBox>

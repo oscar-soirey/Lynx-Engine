@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- "New project" dialog of the project browser : a name, a folder, a template. -->
+<VBox Name="np" Spacing="6" Width="760" Height="520">
+	<Label Text="New project" Class="dialog-title"/>
+	<PropertyRow Label="Name">
+		<TextInput Name="np.title" Slot.Fill="1"/>
+	</PropertyRow>
+	<PropertyRow Label="Location">
+		<TextInput Name="np.location" Slot.Fill="1"/>
+		<Button Name="np.browse" Text="Browse..."/>
+	</PropertyRow>
+	<Label Name="np.folder" Text="" Class="dim" Wrap="true" Slot.Padding="134,0,0,0"/>
+	<Label Name="np.dll" Text="" Class="dim" Slot.Padding="134,0,0,0"/>
+
+	<Section Text="Template"/>
+	<TileView Name="np.templates" Layout="Rows" TileHeight="64" IconSize="48" Spacing="2" Slot.Fill="1" EmptyText="No template found."/>
+	<Label Name="np.error" Text="" Class="error" Wrap="true" Visibility="Collapsed"/>
+
+	<HBox Spacing="6">
+		<Spacer Slot.Fill="1"/>
+		<Button Name="np.cancel" Text="Cancel"/>
+		<Button Name="np.create" Text="Create and open" Style="Primary"/>
+	</HBox>
+</VBox>
