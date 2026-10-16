@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  "Buy me a coffee" (DonationPrompt.cpp) : shown when a project opens and
+  then from time to time. "Donate" opens the GitHub Sponsors page.
+-->
+<VBox Name="don" Class="dialog" Spacing="10" Width="480">
+	<Label Text="Buy me a coffee" Class="dialog-title"/>
+	<Label Text="Lynx Engine is free and open source (Apache 2.0), made by one developer on his free time. If Lynx helps you make your games, a small donation helps a lot to keep it alive and growing. Thank you!" Wrap="true"/>
+
+	<Section Text="Amount (USD)"/>
+	<HBox Spacing="6">
+		<Button Name="don.3" Text="$3"/>
+		<Button Name="don.5" Text="$5"/>
+		<Button Name="don.10" Text="$10"/>
+		<Button Name="don.20" Text="$20"/>
+		<Label Text="Other :" Slot.VAlign="Center" Slot.Padding="8,0,0,0"/>
+		<TextInput Name="don.amount" Width="80"/>
+	</HBox>
+	<Label Name="don.error" Text="" Class="error" Visibility="Collapsed"/>
+
+	<Checkbox Name="don.never" Text="Don't show this again"/>
+
+	<HBox Spacing="8">
+		<Spacer Slot.Fill="1"/>
+		<Button Name="don.later" Text="Maybe later"/>
+		<Button Name="don.donate" Text="Donate $5" Style="Primary"/>
+	</HBox>
+</VBox>

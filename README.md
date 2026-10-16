@@ -38,3 +38,11 @@ The project's documentation site covers, among other things:
 ## Author
 
 Developed by **Oscar Soirey**.
+
+## License
+
+Lynx Engine is released under the [Apache License 2.0](LICENCE.md). You can use it, modify it and ship commercial games made with it, with no royalties.
+
+## Support
+
+Lynx is free. If it helps you, you can [buy me a coffee](https://github.com/sponsors/oscar-soirey) on GitHub Sponsors.

@@ -92,6 +92,7 @@
 #include "SpriteVoxelizer.h"
 #include "ProjectInfo.h"
 #include "ShipGame.h"
+#include "DonationPrompt.h"
 #include "commands/ScriptRunner.h"
 #include <array>
 #include <chrono>
@@ -5448,6 +5449,10 @@ int main(int argc, char** argv)
 
     Rwindow_maximize(win);
     Rwindow_show(win);
+
+    // "Buy me a coffee" : a few seconds after the project opens, then from
+    // time to time (never while the game is playing).
+    lynx::editor::donation::Start(win, []() { return isPlaying; });
 
     // The loading time is not a frame.
     lastFrameTime =
