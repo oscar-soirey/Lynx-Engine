@@ -318,20 +318,51 @@ namespace lynx::editor::ui
         return widget;
     }
 
+    // Every window built by LoadWindow : Find looks in them too (the panels
+    // bind the widgets of the tool windows - Camera Shake, Post Process, 2D
+    // Lighting, Voxel World, Options... - from the main window).
+    static std::vector<Rid>& LoadedWindows()
+    {
+        static std::vector<Rid> windows;
+        return windows;
+    }
+
     Rid LoadWindow(const char* file)
     {
         const std::string path = Path(file);
         Rid window = Rwindow_create_from_xml_file(path.c_str());
         if (window == R_INVALID_ID)
             std::cerr << "[UI] Could not build the window " << path << "\n";
+        else
+            LoadedWindows().push_back(window);
         return window;
     }
 
     Rid Find(Rid scope, const char* name)
     {
         Rid widget = Rwidget_find(scope, name);
-        if (widget == R_INVALID_ID)
-            std::cerr << "[UI] No widget named \"" << name << "\"\n";
+        if (widget != R_INVALID_ID)
+            return widget;
+
+        // Not in this scope : a widget of another window of the editor.
+        std::vector<Rid>& windows = LoadedWindows();
+        for (size_t i = 0; i < windows.size();)
+        {
+            if (!Rwindow_is_valid(windows[i]))
+            {
+                windows.erase(windows.begin() + static_cast<std::ptrdiff_t>(i));
+                continue;
+            }
+            if (windows[i] != scope)
+            {
+                widget = Rwidget_find(windows[i], name);
+                if (widget != R_INVALID_ID)
+                    return widget;
+            }
+            ++i;
+        }
+
+        std::cerr << "[UI] No widget named \"" << name << "\"\n";
         return widget;
     }
 
