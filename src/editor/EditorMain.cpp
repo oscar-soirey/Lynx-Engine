@@ -93,6 +93,7 @@
 #include "ProjectInfo.h"
 #include "ShipGame.h"
 #include "DonationPrompt.h"
+#include "raven/CommandsHost.h"
 #include "commands/ScriptRunner.h"
 #include <array>
 #include <chrono>
@@ -5724,6 +5725,13 @@ int main(int argc, char** argv)
         // --------------------------------------------------------
 
         lynx::editor::commands_window::Update();
+        {
+            // Commands / Lynxie : ImGui, in a window of its own (raven/CommandsHost.cpp).
+            const bool was_open = editorWindows.commands;
+            lynx::editor::commands_host::Frame(editorWindows.commands);
+            if (was_open != editorWindows.commands)
+                SaveEditorWindowVisibility();
+        }
         git_window::Update();
         lynx::editor::command_server::Poll();
 
@@ -5870,6 +5878,7 @@ int main(int argc, char** argv)
 
     lynx::editor::game_build::Shutdown();
     lynx::editor::project_info::Shutdown();
+    lynx::editor::commands_host::Shutdown();
     lynx::editor::commands_window::Shutdown();
     git_window::Shutdown();
     lynx::editor::script_runner::Shutdown();

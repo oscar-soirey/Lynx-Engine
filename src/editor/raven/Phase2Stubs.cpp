@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 // The ImGui editor had these windows ; their Raven version comes with the next
 // phases of the port :
-//   phase 2 : Commands (Lynxie), Git, Input Settings, code editors, Profiler,
+//   phase 2 : Git, Input Settings, code editors, Profiler,
 //             Ship Game, Sprite -> voxels ;
 //   phase 3 : Widget Editor, Anim Graph / Behavior Tree, Particle Editor, the
 //             editor modules of the plugins (new Raven API).
@@ -66,19 +66,8 @@ namespace
 
 
 // ---- Commands (Python / Lynxie) ---------------------------------------------
-namespace lynx::editor::commands_window
-{
-    void Update() {}
-    void Shutdown() {}
-    void Draw(bool*) {}
-    void ShowLynxie(int) { NotYet("Lynxie"); }
-    void AskLynxie(const std::string& prompt, const std::string&)
-    {
-        NotYet("Lynxie");
-        std::cout << prompt << "\n";
-    }
-    bool IsLynxieBusy() { return false; }
-}
+// The real window (commands/CommandsWindow.cpp, ImGui), in a native window of
+// its own : raven/CommandsHost.cpp.
 
 
 // ---- Code editors : the files open in the program of the system --------------
