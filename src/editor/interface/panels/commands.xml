@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Commands : Python scripts of the project, Lynxie (local AI, Ollama), the
+  command console, the reference of every command, the AI / MCP connection.
+  Filled by src/editor/commands/CommandsWindow.cpp.
+-->
+<VBox Name="commands" Slot.Title="Commands" Slot.Dock="Tab" Slot.DockTo="console" Spacing="4" Slot.Padding="4">
+<TabView Name="cmd.tabs" Slot.Fill="1">
+
+	<!-- Scripts : the .py files of <project>/commands/ -->
+	<HBox Slot.Title="Scripts" Spacing="6" Slot.Padding="4">
+		<VBox Spacing="4" Width="260">
+			<HBox Spacing="4">
+				<Button Name="cmd.scripts.new" Text="New"/>
+				<Button Name="cmd.scripts.refresh" Text="Refresh"/>
+				<Button Name="cmd.scripts.folder" Text="Folder"/>
+			</HBox>
+			<TreeView Name="cmd.scripts.list" Slot.Fill="1"/>
+			<Label Name="cmd.scripts.empty" Text="No script. Put .py files in the &quot;commands&quot; folder of the project, or click New." Class="dim" Wrap="true" Visibility="Collapsed"/>
+		</VBox>
+		<VBox Spacing="4" Slot.Fill="1">
+			<Label Name="cmd.scripts.name" Text="Select a script"/>
+			<Label Name="cmd.scripts.desc" Text="" Class="dim" Wrap="true"/>
+			<HBox Spacing="4">
+				<TextInput Name="cmd.scripts.args" Placeholder="arguments" Width="260"/>
+				<Button Name="cmd.scripts.run" Text="Run" Style="Primary"/>
+				<Button Name="cmd.scripts.stop" Text="Stop"/>
+				<Button Name="cmd.scripts.edit" Text="Edit"/>
+				<Button Name="cmd.scripts.clear" Text="Clear"/>
+				<Label Name="cmd.scripts.running" Text="Running..." Class="success" Slot.VAlign="Center" Visibility="Collapsed"/>
+			</HBox>
+			<TreeView Name="cmd.scripts.output" Slot.Fill="1"/>
+			<HBox Spacing="6">
+				<Label Text="Python" Slot.VAlign="Center"/>
+				<TextInput Name="cmd.scripts.python" Width="260" Tooltip="Python 3 executable : python, py, or a full path (C:/Python312/python.exe)."/>
+			</HBox>
+		</VBox>
+	</HBox>
+
+	<!-- Lynxie : the local AI assistant -->
+	<VBox Slot.Title="Lynxie" Spacing="6" Slot.Padding="4">
+		<HBox Spacing="8">
+			<Image Name="cmd.ai.icon" Width="34" Height="30" Stretch="Fit" TintText="true" Slot.VAlign="Center"/>
+			<VBox Spacing="0" Slot.VAlign="Center">
+				<Label Text="Lynxie"/>
+				<Label Text="Local AI assistant (Ollama)" Class="dim"/>
+			</VBox>
+			<Spacer Slot.Fill="1"/>
+			<Label Text="Model" Slot.VAlign="Center"/>
+			<ComboBox Name="cmd.ai.model" Width="260" Slot.VAlign="Center"/>
+			<Button Name="cmd.ai.refresh" Text="Refresh models" Slot.VAlign="Center"/>
+		</HBox>
+		<Label Name="cmd.ai.status" Text="" Class="dim" Wrap="true"/>
+		<Expander Name="cmd.ai.context" Title="Context sent to the model" Visibility="Collapsed">
+			<VBox Spacing="4">
+				<HBox Spacing="6">
+					<Label Name="cmd.ai.context.info" Text="" Class="dim" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Button Name="cmd.ai.context.copy" Text="Copy"/>
+				</HBox>
+				<Label Name="cmd.ai.context.missing" Text="python/AI_API_REFERENCE.md is missing : the model does not know the Python API." Class="warning" Wrap="true" Visibility="Collapsed"/>
+				<TextEditor Name="cmd.ai.context.text" Height="220" ReadOnly="true" WordWrap="true" LineNumbers="false"/>
+			</VBox>
+		</Expander>
+		<ScrollBox Name="cmd.ai.scroll" Slot.Fill="1">
+			<VBox Name="cmd.ai.chat" Spacing="8" Slot.Padding="6"/>
+		</ScrollBox>
+		<HBox Spacing="6">
+			<TextInput Name="cmd.ai.prompt" Placeholder="Describe what Lynxie should do..." Slot.Fill="1"/>
+			<Button Name="cmd.ai.send" Text="Send" Style="Primary"/>
+		</HBox>
+		<HBox Spacing="8">
+			<Checkbox Name="cmd.ai.autofix" Text="Auto-fix errors" Tooltip="If the script fails : its changes are undone and Lynxie silently corrects it and tries again, until it works (no error in the conversation ; the output of every run is in Commands > Scripts). Untick to stop."/>
+			<Label Text="Scripts run automatically" Class="dim" Slot.VAlign="Center" Tooltip="Each script is still saved in commands/ai_output.py (Scripts tab). Its output goes to the Console."/>
+			<Button Name="cmd.ai.revert" Text="Revert file edit" Visibility="Collapsed"/>
+			<Spacer Slot.Fill="1"/>
+			<Button Name="cmd.ai.clear" Text="Clear chat"/>
+		</HBox>
+	</VBox>
+
+	<!-- Console : type a command -->
+	<VBox Slot.Title="Console" Spacing="4" Slot.Padding="4">
+		<Label Text="command {json}   or   command key=value ...      ex : actor.spawn class=Enemy location=[2,3,0]" Class="dim"/>
+		<TreeView Name="cmd.console.log" Slot.Fill="1"/>
+		<HBox Spacing="6">
+			<TextInput Name="cmd.console.input" Placeholder="command (Up / Down : history)" Slot.Fill="1"/>
+			<Button Name="cmd.console.clear" Text="Clear"/>
+		</HBox>
+	</VBox>
+
+	<!-- Reference : every command and its parameters -->
+	<VBox Slot.Title="Reference" Spacing="4" Slot.Padding="4">
+		<TextInput Name="cmd.ref.filter" Placeholder="Filter (actor, voxel, asset...)"/>
+		<TreeView Name="cmd.ref.tree" Slot.Fill="1"/>
+		<HBox Spacing="6">
+			<Label Name="cmd.ref.selected" Text="" Class="dim" Slot.Fill="1" Slot.VAlign="Center"/>
+			<Button Name="cmd.ref.try" Text="Try in console"/>
+		</HBox>
+	</VBox>
+
+	<!-- AI / MCP : connection of external AI tools -->
+	<VBox Slot.Title="AI / MCP" Spacing="6" Slot.Padding="6">
+		<Label Name="cmd.mcp.server" Text=""/>
+		<Label Name="cmd.mcp.file" Text="" Class="dim" Wrap="true"/>
+		<Label Text="An AI model acts on the editor through the MCP server python/lynx_mcp.py (every command becomes a tool). Add it to your MCP client (Claude Desktop, Claude Code...) :" Wrap="true"/>
+		<HBox Spacing="6">
+			<Label Text="Claude Desktop (claude_desktop_config.json) :" Slot.Fill="1" Slot.VAlign="Center"/>
+			<Button Name="cmd.mcp.copy_desktop" Text="Copy"/>
+		</HBox>
+		<TextEditor Name="cmd.mcp.desktop" Height="150" ReadOnly="true" LineNumbers="false"/>
+		<HBox Spacing="6">
+			<Label Text="Claude Code :" Slot.VAlign="Center"/>
+			<TextInput Name="cmd.mcp.code" ReadOnly="true" Slot.Fill="1"/>
+			<Button Name="cmd.mcp.copy_code" Text="Copy"/>
+		</HBox>
+		<Label Text="Without --project, the MCP server connects to the editor started last. Add &quot;--project&quot;, &quot;&lt;project folder&gt;&quot; to the args to pin a project." Class="dim" Wrap="true"/>
+		<HBox Spacing="6">
+			<Label Text="Activity" Class="section" Slot.Fill="1" Slot.VAlign="Center"/>
+			<Button Name="cmd.mcp.clear" Text="Clear"/>
+		</HBox>
+		<TreeView Name="cmd.mcp.activity" Slot.Fill="1"/>
+	</VBox>
+
+</TabView>
+</VBox>

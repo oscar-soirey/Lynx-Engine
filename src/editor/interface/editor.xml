@@ -83,6 +83,7 @@
 			<Include Source="panels/color_picking.xml"/>
 			<Include Source="panels/console.xml"/>
 			<Include Source="panels/build.xml"/>
+			<Include Source="panels/commands.xml"/>
 		</DockArea>
 
 		<!-- Status bar -->

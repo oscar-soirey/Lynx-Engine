@@ -179,13 +179,8 @@ lynx_embed_files("${LYNX_UI_HEADER}" "${LYNX_UI_ROOT}"
 		"${CMAKE_CURRENT_SOURCE_DIR}/fonts/VCR-OSD-MONO.ttf=fonts/VCR-OSD-MONO.ttf"
 )
 
-# Dear ImGui : the "Commands" window (Scripts, Lynxie, Console...) is still
-# ImGui code, shown in a window of its own (src/editor/raven/CommandsHost.cpp).
-file(GLOB LYNX_EDITOR_IMGUI_SOURCE "${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp")
-
 add_executable(LynxEditor src/editor_icon.rc
 		third-party/glad/glad.c
-		${LYNX_EDITOR_IMGUI_SOURCE}
 		"${LYNX_UI_HEADER}"
 
 		src/host/GameProject.cpp
@@ -217,15 +212,9 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/raven/RavenUi.cpp
 		src/editor/raven/GlBridge.cpp
 		src/editor/raven/Phase2Stubs.cpp
-		src/editor/raven/CommandsHost.cpp
-		src/editor/raven/LynxieIconShim.cpp
 
-		# Commands window (ImGui) and what it uses.
+		# Commands panel (Scripts, Lynxie, Console, Reference, AI / MCP).
 		src/editor/commands/CommandsWindow.cpp
-		src/editor/JsLanguage.cpp
-		src/editor/MarkdownText.cpp
-		src/editor/TextSelection.cpp
-		src/editor/EditorFonts.cpp
 
 		src/editor/commands/CommandRegistry.cpp
 		src/editor/commands/CommandServer.cpp

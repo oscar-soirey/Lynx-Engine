@@ -205,9 +205,6 @@ namespace editor_ui::shell
         menu.Item("Git", []() { git_window::Show(); });
         menu.Item("Profiler", []() { lynx::editor::profiler_window::Show(); });
         menu.Separator();
-        menu.Title("Coming to this editor :");
-        menu.Item("Commands (Python / AI)", []() {}, false);
-        menu.Separator();
         OpenUnder(menu, under);
     }
 

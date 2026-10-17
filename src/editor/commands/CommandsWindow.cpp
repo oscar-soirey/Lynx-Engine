@@ -1,8 +1,5 @@
 #include "CommandsWindow.h"
-#include "../LynxieIcon.h"
-#include "../MarkdownText.h"
-#include "../TextSelection.h"
-#include "../EditorFonts.h"
+#include "../raven/RavenUi.h"
 
 #include "CommandRegistry.h"
 #include "CommandServer.h"
@@ -10,8 +7,6 @@
 #include "FileEdits.h"
 #include "../JsLanguage.h"
 #include "../../scripting/Scripting.h"
-
-#include <imgui/imgui.h>
 
 #include <algorithm>
 #include <cctype>
@@ -24,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -79,9 +75,7 @@ namespace lynx::editor::commands_window
 		};
 
 		LocalAiState g_local_ai;
-		char g_ai_prompt[4096] = {};
 		bool g_ai_code_loaded = false;
-		size_t g_ai_chat_entries = 0;   // conversation auto-scroll
 
 #ifdef _WIN32
 		bool OllamaRequest(const wchar_t* method, const wchar_t* path, const std::string& body,
@@ -1673,12 +1667,27 @@ namespace lynx::editor::commands_window
 
 		constexpr size_t kMaxLog = 4000;
 
-		std::deque<LogLine> g_console;
-		std::deque<LogLine> g_activity;
+		// A log and its counters : the panel adds only the new lines.
+		struct Log
+		{
+			std::deque<LogLine> lines;
+			uint64_t added = 0;     // lines pushed since the start
+			uint64_t cleared = 0;   // Clear() count
+		};
+
+		Log g_console;
+		Log g_activity;
 		bool g_console_scroll = false;
 
-		void Push(std::deque<LogLine>& log, const std::string& text, int kind)
+		void Clear(Log& log)
 		{
+			log.lines.clear();
+			++log.cleared;
+		}
+
+		void Push(Log& log_, const std::string& text, int kind)
+		{
+			std::deque<LogLine>& log = log_.lines;
 			// Multi-line text : one entry per line.
 			size_t start = 0;
 
@@ -1686,6 +1695,7 @@ namespace lynx::editor::commands_window
 			{
 				const size_t end = text.find('\n', start);
 				log.push_back({ text.substr(start, end == std::string::npos ? std::string::npos : end - start), kind });
+				++log_.added;
 
 				if (end == std::string::npos)
 					break;
@@ -1697,42 +1707,6 @@ namespace lynx::editor::commands_window
 				log.pop_front();
 		}
 
-		void DrawLog(const char* id, std::deque<LogLine>& log, bool& scroll)
-		{
-			ImGui::BeginChild(id, ImVec2(0.f, 0.f), true, ImGuiWindowFlags_HorizontalScrollbar);
-
-			const bool at_bottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.f;
-
-			ImGuiListClipper clipper;
-			clipper.Begin(static_cast<int>(log.size()));
-
-			while (clipper.Step())
-			{
-				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-				{
-					const LogLine& line = log[static_cast<size_t>(i)];
-
-					static const ImVec4 kColors[] = {
-						ImVec4(0.85f, 0.85f, 0.85f, 1.f),
-						ImVec4(0.55f, 0.75f, 1.00f, 1.f),
-						ImVec4(0.55f, 0.85f, 0.55f, 1.f),
-						ImVec4(0.95f, 0.45f, 0.45f, 1.f),
-					};
-
-					ImGui::PushStyleColor(ImGuiCol_Text, kColors[std::clamp(line.kind, 0, 3)]);
-					ImGui::TextUnformatted(line.text.c_str());
-					ImGui::PopStyleColor();
-				}
-			}
-
-			if (scroll || at_bottom)
-			{
-				ImGui::SetScrollHereY(1.f);
-				scroll = false;
-			}
-
-			ImGui::EndChild();
-		}
 
 		// Results can be huge (screenshots, file contents) : shortened.
 		std::string Shorten(const Json& value)
@@ -1758,7 +1732,6 @@ namespace lynx::editor::commands_window
 		// Console
 		// ---------------------------------------------------------------------
 
-		char g_input[4096] = {};
 		std::vector<std::string> g_history;
 		int g_history_pos = -1;
 
@@ -1892,64 +1865,7 @@ namespace lynx::editor::commands_window
 			});
 		}
 
-		int ConsoleCallback(ImGuiInputTextCallbackData* data)
-		{
-			if (data->EventFlag != ImGuiInputTextFlags_CallbackHistory || g_history.empty())
-				return 0;
 
-			if (data->EventKey == ImGuiKey_UpArrow)
-				g_history_pos = g_history_pos < 0 ? static_cast<int>(g_history.size()) - 1 : std::max(0, g_history_pos - 1);
-			else if (data->EventKey == ImGuiKey_DownArrow && g_history_pos >= 0)
-				g_history_pos = g_history_pos + 1 >= static_cast<int>(g_history.size()) ? -1 : g_history_pos + 1;
-
-			data->DeleteChars(0, data->BufTextLen);
-
-			if (g_history_pos >= 0)
-				data->InsertChars(0, g_history[static_cast<size_t>(g_history_pos)].c_str());
-
-			return 0;
-		}
-
-		void DrawConsole()
-		{
-			ImGui::TextDisabled("command {json}   or   command key=value ...      ex : actor.spawn class=Enemy location=[2,3,0]");
-
-			const float input_height = ImGui::GetFrameHeightWithSpacing();
-			ImGui::BeginChild("##ConsoleOut", ImVec2(0.f, -input_height));
-			DrawLog("##ConsoleLog", g_console, g_console_scroll);
-			ImGui::EndChild();
-
-			ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Clear").x - ImGui::GetStyle().FramePadding.x * 2.f - ImGui::GetStyle().ItemSpacing.x);
-
-			bool reclaim = false;
-
-			if (ImGui::InputText("##ConsoleInput", g_input, sizeof(g_input),
-			                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory,
-			                     ConsoleCallback))
-			{
-				const std::string line = g_input;
-
-				if (!line.empty())
-				{
-					if (g_history.empty() || g_history.back() != line)
-						g_history.push_back(line);
-
-					g_history_pos = -1;
-					RunConsoleLine(line);
-				}
-
-				g_input[0] = '\0';
-				reclaim = true;
-			}
-
-			if (reclaim)
-				ImGui::SetKeyboardFocusHere(-1);
-
-			ImGui::SameLine();
-
-			if (ImGui::Button("Clear"))
-				g_console.clear();
-		}
 
 
 		// ---------------------------------------------------------------------
@@ -1966,11 +1882,7 @@ namespace lynx::editor::commands_window
 		std::vector<ScriptFile> g_scripts;
 		Clock::time_point g_last_scan{};
 		int g_selected = -1;
-		char g_arguments[1024] = {};
-		char g_python[512] = {};
-		bool g_python_loaded = false;
 		bool g_output_scroll = false;
-		size_t g_output_lines = 0;
 
 		std::string ReadDescription(const fs::path& file)
 		{
@@ -2106,519 +2018,452 @@ namespace lynx::editor::commands_window
 #endif
 		}
 
-		void DrawScripts()
-		{
-			if (!g_python_loaded)
-			{
-				g_python_loaded = true;
-				std::snprintf(g_python, sizeof(g_python), "%s", script_runner::PythonExecutable().c_str());
-			}
 
-			ScanScripts(false);
 
-			const bool running = script_runner::IsRunning();
-
-			// --- Left : script list ------------------------------------------
-
-			ImGui::BeginChild("##ScriptList", ImVec2(ImGui::GetContentRegionAvail().x * 0.32f, 0.f), true);
-
-			if (ImGui::SmallButton("New"))
-				CreateNewScript();
-
-			ImGui::SameLine();
-
-			if (ImGui::SmallButton("Refresh"))
-				ScanScripts(true);
-
-			ImGui::SameLine();
-
-			if (ImGui::SmallButton("Folder"))
-			{
-				std::error_code ec;
-				fs::create_directories(script_runner::ScriptsFolder(), ec);
-				OpenPath(script_runner::ScriptsFolder());
-			}
-
-			ImGui::Separator();
-
-			if (g_scripts.empty())
-				ImGui::TextWrapped("No script. Put .py files in the \"commands\" folder of the project, or click New.");
-
-			for (size_t i = 0; i < g_scripts.size(); ++i)
-			{
-				const ScriptFile& script = g_scripts[i];
-
-				if (ImGui::Selectable(script.label.c_str(), g_selected == static_cast<int>(i),
-				                      ImGuiSelectableFlags_AllowDoubleClick))
-				{
-					g_selected = static_cast<int>(i);
-
-					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !running)
-						script_runner::Run(script.path, g_arguments);
-				}
-
-				if (!script.description.empty() && ImGui::IsItemHovered())
-					ImGui::SetTooltip("%s", script.description.c_str());
-			}
-
-			ImGui::EndChild();
-			ImGui::SameLine();
-
-			// --- Right : run / output ----------------------------------------
-
-			ImGui::BeginGroup();
-
-			const ScriptFile* selected =
-				(g_selected >= 0 && g_selected < static_cast<int>(g_scripts.size()))
-					? &g_scripts[static_cast<size_t>(g_selected)] : nullptr;
-
-			if (selected)
-			{
-				ImGui::TextUnformatted(selected->label.c_str());
-
-				if (!selected->description.empty())
-					ImGui::TextDisabled("%s", selected->description.c_str());
-			}
-			else
-			{
-				ImGui::TextDisabled("Select a script");
-			}
-
-			ImGui::SetNextItemWidth(260.f);
-			ImGui::InputTextWithHint("##Args", "arguments", g_arguments, sizeof(g_arguments));
-			ImGui::SameLine();
-
-			ImGui::BeginDisabled(!selected || running);
-
-			if (ImGui::Button("Run") && selected)
-			{
-				script_runner::Run(selected->path, g_arguments);
-				g_output_scroll = true;
-			}
-
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!running);
-
-			if (ImGui::Button("Stop"))
-				script_runner::Stop();
-
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!selected);
-
-			if (ImGui::Button("Edit") && selected)
-				OpenPath(selected->path);
-
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-
-			if (ImGui::Button("Clear"))
-				script_runner::ClearOutput();
-
-			if (running)
-			{
-				ImGui::SameLine();
-				ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.f), "Running...");
-			}
-
-			// Output.
-			ImGui::BeginChild("##ScriptOutput", ImVec2(0.f, -ImGui::GetFrameHeightWithSpacing()), true,
-			                  ImGuiWindowFlags_HorizontalScrollbar);
-
-			const bool at_bottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.f;
-
-			script_runner::ForEachLine([](const std::string& line)
-			{
-				const bool error = line.find("Error") != std::string::npos ||
-				                   line.find("ERROR") != std::string::npos ||
-				                   line.find("Traceback") != std::string::npos ||
-				                   line.rfind("--- Failed", 0) == 0;
-
-				if (error)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.f));
-
-				ImGui::TextUnformatted(line.c_str());
-
-				if (error)
-					ImGui::PopStyleColor();
-			});
-
-			const size_t count = script_runner::LineCount();
-
-			if (g_output_scroll || (at_bottom && count != g_output_lines))
-			{
-				ImGui::SetScrollHereY(1.f);
-				g_output_scroll = false;
-			}
-
-			g_output_lines = count;
-
-			ImGui::EndChild();
-
-			// Python executable.
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted("Python");
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(260.f);
-
-			if (ImGui::InputText("##Python", g_python, sizeof(g_python)))
-			{
-				script_runner::PythonExecutable() = g_python;
-				script_runner::SaveSettings();
-			}
-
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Python 3 executable : python, py, or a full path (C:/Python312/python.exe).");
-
-			ImGui::EndGroup();
-		}
-
-		// A chat message : text wrapped, ``` code blocks (examples Lynxie gives
-		// in her answers) drawn indented, in the "disabled" color, not wrapped.
-		void DrawMessage(const std::string& text)
-		{
-			bool in_code = false;
-			size_t start = 0;
-			std::string paragraph;
-
-			auto flush_paragraph = [&]()
-			{
-				if (paragraph.empty())
-					return;
-				text_selection::TextWrapped(paragraph.c_str());   // same look, selectable
-				paragraph.clear();
-			};
-
-			while (start <= text.size())
-			{
-				const size_t end = text.find('\n', start);
-				const std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-				const size_t first = line.find_first_not_of(" \t");
-
-				if (first != std::string::npos && line.compare(first, 3, "```") == 0)
-				{
-					flush_paragraph();
-					in_code = !in_code;
-				}
-				else if (in_code)
-				{
-					ImGui::Indent();
-					ImGui::TextDisabled("%s", line.empty() ? " " : line.c_str());
-					text_selection::RecordLastItem(line.c_str());
-					ImGui::Unindent();
-				}
-				else
-				{
-					paragraph += (paragraph.empty() ? "" : "\n") + line;
-				}
-
-				if (end == std::string::npos)
-					break;
-				start = end + 1;
-			}
-			flush_paragraph();
-		}
-
-		void DrawLocalAI()
-		{
-			std::lock_guard<std::mutex> ai_lock(g_local_ai.mutex);
-			if (!g_local_ai.refresh_started)
-				StartModelRefresh();
-
-			// Header : Lynxie, then the model.
-			{
-				const float icon_height = ImGui::GetFrameHeight() * 1.6f;
-				lynxie_icon::Draw(icon_height);
-				ImGui::SameLine();
-				ImGui::BeginGroup();
-				ImGui::TextUnformatted("Lynxie");
-				ImGui::TextDisabled("Local AI assistant (Ollama)");
-				ImGui::EndGroup();
-				ImGui::SameLine();
-				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (icon_height - ImGui::GetFrameHeight()) * 0.5f);
-			}
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted("Model");
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 10.f,
-			                                 std::min(ImGui::GetFontSize() * 16.f, ImGui::GetContentRegionAvail().x * 0.5f)));
-			const char* preview = g_local_ai.selected_model >= 0 &&
-			                      g_local_ai.selected_model < static_cast<int>(g_local_ai.models.size())
-				? g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)].c_str()
-				: (g_local_ai.busy ? "Loading models..." : "No model selected");
-			if (ImGui::BeginCombo("##LocalModel", preview))
-			{
-				for (size_t i = 0; i < g_local_ai.models.size(); ++i)
-				{
-					const bool selected = g_local_ai.selected_model == static_cast<int>(i);
-					if (ImGui::Selectable(g_local_ai.models[i].c_str(), selected))
-						g_local_ai.selected_model = static_cast<int>(i);
-					if (selected) ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			ImGui::SameLine();
-			ImGui::BeginDisabled(g_local_ai.busy);
-			if (ImGui::Button("Refresh models"))
-				StartModelRefresh();
-			ImGui::EndDisabled();
-			ImGui::TextWrapped("%s", g_local_ai.status.c_str());
-
-			// What the model really received (scene state, rules, references).
-			if (!g_local_ai.last_context.empty() &&
-			    ImGui::CollapsingHeader("Context sent to the model"))
-			{
-				ImGui::TextDisabled("~%d tokens  ·  num_ctx %d  ·  rebuilt from the live scene at every message",
-				                    g_local_ai.last_context_tokens, g_local_ai.last_num_ctx);
-				if (g_local_ai.last_context.find("AI_API_REFERENCE.md not found") != std::string::npos)
-					ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.f),
-					                   "python/AI_API_REFERENCE.md is missing : the model does not know the Python API.");
-				ImGui::SameLine();
-				if (ImGui::SmallButton("Copy##aicontext"))
-					ImGui::SetClipboardText(g_local_ai.last_context.c_str());
-				ImGui::InputTextMultiline("##AIContext", g_local_ai.last_context.data(), g_local_ai.last_context.size() + 1,
-				                          ImVec2(-1.f, ImGui::GetTextLineHeight() * 12.f), ImGuiInputTextFlags_ReadOnly);
-			}
-
-			// The conversation takes all the room left above the message box.
-			const ImGuiStyle& style = ImGui::GetStyle();
-			const float bottom_height = ImGui::GetFrameHeightWithSpacing() * 2.f + ImGui::GetTextLineHeightWithSpacing();
-			ImGui::BeginChild("##LocalAIConversation", ImVec2(0.f, -bottom_height), true);
-			// The text of the conversation can be selected and copied (drag, Ctrl+C).
-			text_selection::Begin("##LynxieText");
-			// Colors readable on the light pixel theme and on a dark one.
-			const ImVec4 window_bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
-			const bool light_theme = window_bg.x * 0.3f + window_bg.y * 0.59f + window_bg.z * 0.11f > 0.5f;
-			const ImVec4 you_color = light_theme ? ImVec4(0.12f, 0.33f, 0.62f, 1.f) : ImVec4(0.55f, 0.75f, 1.f, 1.f);
-			const ImVec4 lynxie_color = light_theme ? ImVec4(0.10f, 0.45f, 0.22f, 1.f) : ImVec4(0.60f, 0.90f, 0.68f, 1.f);
-			const float line_height = ImGui::GetTextLineHeight();
-
-			int message_index = 0;
-			for (const auto& [speaker, text] : g_local_ai.conversation)
-			{
-				ImGui::PushID(message_index++);
-				// Speaker : "You", "Lynxie" (with her icon), "Lynx" = script receipts, title in grey.
-				if (speaker == "Lynxie")
-				{
-					lynxie_icon::Draw(line_height, lynxie_color);
-					ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
-				}
-				ImGui::PushStyleColor(ImGuiCol_Text,
-					speaker == "You"    ? you_color :
-					speaker == "Lynxie" ? lynxie_color :
-					                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-				ImGui::TextUnformatted(speaker.c_str());
-				text_selection::RecordLastItem(speaker.c_str());
-				ImGui::PopStyleColor();
-				// Lynxie writes Markdown (**bold**, lists, `code`, tables...) ;
-				// the user's messages and the script receipts stay plain text.
-				// Lynxie's and the user's messages : editor font, normal size ; the
-				// script receipts keep the editor's mono font (code, output).
-				if (speaker == "Lynxie")
-				{
-					fonts::PushLynxie();
-					markdown::Render(text);
-					fonts::PopLynxie();
-				}
-				else if (speaker == "You")
-				{
-					fonts::PushLynxie();
-					DrawMessage(text);
-					fonts::PopLynxie();
-				}
-				else
-					DrawMessage(text);
-				ImGui::Spacing();
-				ImGui::PopID();
-			}
-			if (g_local_ai.conversation.empty())
-			{
-				// Welcome : Lynxie in the middle of the empty conversation.
-				const float icon_height = std::min(ImGui::GetContentRegionAvail().y * 0.45f, ImGui::GetFontSize() * 6.f);
-				const char* hello = "Hi, I'm Lynxie !";
-				const char* hint = "Ask me how the engine works, or tell me what to change in the level.";
-				const float available = ImGui::GetContentRegionAvail().x;
-				ImGui::Dummy(ImVec2(0.f, std::max(0.f, (ImGui::GetContentRegionAvail().y - icon_height) * 0.3f)));
-				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - lynxie_icon::WidthFor(icon_height)) * 0.5f));
-				lynxie_icon::Draw(icon_height);
-				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - ImGui::CalcTextSize(hello).x) * 0.5f));
-				ImGui::TextUnformatted(hello);
-				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.f, (available - ImGui::CalcTextSize(hint).x) * 0.5f));
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::TextDisabled("%s", hint);
-				ImGui::PopTextWrapPos();
-			}
-			if (g_local_ai.busy)
-			{
-				lynxie_icon::Draw(line_height, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-				ImGui::SameLine(0.f, style.ItemSpacing.x * 0.5f);
-				static const char* const kDots[] = { "", ".", "..", "..." };
-				ImGui::TextDisabled("Lynxie is thinking%s", kDots[static_cast<int>(ImGui::GetTime() * 3.0) % 4]);
-			}
-			else if (g_ai_run.script_running)
-				ImGui::TextDisabled("Running the script...");
-
-			// Follow the conversation when something new arrives.
-			const size_t entries = g_local_ai.conversation.size() + (g_local_ai.busy ? 1 : 0) + (g_ai_run.script_running ? 1 : 0);
-			if (entries != g_ai_chat_entries)
-			{
-				g_ai_chat_entries = entries;
-				ImGui::SetScrollHereY(1.f);
-			}
-			text_selection::End();
-			ImGui::EndChild();
-
-			const bool can_send = !g_local_ai.busy && g_local_ai.selected_model >= 0 &&
-			                      !g_ai_run.waiting_fix && !g_ai_run.waiting_result && !g_ai_run.script_running;
-			ImGui::BeginDisabled(!can_send);
-			const float send_width = ImGui::CalcTextSize("Send").x + style.FramePadding.x * 2.f;
-			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - send_width - style.ItemSpacing.x);
-			const bool enter = ImGui::InputTextWithHint("##LocalAIMessage", "Describe what Lynxie should do...",
-			                                          g_ai_prompt, sizeof(g_ai_prompt),
-			                                          ImGuiInputTextFlags_EnterReturnsTrue);
-			ImGui::SameLine();
-			if ((ImGui::Button("Send") || enter) && can_send)
-			{
-				const std::string prompt = g_ai_prompt;
-				const std::string model = g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)];
-				if (!prompt.empty())
-				{
-					g_ai_prompt[0] = '\0';
-					g_ai_run.follow_ups = 0;
-					StartChatRequest(model, prompt);
-				}
-			}
-			ImGui::EndDisabled();
-
-			ImGui::Checkbox("Auto-fix errors", &g_ai_run.auto_fix);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("If the script fails : its changes are undone and Lynxie silently corrects it "
-				                  "and tries again, until it works (no error in the conversation ; the output of "
-				                  "every run is in Commands > Scripts). Untick to stop.");
-			ImGui::SameLine();
-			ImGui::TextDisabled("Scripts run automatically");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Each script is still saved in commands/ai_output.py (Scripts tab).\n"
-				                  "Its output goes to the Console window.");
-			if (file_edits::CanRevert())
-			{
-				ImGui::SameLine();
-				ImGui::BeginDisabled(g_local_ai.busy || g_ai_run.script_running);
-				if (ImGui::Button("Revert file edit"))
-				{
-					const std::string reverted = file_edits::Revert();
-					lynx::ReloadScripts();
-					g_local_ai.conversation.emplace_back("Lynx", "[Reverted] " + reverted);
-				}
-				ImGui::EndDisabled();
-				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-					ImGui::SetTooltip("Restores the files of Lynxie's last edit : %s", file_edits::RevertDescription().c_str());
-			}
-			ImGui::SameLine();
-			const float clear_width = ImGui::CalcTextSize("Clear chat").x + style.FramePadding.x * 2.f;
-			ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - clear_width));
-			if (ImGui::Button("Clear chat"))
-			{
-				g_local_ai.messages.clear();
-				g_local_ai.conversation.clear();
-				g_local_ai.generated_code.clear();
-				g_ai_code_loaded = false;
-			}
-		}
 
 
 		// ---------------------------------------------------------------------
 		// Reference
 		// ---------------------------------------------------------------------
 
-		char g_filter[128] = {};
 
-		void DrawReference()
-		{
-			ImGui::SetNextItemWidth(-1.f);
-			ImGui::InputTextWithHint("##RefFilter", "Filter (actor, voxel, asset...)", g_filter, sizeof(g_filter));
-
-			ImGui::BeginChild("##Reference", ImVec2(0.f, 0.f), true);
-
-			const std::string filter = g_filter;
-
-			for (const commands::CommandInfo* command : commands::List())
-			{
-				if (!filter.empty() && command->name.find(filter) == std::string::npos &&
-					command->description.find(filter) == std::string::npos)
-					continue;
-
-				if (!ImGui::TreeNode(command->name.c_str()))
-				{
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("%s", command->description.c_str());
-
-					continue;
-				}
-
-				ImGui::PushTextWrapPos(0.f);
-				ImGui::TextUnformatted(command->description.c_str());
-				ImGui::PopTextWrapPos();
-
-				for (const commands::ParamInfo& param : command->params)
-				{
-					ImGui::Bullet();
-					ImGui::TextColored(param.required ? ImVec4(1.f, 0.85f, 0.4f, 1.f) : ImVec4(0.7f, 0.8f, 1.f, 1.f),
-					                   "%s", param.name.c_str());
-					ImGui::SameLine();
-					ImGui::TextDisabled("(%s%s)", param.type.c_str(), param.required ? ", required" : "");
-					ImGui::SameLine();
-					ImGui::PushTextWrapPos(0.f);
-					ImGui::TextUnformatted(param.description.c_str());
-					ImGui::PopTextWrapPos();
-				}
-
-				if (ImGui::SmallButton("Try in console"))
-				{
-					std::snprintf(g_input, sizeof(g_input), "%s ", command->name.c_str());
-				}
-
-				ImGui::TreePop();
-			}
-
-			ImGui::EndChild();
-		}
 
 
 		// ---------------------------------------------------------------------
 		// AI / MCP
 		// ---------------------------------------------------------------------
 
-		bool g_activity_scroll = false;
 
 		std::string JsonPath(const fs::path& path)
 		{
 			return Json(path.generic_string()).dump();
 		}
 
-		void DrawAi()
+		// ---------------------------------------------------------------------
+		// The Raven panel (interface/panels/commands.xml)
+		// ---------------------------------------------------------------------
+
+		namespace panel
 		{
-			if (command_server::IsRunning())
+			Rid root = R_INVALID_ID;
+			Rid tabs = R_INVALID_ID;
+
+			// Scripts
+			Rid scripts_list = R_INVALID_ID, scripts_empty = R_INVALID_ID;
+			Rid scripts_name = R_INVALID_ID, scripts_desc = R_INVALID_ID, scripts_args = R_INVALID_ID;
+			Rid scripts_run = R_INVALID_ID, scripts_stop = R_INVALID_ID, scripts_edit = R_INVALID_ID;
+			Rid scripts_running = R_INVALID_ID, scripts_output = R_INVALID_ID, scripts_python = R_INVALID_ID;
+			std::vector<Rid> script_items;
+			std::vector<std::string> script_labels;   // what the list shows
+			int shown_selected = -2;
+			size_t output_shown = 0;
+
+			// Lynxie
+			Rid ai_icon = R_INVALID_ID, ai_model = R_INVALID_ID, ai_refresh = R_INVALID_ID, ai_status = R_INVALID_ID;
+			Rid ai_context = R_INVALID_ID, ai_context_info = R_INVALID_ID, ai_context_missing = R_INVALID_ID;
+			Rid ai_context_text = R_INVALID_ID;
+			Rid ai_scroll = R_INVALID_ID, ai_chat = R_INVALID_ID, ai_prompt = R_INVALID_ID, ai_send = R_INVALID_ID;
+			Rid ai_autofix = R_INVALID_ID, ai_revert = R_INVALID_ID;
+			std::vector<std::string> shown_models;
+			std::string shown_context;
+			size_t chat_messages = ~size_t(0);
+			size_t chat_last_size = 0;
+			int chat_state = -1;        // 0 idle, 1 thinking, 2 running a script
+			int thinking_dots = -1;
+			Rid thinking_label = R_INVALID_ID;
+
+			// Console
+			Rid console_log = R_INVALID_ID, console_input = R_INVALID_ID;
+
+			// Reference
+			Rid ref_filter = R_INVALID_ID, ref_tree = R_INVALID_ID, ref_selected = R_INVALID_ID, ref_try = R_INVALID_ID;
+			std::map<Rid, std::string> ref_rows;     // every row -> its command
+			std::string ref_current;
+			size_t ref_count = ~size_t(0);
+			bool ref_refill = true;
+
+			// AI / MCP
+			Rid mcp_server = R_INVALID_ID, mcp_file = R_INVALID_ID, mcp_desktop = R_INVALID_ID, mcp_code = R_INVALID_ID;
+			Rid mcp_activity = R_INVALID_ID;
+			std::string shown_desktop, shown_code;
+
+			enum Tab { kScripts = 0, kLynxie = 1, kConsole = 2, kReference = 3, kMcp = 4 };
+		}
+
+		// ShowLynxie : the Lynxie tab comes to the front for a few frames (at
+		// startup the dock layout settles first), the editor shows the panel.
+		int g_show_lynxie = 0;
+		bool g_show_request = false;
+
+		// The tree of a log follows its lines (new ones added, everything again after a Clear).
+		struct LogView
+		{
+			Rid tree = R_INVALID_ID;
+			uint64_t added = 0;
+			uint64_t cleared = ~0ull;
+			size_t items = 0;
+		};
+
+		LogView g_console_view;
+		LogView g_activity_view;
+
+		void ColorLogItem(Rid item, int kind)
+		{
+			switch (kind)
 			{
-				ImGui::Text("Command server : 127.0.0.1:%d   -   %d client(s) connected",
-				            command_server::Port(), command_server::ClientCount());
+			case 1: Rtree_item_set_text_color(item, 0.55f, 0.75f, 1.00f, 1.f); break;
+			case 2: Rtree_item_set_text_color(item, 0.55f, 0.85f, 0.55f, 1.f); break;
+			case 3: Rtree_item_set_text_color(item, 0.95f, 0.45f, 0.45f, 1.f); break;
+			default: break;
+			}
+		}
+
+		void UpdateLogView(LogView& view, const Log& log)
+		{
+			if (view.tree == R_INVALID_ID)
+				return;
+			if (view.cleared == log.cleared && view.added == log.added)
+				return;
+
+			size_t first = 0;   // index in log.lines of the first line to add
+			const uint64_t fresh = log.added - view.added;
+			if (view.cleared != log.cleared || fresh > log.lines.size() || view.items > kMaxLog + kMaxLog / 4)
+			{
+				Rtree_view_clear_items(view.tree);
+				view.items = 0;
+				first = 0;
 			}
 			else
+				first = log.lines.size() - static_cast<size_t>(fresh);
+
+			Rid last = R_INVALID_ID;
+			for (size_t i = first; i < log.lines.size(); ++i)
 			{
-				ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.f), "Command server not running (see the console).");
+				last = Rtree_view_add_item(view.tree, R_INVALID_ID, log.lines[i].text.empty() ? " " : log.lines[i].text.c_str());
+				ColorLogItem(last, log.lines[i].kind);
+				++view.items;
+			}
+			view.added = log.added;
+			view.cleared = log.cleared;
+			if (last != R_INVALID_ID)
+				Rtree_view_scroll_to_item(view.tree, last);
+		}
+
+		std::string InputText(Rid input)
+		{
+			const char* text = input != R_INVALID_ID ? Rtext_input_get_text(input) : nullptr;
+			return text ? text : "";
+		}
+
+		const ScriptFile* SelectedScript()
+		{
+			return (g_selected >= 0 && g_selected < static_cast<int>(g_scripts.size()))
+				? &g_scripts[static_cast<size_t>(g_selected)] : nullptr;
+		}
+
+		void RunSelectedScript()
+		{
+			const ScriptFile* script = SelectedScript();
+			if (!script || script_runner::IsRunning())
+				return;
+			script_runner::Run(script->path, InputText(panel::scripts_args));
+			g_output_scroll = true;
+		}
+
+		// ---- Scripts ----------------------------------------------------------------
+
+		void UpdateScriptsTab()
+		{
+			using namespace panel;
+			ScanScripts(false);
+
+			std::vector<std::string> labels;
+			labels.reserve(g_scripts.size());
+			for (const ScriptFile& s : g_scripts)
+				labels.push_back(s.label);
+			if (labels != script_labels)
+			{
+				script_labels = labels;
+				Rtree_view_clear_items(scripts_list);
+				script_items.clear();
+				for (const ScriptFile& s : g_scripts)
+					script_items.push_back(Rtree_view_add_item(scripts_list, R_INVALID_ID, s.label.c_str()));
+				shown_selected = -2;
+			}
+			ui::SetVisible(scripts_empty, g_scripts.empty());
+
+			if (shown_selected != g_selected)
+			{
+				shown_selected = g_selected;
+				if (g_selected >= 0 && g_selected < static_cast<int>(script_items.size()))
+					Rtree_view_set_selected_item(scripts_list, script_items[static_cast<size_t>(g_selected)]);
+				const ScriptFile* s = SelectedScript();
+				ui::SetText(scripts_name, s ? s->label : std::string("Select a script"));
+				ui::SetText(scripts_desc, s ? s->description : std::string());
+				ui::SetVisible(scripts_desc, s && !s->description.empty());
 			}
 
-			ImGui::TextDisabled("Connection file : %s", command_server::ConnectionFile().generic_string().c_str());
+			const bool running = script_runner::IsRunning();
+			const bool selected = SelectedScript() != nullptr;
+			ui::SetEnabled(scripts_run, selected && !running);
+			ui::SetEnabled(scripts_stop, running);
+			ui::SetEnabled(scripts_edit, selected);
+			ui::SetVisible(scripts_running, running);
 
-			ImGui::Spacing();
-			ImGui::TextWrapped(
-				"An AI model acts on the editor through the MCP server python/lynx_mcp.py (every command "
-				"becomes a tool). Add it to your MCP client (Claude Desktop, Claude Code...) :");
+			// Output of the script (errors in red).
+			const size_t count = script_runner::LineCount();
+			if (count != output_shown || g_output_scroll)
+			{
+				if (count < output_shown || g_output_scroll)
+				{
+					Rtree_view_clear_items(scripts_output);
+					output_shown = 0;
+				}
+				size_t index = 0;
+				Rid last = R_INVALID_ID;
+				const size_t from = output_shown;
+				script_runner::ForEachLine([&](const std::string& line)
+				{
+					if (index++ < from)
+						return;
+					last = Rtree_view_add_item(scripts_output, R_INVALID_ID, line.empty() ? " " : line.c_str());
+					const bool error = line.find("Error") != std::string::npos ||
+					                   line.find("ERROR") != std::string::npos ||
+					                   line.find("Traceback") != std::string::npos ||
+					                   line.rfind("--- Failed", 0) == 0;
+					if (error)
+						Rtree_item_set_text_color(last, 0.95f, 0.45f, 0.45f, 1.f);
+				});
+				output_shown = index;
+				g_output_scroll = false;
+				if (last != R_INVALID_ID)
+					Rtree_view_scroll_to_item(scripts_output, last);
+			}
+		}
+
+		// ---- Lynxie -----------------------------------------------------------------
+
+		Rid ChatLabel(const std::string& text, const char* style_class, bool markdown)
+		{
+			Rid label = Rlabel_create("");
+			if (markdown)
+				Rwidget_set_attribute(label, "Markdown", "true");
+			Rlabel_set_wrap(label, R_TRUE);
+			Rlabel_set_text(label, text.c_str());
+			if (style_class)
+				Rwidget_add_class(label, style_class);
+			Rwidget_add_child(panel::ai_chat, label);
+			return label;
+		}
+
+		// Called with g_local_ai.mutex held.
+		void RebuildChat(int state)
+		{
+			using namespace panel;
+			Rwidget_clear_children(ai_chat);
+			thinking_label = R_INVALID_ID;
+
+			if (g_local_ai.conversation.empty())
+			{
+				Rid spacer = Rwidget_create(R_WIDGET_SPACER);
+				Rwidget_set_size(spacer, 0.f, 40.f);
+				Rwidget_add_child(ai_chat, spacer);
+				Rid icon = Rwidget_create(R_WIDGET_IMAGE);
+				Rimage_set_texture(icon, ui::Texture("icons/lynxie.png"));
+				Rimage_set_tint_text(icon, R_TRUE);
+				Rwidget_set_size(icon, 110.f, 96.f);
+				Rimage_set_stretch(icon, R_STRETCH_FILL);
+				Rwidget_add_child(ai_chat, icon);
+				Rid hello = ChatLabel("Hi, I'm Lynxie !", nullptr, false);
+				Rwidget_set_attribute(hello, "TextAlign", "Center");
+				Rid hint = ChatLabel("Ask me how the engine works, or tell me what to change in the level.", "dim", false);
+				Rwidget_set_attribute(hint, "TextAlign", "Center");
+			}
+
+			for (const auto& [speaker, text] : g_local_ai.conversation)
+			{
+				// "You", "Lynxie", "Lynx" (receipts of the scripts, in grey).
+				ChatLabel(speaker, speaker == "You" ? "section" : speaker == "Lynxie" ? "success" : "dim", false);
+				// Lynxie writes Markdown (**bold**, lists, `code`, tables...).
+				ChatLabel(text, speaker == "Lynx" ? "dim" : nullptr, speaker == "Lynxie");
+			}
+
+			if (state == 1)
+				thinking_label = ChatLabel("Lynxie is thinking", "dim", false);
+			else if (state == 2)
+				ChatLabel("Running the script...", "dim", false);
+
+			// At the end once the new rows are laid out.
+			const Rid scroll = ai_scroll;
+			Rscroll_box_scroll_to_end(scroll);
+			ui::Later([scroll]() { if (Rwidget_is_valid(scroll)) Rscroll_box_scroll_to_end(scroll); });
+		}
+
+		bool CanSend()
+		{
+			return !g_local_ai.busy && g_local_ai.selected_model >= 0 &&
+			       g_local_ai.selected_model < static_cast<int>(g_local_ai.models.size()) &&
+			       !g_ai_run.waiting_fix && !g_ai_run.waiting_result && !g_ai_run.script_running;
+		}
+
+		void SendPrompt()
+		{
+			const std::string prompt = InputText(panel::ai_prompt);
+			if (prompt.empty())
+				return;
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			if (!CanSend())
+				return;
+			const std::string model = g_local_ai.models[static_cast<size_t>(g_local_ai.selected_model)];
+			ui::SetText(panel::ai_prompt, "");
+			g_ai_run.follow_ups = 0;
+			StartChatRequest(model, prompt);
+		}
+
+		void UpdateLynxieTab()
+		{
+			using namespace panel;
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			if (!g_local_ai.refresh_started)
+				StartModelRefresh();
+
+			// Models.
+			if (g_local_ai.models != shown_models)
+			{
+				shown_models = g_local_ai.models;
+				Rcombo_box_clear_items(ai_model);
+				for (const std::string& m : shown_models)
+					Rcombo_box_add_item(ai_model, m.c_str());
+			}
+			if (g_local_ai.selected_model >= 0 && Rcombo_box_get_selected(ai_model) != g_local_ai.selected_model)
+				Rcombo_box_set_selected(ai_model, g_local_ai.selected_model);
+			ui::SetEnabled(ai_refresh, !g_local_ai.busy);
+			ui::SetText(ai_status, g_local_ai.models.empty() && g_local_ai.busy ? std::string("Loading models...") : g_local_ai.status);
+
+			// Context sent to the model.
+			ui::SetVisible(ai_context, !g_local_ai.last_context.empty());
+			if (g_local_ai.last_context != shown_context)
+			{
+				shown_context = g_local_ai.last_context;
+				Rtext_editor_set_text(ai_context_text, shown_context.c_str());
+				char info[160];
+				std::snprintf(info, sizeof(info), "~%d tokens  -  num_ctx %d  -  rebuilt from the live scene at every message",
+				              g_local_ai.last_context_tokens, g_local_ai.last_num_ctx);
+				ui::SetText(ai_context_info, info);
+				ui::SetVisible(ai_context_missing, shown_context.find("AI_API_REFERENCE.md not found") != std::string::npos);
+			}
+
+			// Conversation : built again when it changes.
+			const int state = g_local_ai.busy ? 1 : g_ai_run.script_running ? 2 : 0;
+			const size_t last_size = g_local_ai.conversation.empty() ? 0 : g_local_ai.conversation.back().second.size();
+			if (g_local_ai.conversation.size() != chat_messages || last_size != chat_last_size || state != chat_state)
+			{
+				chat_messages = g_local_ai.conversation.size();
+				chat_last_size = last_size;
+				chat_state = state;
+				thinking_dots = -1;
+				RebuildChat(state);
+			}
+			if (thinking_label != R_INVALID_ID)
+			{
+				static const char* const kDots[] = { "", ".", "..", "..." };
+				const int dots = static_cast<int>(Rget_time() * 3.0) % 4;
+				if (dots != thinking_dots)
+				{
+					thinking_dots = dots;
+					ui::SetText(thinking_label, std::string("Lynxie is thinking") + kDots[dots]);
+				}
+			}
+
+			const bool can_send = CanSend();
+			ui::SetEnabled(ai_send, can_send);
+			ui::SetChecked(ai_autofix, g_ai_run.auto_fix);
+			const bool can_revert = file_edits::CanRevert();
+			ui::SetVisible(ai_revert, can_revert);
+			if (can_revert)
+			{
+				ui::SetEnabled(ai_revert, !g_local_ai.busy && !g_ai_run.script_running);
+				ui::SetTooltip(ai_revert, "Restores the files of Lynxie's last edit : " + file_edits::RevertDescription());
+			}
+		}
+
+		// ---- Reference --------------------------------------------------------------
+
+		void UpdateReferenceTab()
+		{
+			using namespace panel;
+			const auto& list = commands::List();
+			if (list.size() != ref_count)
+			{
+				ref_count = list.size();
+				ref_refill = true;
+			}
+			if (!ref_refill)
+				return;
+			ref_refill = false;
+
+			const std::string filter = InputText(ref_filter);
+			Rtree_view_clear_items(ref_tree);
+			ref_rows.clear();
+			for (const commands::CommandInfo* command : list)
+			{
+				if (!filter.empty() && command->name.find(filter) == std::string::npos &&
+				    command->description.find(filter) == std::string::npos)
+					continue;
+
+				Rid item = Rtree_view_add_item(ref_tree, R_INVALID_ID, command->name.c_str());
+				ref_rows[item] = command->name;
+				if (!command->description.empty())
+				{
+					Rid desc = Rtree_view_add_item(ref_tree, item, command->description.c_str());
+					Rtree_item_set_text_color(desc, 0.70f, 0.70f, 0.70f, 1.f);
+					ref_rows[desc] = command->name;
+				}
+				for (const commands::ParamInfo& param : command->params)
+				{
+					const std::string text = param.name + "  (" + param.type + (param.required ? ", required" : "") + ")  " +
+					                         param.description;
+					Rid row = Rtree_view_add_item(ref_tree, item, text.c_str());
+					if (param.required)
+						Rtree_item_set_text_color(row, 1.f, 0.85f, 0.4f, 1.f);
+					else
+						Rtree_item_set_text_color(row, 0.7f, 0.8f, 1.f, 1.f);
+					ref_rows[row] = command->name;
+				}
+			}
+		}
+
+		// The command of a row (the command itself, or one of its lines).
+		std::string RefCommandOf(Rid item)
+		{
+			const auto it = panel::ref_rows.find(item);
+			return it != panel::ref_rows.end() ? it->second : std::string();
+		}
+
+		void TryInConsole(const std::string& name)
+		{
+			if (name.empty())
+				return;
+			ui::SetText(panel::console_input, name + " ");
+			Rtab_view_set_active(panel::tabs, panel::kConsole);
+			Rwidget_focus(panel::console_input);
+		}
+
+		// ---- AI / MCP ---------------------------------------------------------------
+
+		void UpdateMcpTab()
+		{
+			using namespace panel;
+			if (command_server::IsRunning())
+				ui::SetText(mcp_server, "Command server : 127.0.0.1:" + std::to_string(command_server::Port()) +
+				                        "   -   " + std::to_string(command_server::ClientCount()) + " client(s) connected");
+			else
+				ui::SetText(mcp_server, "Command server not running (see the console).");
+			ui::SetClass(mcp_server, "error", !command_server::IsRunning());
+			ui::SetText(mcp_file, "Connection file : " + command_server::ConnectionFile().generic_string());
 
 			const fs::path mcp = script_runner::PythonFolder() / "lynx_mcp.py";
 			const std::string python = script_runner::PythonExecutable();
-
 			const std::string desktop =
 				"{\n"
 				"  \"mcpServers\": {\n"
@@ -2628,39 +2473,236 @@ namespace lynx::editor::commands_window
 				"    }\n"
 				"  }\n"
 				"}";
-
-			const std::string code =
-				"claude mcp add lynx -- " + python + " \"" + mcp.generic_string() + "\"";
-
-			ImGui::Spacing();
-			ImGui::TextUnformatted("Claude Desktop (claude_desktop_config.json) :");
-			ImGui::InputTextMultiline("##McpDesktop", const_cast<char*>(desktop.c_str()), desktop.size() + 1,
-			                          ImVec2(-1.f, ImGui::GetTextLineHeight() * 8.5f), ImGuiInputTextFlags_ReadOnly);
-
-			if (ImGui::SmallButton("Copy##desktop"))
-				ImGui::SetClipboardText(desktop.c_str());
-
-			ImGui::Spacing();
-			ImGui::TextUnformatted("Claude Code :");
-			ImGui::InputText("##McpCode", const_cast<char*>(code.c_str()), code.size() + 1, ImGuiInputTextFlags_ReadOnly);
-
-			if (ImGui::SmallButton("Copy##code"))
-				ImGui::SetClipboardText(code.c_str());
-
-			ImGui::Spacing();
-			ImGui::TextWrapped("Without --project, the MCP server connects to the editor started last. "
-			                   "Add \"--project\", \"<project folder>\" to the args to pin a project.");
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::TextUnformatted("Activity");
-			ImGui::SameLine();
-
-			if (ImGui::SmallButton("Clear##activity"))
-				g_activity.clear();
-
-			DrawLog("##Activity", g_activity, g_activity_scroll);
+			const std::string code = "claude mcp add lynx -- " + python + " \"" + mcp.generic_string() + "\"";
+			if (desktop != shown_desktop)
+			{
+				shown_desktop = desktop;
+				Rtext_editor_set_text(mcp_desktop, desktop.c_str());
+			}
+			if (code != shown_code)
+			{
+				shown_code = code;
+				ui::SetText(mcp_code, code);
+			}
 		}
+	}
+
+
+	void BindPanel(Rid root)
+	{
+		using namespace panel;
+		if (root == R_INVALID_ID)
+			return;
+		panel::root = root;
+		auto find = [root](const char* name) { return ui::Find(root, name); };
+
+		tabs = find("cmd.tabs");
+
+		// Scripts.
+		scripts_list = find("cmd.scripts.list");
+		scripts_empty = find("cmd.scripts.empty");
+		scripts_name = find("cmd.scripts.name");
+		scripts_desc = find("cmd.scripts.desc");
+		scripts_args = find("cmd.scripts.args");
+		scripts_run = find("cmd.scripts.run");
+		scripts_stop = find("cmd.scripts.stop");
+		scripts_edit = find("cmd.scripts.edit");
+		scripts_running = find("cmd.scripts.running");
+		scripts_output = find("cmd.scripts.output");
+		scripts_python = find("cmd.scripts.python");
+
+		ui::OnClick(find("cmd.scripts.new"), []() { CreateNewScript(); });
+		ui::OnClick(find("cmd.scripts.refresh"), []() { ScanScripts(true); });
+		ui::OnClick(find("cmd.scripts.folder"), []()
+		{
+			std::error_code ec;
+			fs::create_directories(script_runner::ScriptsFolder(), ec);
+			OpenPath(script_runner::ScriptsFolder());
+		});
+		ui::OnTreeSelect(scripts_list, [](Rid item)
+		{
+			for (size_t i = 0; i < script_items.size(); ++i)
+				if (script_items[i] == item)
+					g_selected = static_cast<int>(i);
+		});
+		ui::OnTreeActivate(scripts_list, [](Rid item)
+		{
+			for (size_t i = 0; i < script_items.size(); ++i)
+				if (script_items[i] == item)
+					g_selected = static_cast<int>(i);
+			RunSelectedScript();
+		});
+		ui::OnClick(scripts_run, []() { RunSelectedScript(); });
+		ui::OnClick(scripts_stop, []() { script_runner::Stop(); });
+		ui::OnClick(scripts_edit, []() { if (const ScriptFile* s = SelectedScript()) OpenPath(s->path); });
+		ui::OnClick(find("cmd.scripts.clear"), []()
+		{
+			script_runner::ClearOutput();
+			Rtree_view_clear_items(panel::scripts_output);
+			panel::output_shown = 0;
+		});
+		ui::SetText(scripts_python, script_runner::PythonExecutable());
+		ui::OnText(scripts_python, [](const std::string& text)
+		{
+			script_runner::PythonExecutable() = text;
+			script_runner::SaveSettings();
+		});
+
+		// Lynxie.
+		ai_icon = find("cmd.ai.icon");
+		Rimage_set_texture(ai_icon, ui::Texture("icons/lynxie.png"));
+		ai_model = find("cmd.ai.model");
+		ai_refresh = find("cmd.ai.refresh");
+		ai_status = find("cmd.ai.status");
+		ai_context = find("cmd.ai.context");
+		ai_context_info = find("cmd.ai.context.info");
+		ai_context_missing = find("cmd.ai.context.missing");
+		ai_context_text = find("cmd.ai.context.text");
+		ai_scroll = find("cmd.ai.scroll");
+		ai_chat = find("cmd.ai.chat");
+		ai_prompt = find("cmd.ai.prompt");
+		ai_send = find("cmd.ai.send");
+		ai_autofix = find("cmd.ai.autofix");
+		ai_revert = find("cmd.ai.revert");
+
+		ui::OnSelect(ai_model, [](int index)
+		{
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			if (index >= 0 && index < static_cast<int>(g_local_ai.models.size()))
+				g_local_ai.selected_model = index;
+		});
+		ui::OnClick(ai_refresh, []()
+		{
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			StartModelRefresh();
+		});
+		ui::OnClick(find("cmd.ai.context.copy"), []()
+		{
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			Rclipboard_set_text(g_local_ai.last_context.c_str());
+		});
+		ui::OnClick(ai_send, []() { SendPrompt(); });
+		ui::OnEvent(ai_prompt, [](const REvent& event)
+		{
+			if (event.type == R_EVENT_KEY_DOWN && event.key == R_KEY_ENTER)
+			{
+				SendPrompt();
+				return true;
+			}
+			return false;
+		});
+		ui::OnToggle(ai_autofix, [](bool on) { g_ai_run.auto_fix = on; });
+		ui::OnClick(ai_revert, []()
+		{
+			const std::string reverted = file_edits::Revert();
+			lynx::ReloadScripts();
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			g_local_ai.conversation.emplace_back("Lynx", "[Reverted] " + reverted);
+		});
+		ui::OnClick(find("cmd.ai.clear"), []()
+		{
+			std::lock_guard<std::mutex> lock(g_local_ai.mutex);
+			g_local_ai.messages.clear();
+			g_local_ai.conversation.clear();
+			g_local_ai.generated_code.clear();
+			g_ai_code_loaded = false;
+		});
+
+		// Console.
+		console_log = find("cmd.console.log");
+		console_input = find("cmd.console.input");
+		g_console_view.tree = console_log;
+		ui::OnEvent(console_input, [](const REvent& event)
+		{
+			if (event.type != R_EVENT_KEY_DOWN)
+				return false;
+			if (event.key == R_KEY_ENTER)
+			{
+				const std::string line = InputText(console_input);
+				if (!line.empty())
+				{
+					if (g_history.empty() || g_history.back() != line)
+						g_history.push_back(line);
+					g_history_pos = -1;
+					RunConsoleLine(line);
+				}
+				ui::SetText(console_input, "");
+				return true;
+			}
+			if ((event.key == R_KEY_UP || event.key == R_KEY_DOWN) && !g_history.empty())
+			{
+				if (event.key == R_KEY_UP)
+					g_history_pos = g_history_pos < 0 ? static_cast<int>(g_history.size()) - 1 : std::max(0, g_history_pos - 1);
+				else if (g_history_pos >= 0)
+					g_history_pos = g_history_pos + 1 >= static_cast<int>(g_history.size()) ? -1 : g_history_pos + 1;
+				ui::SetText(console_input, g_history_pos >= 0 ? g_history[static_cast<size_t>(g_history_pos)] : std::string());
+				return true;
+			}
+			return false;
+		});
+		ui::OnClick(find("cmd.console.clear"), []() { Clear(g_console); });
+
+		// Reference.
+		ref_filter = find("cmd.ref.filter");
+		ref_tree = find("cmd.ref.tree");
+		ref_selected = find("cmd.ref.selected");
+		ref_try = find("cmd.ref.try");
+		ui::OnText(ref_filter, [](const std::string&) { panel::ref_refill = true; });
+		ui::OnTreeSelect(ref_tree, [](Rid item)
+		{
+			panel::ref_current = RefCommandOf(item);
+			ui::SetText(panel::ref_selected, panel::ref_current);
+			ui::SetEnabled(panel::ref_try, !panel::ref_current.empty());
+		});
+		ui::OnTreeActivate(ref_tree, [](Rid item) { TryInConsole(RefCommandOf(item)); });
+		ui::OnClick(ref_try, []() { TryInConsole(panel::ref_current); });
+		ui::SetEnabled(ref_try, false);
+
+		// AI / MCP.
+		mcp_server = find("cmd.mcp.server");
+		mcp_file = find("cmd.mcp.file");
+		mcp_desktop = find("cmd.mcp.desktop");
+		mcp_code = find("cmd.mcp.code");
+		mcp_activity = find("cmd.mcp.activity");
+		g_activity_view.tree = mcp_activity;
+		ui::OnClick(find("cmd.mcp.copy_desktop"), []() { Rclipboard_set_text(panel::shown_desktop.c_str()); });
+		ui::OnClick(find("cmd.mcp.copy_code"), []() { Rclipboard_set_text(panel::shown_code.c_str()); });
+		ui::OnClick(find("cmd.mcp.clear"), []() { Clear(g_activity); });
+	}
+
+	void UpdatePanel(bool shown)
+	{
+		using namespace panel;
+		if (root == R_INVALID_ID)
+			return;
+
+		if (g_show_lynxie > 0)
+		{
+			--g_show_lynxie;
+			Rtab_view_set_active(tabs, kLynxie);
+		}
+
+		// The logs keep up even when hidden (cheap : only the new lines).
+		UpdateLogView(g_console_view, g_console);
+		UpdateLogView(g_activity_view, g_activity);
+
+		if (!shown)
+			return;
+		switch (Rtab_view_get_active(tabs))
+		{
+		case kScripts: UpdateScriptsTab(); break;
+		case kLynxie: UpdateLynxieTab(); break;
+		case kReference: UpdateReferenceTab(); break;
+		case kMcp: UpdateMcpTab(); break;
+		default: break;
+		}
+	}
+
+	bool TakeShowRequest()
+	{
+		const bool request = g_show_request;
+		g_show_request = false;
+		return request;
 	}
 
 
@@ -2748,13 +2790,6 @@ namespace lynx::editor::commands_window
 	}
 
 
-	namespace
-	{
-		// Frames during which the Lynxie tab is forced to the front (a few at
-		// startup : the dock layout and the other windows settle first).
-		int g_show_lynxie = 0;
-	}
-
 	void AskLynxie(const std::string& prompt, const std::string& display)
 	{
 		if (prompt.empty())
@@ -2773,61 +2808,7 @@ namespace lynx::editor::commands_window
 	void ShowLynxie(int frames)
 	{
 		g_show_lynxie = std::max(g_show_lynxie, frames);
+		g_show_request = true;
 	}
 
-
-	void Draw(bool* open)
-	{
-		if (open && !*open)
-			return;
-
-		ImGui::SetNextWindowSize(ImVec2(900.f, 480.f), ImGuiCond_FirstUseEver);
-		if (g_show_lynxie > 0)
-			ImGui::SetNextWindowFocus();
-
-		if (!ImGui::Begin("Commands", open))
-		{
-			ImGui::End();
-			return;
-		}
-
-		if (ImGui::BeginTabBar("##CommandsTabs"))
-		{
-			if (ImGui::BeginTabItem("Scripts"))
-			{
-				DrawScripts();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Lynxie", nullptr, g_show_lynxie > 0 ? ImGuiTabItemFlags_SetSelected : 0))
-			{
-				DrawLocalAI();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Console"))
-			{
-				DrawConsole();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Reference"))
-			{
-				DrawReference();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("AI / MCP"))
-			{
-				DrawAi();
-				ImGui::EndTabItem();
-			}
-
-			ImGui::EndTabBar();
-		}
-
-		if (g_show_lynxie > 0)
-			--g_show_lynxie;
-		ImGui::End();
-	}
 }

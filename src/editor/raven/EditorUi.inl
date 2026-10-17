@@ -36,6 +36,7 @@ namespace editor_ui
         Rid color_picking = R_INVALID_ID;
         Rid console = R_INVALID_ID;
         Rid build = R_INVALID_ID;
+        Rid commands = R_INVALID_ID;
         Rid options = R_INVALID_ID;
         Rid post_process = R_INVALID_ID;
         Rid lighting2d = R_INVALID_ID;
@@ -71,6 +72,7 @@ namespace editor_ui
             { &g.voxel_world, &editorWindows.voxelWorld, "Voxel World" },
             { &g.console, &editorWindows.console, "Console" },
             { &g.build, &g_build_panel_open, "Build" },
+            { &g.commands, &editorWindows.commands, "Commands" },
             { &g.options, &showEditorOptions, "Options" },
         };
     }
@@ -499,6 +501,7 @@ namespace editor
         g.color_picking = eui::Find(window, "color_picking");
         g.console = eui::Find(window, "console");
         g.build = eui::Find(window, "build");
+        g.commands = eui::Find(window, "commands");
         // Windows of their own.
         g.options = LoadToolWindow("windows/options.xml", "options");
         g.post_process = LoadToolWindow("windows/post_process.xml", "post_process");
@@ -515,6 +518,7 @@ namespace editor
         paint::Init();
         console::Init();
         tools::Init();
+        lynx::editor::commands_window::BindPanel(g.commands);
 
         // Layout of the project, then the panels of editor_windows.txt.
         shell::LoadLayout();
@@ -537,6 +541,11 @@ namespace editor
         paint::Update();
         tools::Update(dt);
         console::Update();
+
+        // Commands (Scripts, Lynxie, Console, Reference, AI / MCP).
+        lynx::editor::commands_window::UpdatePanel(IsPanelShown(g.commands));
+        if (lynx::editor::commands_window::TakeShowRequest())
+            ShowPanel(g.commands);
 
         // Windows of their own (Git, Profiler, Ship Game, Convert to voxels).
         git_window::Frame(editor_dirty, []() { SaveEditor(); });
