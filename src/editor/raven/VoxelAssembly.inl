@@ -1372,7 +1372,7 @@ namespace editor_ui::vasm_ed
         {
             const std::string title = doc.path.filename().string();
             auto page = std::make_shared<Rid>(R_INVALID_ID);
-            doc.panel = documents::OpenSplit(doc.panel, title, lynx::editor::file_icons::Kind::Script, { "My Blueprint", "Graph", "Details" },
+            doc.panel = documents::OpenSplit(doc.panel, title, lynx::editor::file_icons::Kind::VoxelAssembly, { "My Blueprint", "Graph", "Details" },
                                              [page]() { if (OnPanelClose(*page)) documents::Close(*page); });
             *page = doc.panel;
             doc.shown_title = title;

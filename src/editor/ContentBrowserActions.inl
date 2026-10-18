@@ -4,8 +4,9 @@
 // Logic only : the interface is raven/PanelContentBrowser.inl.
 // Right click on an item   : Open, Rename, Duplicate, Copy / Cut, Paste into,
 //                            Delete, Copy path, Show in Explorer.
-// Right click on the empty : New folder, New file (text, JavaScript class,
-//                            JavaScript script, level, JSON), Paste, Explorer.
+// Right click on the empty : New folder, New file (text, Voxel Assembly, level,
+//                            JSON, ... and the DEPRECATED JavaScript class /
+//                            script, listed last), Paste, Explorer.
 // Shortcuts (window focused) : Del, F2, Ctrl+D, Ctrl+C, Ctrl+X, Ctrl+V.
 //
 // Deleted files are MOVED to <project>/.lynx/trash/<date>/... (same place as
@@ -49,8 +50,8 @@ namespace content_browser_actions
 
     static const FileKindInfo kFileKinds[] = {
         { "Text file (.txt)",                    "NewFile",   ".txt"  },
-        { "JavaScript class (actor)",            "NewActor",  ".js"   },
-        { "JavaScript script (attached)",        "NewScript", ".js"   },
+        { "JavaScript class (DEPRECATED)",       "NewActor",  ".js"   },
+        { "JavaScript script (DEPRECATED)",      "NewScript", ".js"   },
         { "Level (.level + voxel world)",        "NewLevel",  ".level" },
         { "JSON (.json)",                        "NewData",   ".json" },
         { "Widget (.widget, UI)",                "NewWidget", ".widget" },
@@ -187,6 +188,22 @@ namespace content_browser_actions
     static bool IsJs(const stdfs::path& path)
     {
         return LowerExtension(path) == ".js";
+    }
+
+    // JavaScript is DEPRECATED : Voxel Assembly (.vasm) replaces it.
+    static const char* const kJavaScriptDeprecated =
+        "JavaScript is DEPRECATED and will be removed from Lynx.\n\n"
+        "You must move to Voxel Assembly : Content Browser > New > Voxel Assembly (.vasm). "
+        "Its actor classes are made of blocks, graphs and functions, and the engine runs them itself.\n\n"
+        "Port your .js files to Voxel Assembly now : they will stop working.";
+
+    static void WarnJavaScriptDeprecated(bool always)
+    {
+        static bool shown = false;
+        if (shown && !always)
+            return;
+        shown = true;
+        ShowEditorWarning(kJavaScriptDeprecated);
     }
 
     // -------------------------------------------------------------------------
@@ -369,6 +386,9 @@ namespace content_browser_actions
         {
             const std::string name = ToIdentifier(stem);
             return
+                "// !!! DEPRECATED !!! JavaScript will be removed from Lynx : write this class in\n"
+                "// Voxel Assembly instead (Content Browser > New > Voxel Assembly, .vasm).\n"
+                "//\n"
                 "// Actor class : shows up in Place Actors, levels and Level.spawn(\"" + name + "\").\n"
                 "// It can live anywhere in assets/.\n"
                 "class " + name + " extends Actor {\n"
@@ -390,6 +410,8 @@ namespace content_browser_actions
 
         case NewFileKind::JavaScriptScript:
             return
+                "// !!! DEPRECATED !!! JavaScript will be removed from Lynx : use Voxel Assembly (.vasm).\n"
+                "//\n"
                 "// Script attached to an actor (scripts property) : `parent` is that actor.\n"
                 "let speed = 1.0;\n"
                 "\n"
@@ -527,7 +549,11 @@ namespace content_browser_actions
         else if (lynx::editor::particle_editor::CanOpen(path))
             lynx::editor::particle_editor::Open(path);
         else if (lynx::editor::script_editors::CanOpen(path))
+        {
+            if (IsJs(path))
+                WarnJavaScriptDeprecated(false);
             lynx::editor::script_editors::Open(path);
+        }
         else
             OpenInExplorer(path, false);   // default application
     }
@@ -673,6 +699,7 @@ namespace content_browser_actions
         {
             ScriptsChanged({ destination });
             lynx::editor::script_editors::Open(destination);
+            WarnJavaScriptDeprecated(true);
         }
         else if (lynx::editor::vasm_editor::CanOpen(destination))
         {
@@ -931,7 +958,7 @@ namespace content_browser_actions
         {
         case NewFileKind::VoxelAssembly:
         case NewFileKind::JavaScriptClass:
-        case NewFileKind::JavaScriptScript: return "Scripting";
+        case NewFileKind::JavaScriptScript: return "Deprecated : use Voxel Assembly";
         case NewFileKind::Level:            return "World";
         case NewFileKind::Widget:           return "User Interface";
         case NewFileKind::AnimGraph:        return "Animation";
@@ -947,8 +974,8 @@ namespace content_browser_actions
         {
         case NewFileKind::Text:             return "Plain text file : notes, data.";
         case NewFileKind::VoxelAssembly:    return "A new actor class made of blocks, graphs and functions (no code to write).";
-        case NewFileKind::JavaScriptClass:  return "A new actor class (class X extends Actor).";
-        case NewFileKind::JavaScriptScript: return "A behaviour to attach to any actor.";
+        case NewFileKind::JavaScriptClass:  return "DEPRECATED, will be removed : make a Voxel Assembly instead.";
+        case NewFileKind::JavaScriptScript: return "DEPRECATED, will be removed : make a Voxel Assembly instead.";
         case NewFileKind::Level:            return "A level and its voxel world (.hrlv).";
         case NewFileKind::Json:             return "Structured data read by your scripts.";
         case NewFileKind::Widget:           return "A user interface (menu, HUD), Widget Editor.";
@@ -972,11 +999,12 @@ namespace content_browser_actions
         entries.push_back({ "Folder", "Folder", "Organize the assets.", Kind::Folder,
                             [folder]() { BeginNew(NameAction::NewFolder, NewFileKind::Text, folder); } });
 
-        // Order of the sections : World, Scripting, User Interface, Animation, AI, Effects, Data.
+        // Order of the sections : World, Scripting, User Interface, Animation, AI, Effects, Data, Deprecated.
         const NewFileKind order[] = {
-            NewFileKind::Level, NewFileKind::VoxelAssembly, NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript, NewFileKind::Widget,
+            NewFileKind::Level, NewFileKind::VoxelAssembly, NewFileKind::Widget,
             NewFileKind::AnimGraph, NewFileKind::BehaviorTree, NewFileKind::ParticleSystem, NewFileKind::Json,
             NewFileKind::Text,
+            NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript,   // deprecated : last
         };
         for (NewFileKind kind : order)
         {

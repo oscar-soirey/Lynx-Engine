@@ -1,4 +1,12 @@
-# Scripting JS (QuickJS-ng)
+# Scripting JS (QuickJS-ng) — ⚠️ DÉPRÉCIÉ
+
+> ⚠️ **JavaScript est ultra déprécié et va être supprimé de Lynx.**
+> Il faut absolument passer à **Voxel Assembly** (fichiers `.vasm`,
+> *Content Browser > New > Voxel Assembly*) : des classes d'acteurs faites de
+> blocs, de graphes et de fonctions, exécutées par le moteur lui-même.
+> Ne commencez rien de nouveau en JavaScript ; l'éditeur et le moteur affichent
+> un avertissement pour chaque `.js` encore utilisé. Ce document ne sert plus
+> qu'à maintenir l'existant le temps de le porter.
 
 Modèle léger : un script n'est pas une classe, c'est un comportement qu'on attache
 à un `Actor`. Le même fichier peut être attaché à plusieurs acteurs ; chaque attache

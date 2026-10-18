@@ -112,7 +112,7 @@ namespace lynx::editor::ui
 
         const char* const kFileKindNames[] = {
             "Folder", "File", "Text", "Script", "Python", "Cpp", "Data", "Level", "Image", "Sound", "Font",
-            "Widget", "AnimGraph", "BehaviorTree", "Voxels", "Config", "Code", "Markup",
+            "Widget", "AnimGraph", "BehaviorTree", "Voxels", "Config", "Code", "Markup", "VoxelAssembly",
         };
         static_assert(sizeof(kFileKindNames) / sizeof(kFileKindNames[0]) == static_cast<size_t>(file_icons::Kind::Count),
                       "kFileKindNames must follow file_icons::Kind");

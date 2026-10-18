@@ -3,6 +3,11 @@
 /**
  * API publique du scripting JavaScript (QuickJS-ng).
  *
+ * !!! DEPRECATED !!! JavaScript will be removed from Lynx. New gameplay
+ * code MUST be written in Voxel Assembly (.vasm files, src/vasm) : actor
+ * classes made of blocks, run by the engine itself. Every .js loaded prints a
+ * warning ; port the existing scripts to Voxel Assembly.
+ *
  * Les scripts s'attachent aux acteurs via ScriptComponent / Actor::AddScript,
  * ou via la propriete "scripts" dans le fichier de niveau :
  *     <Player object_id_="player" scripts="scripts/Player.js"/>

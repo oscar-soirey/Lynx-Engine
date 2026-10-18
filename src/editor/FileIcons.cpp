@@ -35,8 +35,10 @@ namespace lynx::editor::file_icons
 
 		if (name == "voxels.json")
 			return Kind::Voxels;
-		if (extension == ".js" || extension == ".mjs" || extension == ".ts" || extension == ".vasm")
-			return Kind::Script;
+		if (extension == ".vasm")
+			return Kind::VoxelAssembly;
+		if (extension == ".js" || extension == ".mjs" || extension == ".ts")
+			return Kind::Script;   // deprecated : the icon carries a warning
 		if (extension == ".py")
 			return Kind::Python;
 		if (Is(extension, { ".cpp", ".cc", ".c", ".h", ".hpp", ".inl" }))
@@ -74,7 +76,7 @@ namespace lynx::editor::file_icons
 		{
 		case Kind::Folder: return "Folder";
 		case Kind::Text: return "Text";
-		case Kind::Script: return "JavaScript";
+		case Kind::Script: return "JavaScript (DEPRECATED : use Voxel Assembly)";
 		case Kind::Python: return "Python";
 		case Kind::Cpp: return "C / C++";
 		case Kind::Data: return "JSON data";
@@ -89,6 +91,7 @@ namespace lynx::editor::file_icons
 		case Kind::Config: return "Settings";
 		case Kind::Code: return "Code";
 		case Kind::Markup: return "Markup";
+		case Kind::VoxelAssembly: return "Voxel Assembly";
 		default: return "File";
 		}
 	}

@@ -20,7 +20,7 @@ namespace editor_ui::content_browser
 
     static const char* const kKindNames[] = {
         "Folder", "File", "Text", "Script", "Python", "Cpp", "Data", "Level", "Image", "Sound", "Font",
-        "Widget", "AnimGraph", "BehaviorTree", "Voxels", "Config", "Code", "Markup",
+        "Widget", "AnimGraph", "BehaviorTree", "Voxels", "Config", "Code", "Markup", "VoxelAssembly",
     };
 
     struct Tile

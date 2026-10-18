@@ -56,6 +56,31 @@ def lines(im,y0,n,c=(170,164,155,255),x0=10,x1=21):
         w = x1 - (3 if i%3==2 else 0)
         rect(im,x0,y0+i*3,w,y0+i*3,c)
 
+def warning(im, x0=17, y0=17):
+    # warning triangle (deprecated file types) : 14 wide, 13 tall, "!" inside
+    from PIL import ImageDraw
+    d=ImageDraw.Draw(im)
+    W=14; H=13; cx=x0+W//2
+    d.polygon([(cx,y0),(x0+W,y0+H-1),(x0,y0+H-1)],fill=(255,204,48,255),outline=(150,28,28,255))
+    for y in range(y0+H-2,y0+H-1): rect(im,x0+2,y,x0+W-2,y,(222,150,24,255))
+    rect(im,cx,y0+4,cx,y0+8,(110,16,16,255)); px(im,cx,y0+10,(110,16,16,255))
+def iso_cube(im, cx, top, e, ctop, cleft, cright, out=OUT):
+    # isometric voxel : top rhombus and two side faces, edge e
+    from PIL import ImageDraw
+    d=ImageDraw.Draw(im); h=e//2
+    d.polygon([(cx-e,top+h),(cx,top+2*h),(cx,top+2*h+e),(cx-e,top+h+e)],fill=cleft,outline=out)
+    d.polygon([(cx+e,top+h),(cx,top+2*h),(cx,top+2*h+e),(cx+e,top+h+e)],fill=cright,outline=out)
+    d.polygon([(cx,top),(cx+e,top+h),(cx,top+2*h),(cx-e,top+h)],fill=ctop,outline=out)
+def block(im, x0, y0, x1, y1, c, hat=False, notch_above=None):
+    # a Voxel Assembly block (Scratch-like) with the notch of the block above
+    outline_rect(im,x0,y0,x1,y1,c,shade(c,0.55),round_=not hat)
+    rect(im,x0+1,y1-1,x1-1,y1-1,shade(c,0.8))
+    if hat:
+        for x in range(x0+1,x0+10): px(im,x,y0-1,shade(c,0.55))
+        rect(im,x0+1,y0,x0+9,y0,c); px(im,x0,y0,shade(c,0.55))
+    if notch_above:
+        rect(im,x0+3,y0,x0+6,y0,notch_above)
+
 icons=[]
 # 0 Folder (lynx ears on the tab)
 im=new(); BODY=(242,180,76,255); BACK=(214,146,54,255); HI=(252,212,122,255); FO=(120,76,32,255); PINK=(240,150,140,255)
@@ -80,7 +105,8 @@ icons.append(('File',im))
 # 2 Text
 im=new(); page(im); lines(im,10,6); icons.append(('Text',im))
 # 3 JS
-im=new(); page(im,True,(247,212,72,255),"JS",OUT); lines(im,8,3); icons.append(('Script',im))
+# JavaScript is deprecated (Voxel Assembly replaces it) : warning triangle
+im=new(); page(im,True,(247,212,72,255),"JS",OUT); lines(im,8,3); warning(im); icons.append(('Script',im))
 # 4 Python
 im=new(); page(im,True,(74,124,190,255),"PY",(255,224,96,255)); lines(im,8,3); icons.append(('Python',im))
 # 5 C++
@@ -153,6 +179,15 @@ icons.append(('Config',im))
 im=new(); page(im,True,(84,92,110,255),"<>" if False else "{}"); lines(im,8,3); icons.append(('Code',im))
 # 17 Level xml-other : Markup
 im=new(); page(im,True,(226,124,64,255),"XML"); lines(im,8,3); icons.append(('Markup',im))
+
+# 18 Voxel Assembly (.vasm) : stacked blocks and a voxel
+im=new()
+block(im,2,4,20,10,(255,184,40,255),hat=True)
+block(im,4,10,24,16,(76,151,255,255),notch_above=(255,184,40,255))
+block(im,4,16,18,22,(160,104,255,255),notch_above=(76,151,255,255))
+block(im,2,22,14,28,(255,140,26,255),notch_above=(160,104,255,255))
+iso_cube(im,23,16,7,(108,232,214,255),(46,170,170,255),(28,118,132,255))
+icons.append(('VoxelAssembly',im))
 
 rows=(len(icons)+COLS-1)//COLS
 atlas=Image.new('RGBA',(COLS*N*SCALE,rows*N*SCALE),(0,0,0,0))

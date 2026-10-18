@@ -2648,6 +2648,16 @@ namespace lynx
 					pending.push_back(std::move(file));
 			}
 
+			// JavaScript is DEPRECATED : Voxel Assembly (.vasm) replaces it.
+			if (!pending.empty())
+			{
+				std::cout << kLogPrefix << "WARNING : JavaScript is DEPRECATED and will be removed. "
+				          << pending.size() << " .js class file(s) still loaded :" << std::endl;
+				for (const Pending& file : pending)
+					std::cout << kLogPrefix << "  - " << file.path << std::endl;
+				std::cout << kLogPrefix << "Rewrite them in Voxel Assembly (.vasm : Content Browser > New > Voxel Assembly)." << std::endl;
+			}
+
 			// Plusieurs passes : un fichier qui herite d'une classe d'un autre
 			// fichier pas encore charge (ReferenceError) est reessaye.
 			bool progress = true;
@@ -3362,6 +3372,17 @@ namespace lynx
 			return false;
 		if (ScriptInstance* existing = impl_->Find(path))
 			return existing->loaded;
+
+		// JavaScript is DEPRECATED : one warning per script.
+		{
+			static std::vector<std::string> warned;
+			if (std::find(warned.begin(), warned.end(), path) == warned.end())
+			{
+				warned.push_back(path);
+				std::cout << kLogPrefix << "WARNING : " << path
+				          << " is a JavaScript script, DEPRECATED : move it to Voxel Assembly (.vasm)." << std::endl;
+			}
+		}
 
 		auto inst = std::make_unique<ScriptInstance>();
 		inst->path = path;

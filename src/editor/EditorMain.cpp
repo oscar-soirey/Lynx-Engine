@@ -1648,6 +1648,7 @@ static void CreateActorFromAsset(
 
 
 // Right click menus, rename / duplicate / delete / new file... of the browser.
+static void ShowEditorWarning(const std::string& text);   // below
 #include "ContentBrowserActions.inl"
 
 // Git window (status, commit, pull / push, history) : Raven window windows/git.xml.

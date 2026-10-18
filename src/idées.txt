@@ -24,6 +24,8 @@ revoir le template rpg il est completement bugué avec la camera (elle fait une 
 
 dans quasiemnt tous les projets, le terrain peint en voxels disparait, mais a moitié, et il disparait vraiment, pas juste invisible, je sais pas pouruqoi.
 
+revoir completement les nodes Raven et Lynx
+
 
 
 
