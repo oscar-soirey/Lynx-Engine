@@ -22,7 +22,12 @@
 			<Section Text="Theme"/>
 			<ComboBox Name="options.theme" Width="240"/>
 			<Checkbox Name="options.rounded" Text="Rounded corners"/>
-			<Label Text="Theme files : src/editor/interface/themes (set LYNX_UI_DIR to edit them while the editor runs)." Class="dim" Wrap="true"/>
+			<HBox Spacing="4">
+				<Button Name="options.theme.new" Text="New theme" Tooltip="Creates a theme file from a commented template and opens it. Saved changes are applied right away."/>
+				<Button Name="options.theme.edit" Text="Edit" Tooltip="Opens the file of this theme (your own themes only)."/>
+				<Button Name="options.theme.folder" Text="Open themes folder"/>
+			</HBox>
+			<Label Name="options.theme.info" Text="Your themes : every .xml file of the themes folder. Saving one applies it at once." Class="dim" Wrap="true"/>
 
 			<Separator Slot.Padding="0,8"/>
 			<Button Name="options.reset" Text="Reset interface"/>
@@ -47,6 +52,11 @@
 				<Slider Name="project.camera_speed" Min="1" Max="400" Step="1" Slot.Fill="1"/>
 				<Label Name="project.camera_speed.value" Width="44" TextAlign="Right" Slot.VAlign="Center"/>
 			</PropertyRow>
+			<Section Text="Renderer"/>
+			<PropertyRow Label="Game renderer">
+				<ComboBox Name="project.renderer" Items="Vulkan|OpenGL" Slot.Fill="1" Tooltip="Graphics API of the game (Lynx Runtime, shipped game). Vulkan falls back to OpenGL on a computer without Vulkan. Command line : --vulkan / --opengl."/>
+			</PropertyRow>
+			<Label Text="Applied the next time the game starts. The editor Viewport is drawn by OpenGL inside the Vulkan interface." Class="dim" Wrap="true"/>
 			<Section Text="Voxels"/>
 			<PropertyRow Label="Render mode">
 				<ComboBox Name="project.render_mode" Items="Flat|Smooth|Blocky" Slot.Fill="1"/>

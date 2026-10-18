@@ -191,19 +191,20 @@ namespace editor_ui::shell
                 continue;
             const Rid panel = *e.panel;
             const bool open = IsPanelOpen(panel) != 0;
-            menu.Check(e.label, open, [panel, open]()
+            Rid item = menu.Check(e.label, open, [panel, open]()
             {
                 if (open)
                     HidePanel(panel);
                 else
                     ShowPanel(panel);
             }, panel != g.viewport_panel);
+            eui::SetMenuIcon(item, e.icon);
         }
         // Their Raven windows come with the next versions of the editor.
         menu.Separator();
-        menu.Item("Input Settings", []() { lynx::editor::input_settings::Show(); });
-        menu.Item("Git", []() { git_window::Show(); });
-        menu.Item("Profiler", []() { lynx::editor::profiler_window::Show(); });
+        eui::SetMenuIcon(menu.Item("Input Settings", []() { lynx::editor::input_settings::Show(); }), lynx::editor::icons::Icon::Input);
+        eui::SetMenuIcon(menu.Item("Git", []() { git_window::Show(); }), lynx::editor::icons::Icon::Git);
+        eui::SetMenuIcon(menu.Item("Profiler", []() { lynx::editor::profiler_window::Show(); }), lynx::editor::icons::Icon::Profiler);
         menu.Separator();
         OpenUnder(menu, under);
     }
@@ -465,6 +466,7 @@ namespace editor_ui::shell
         Rid speed = find("project.camera_speed");
         Rid speed_value = find("project.camera_speed.value");
         Rid mode = find("project.render_mode");
+        Rid renderer = find("project.renderer");
 
         auto show = [=]()
         {
@@ -477,6 +479,9 @@ namespace editor_ui::shell
             eui::SetText(speed_value, Format("%.0f", appSettings.cameraSpeed));
             if (Rcombo_box_get_selected(mode) != static_cast<int>(appSettings.voxelRenderMode))
                 Rcombo_box_set_selected(mode, static_cast<int>(appSettings.voxelRenderMode));
+            // Items="Vulkan|OpenGL" : the order of lynx::host::RenderBackend.
+            if (Rcombo_box_get_selected(renderer) != static_cast<int>(appSettings.renderer))
+                Rcombo_box_set_selected(renderer, static_cast<int>(appSettings.renderer));
         };
 
         eui::OnToggle(reload, [](bool on) { appSettings.reloadAfterBuild = on; SaveSettings(); });
@@ -508,6 +513,13 @@ namespace editor_ui::shell
             appSettings.voxelRenderMode = static_cast<HRL_EVoxelRenderMode>(index);
             HRL_SetVoxelRenderMode(scene, appSettings.voxelRenderMode);
             SaveSettings();
+        });
+        eui::OnSelect(renderer, [](int index)
+        {
+            if (index < 0 || index > 1 || index == static_cast<int>(appSettings.renderer))
+                return;
+            appSettings.renderer = static_cast<lynx::host::RenderBackend>(index);
+            SaveSettings();   // read by LynxRuntime / the shipped game at their start
         });
         eui::OnClick(find("project.reset"), [show]()
         {
@@ -701,6 +713,16 @@ namespace editor_ui::shell
 
         if (Rid label = Rwidget_find(t.play, "label"); label != R_INVALID_ID)
             eui::SetText(label, isPlaying ? "Stop" : "Play");
+        {
+            // The icon follows : Play / Stop (the ImGui toolbar did).
+            static int shown = -1;
+            if (shown != (isPlaying ? 1 : 0))
+            {
+                shown = isPlaying ? 1 : 0;
+                eui::SetIcon(Rwidget_find(t.play, "icon"),
+                             isPlaying ? lynx::editor::icons::Icon::Stop : lynx::editor::icons::Icon::Play);
+            }
+        }
         eui::SetClass(t.play, "play", !isPlaying);
         eui::SetClass(t.play, "stop", isPlaying);
         eui::SetTooltip(t.play, isPlaying

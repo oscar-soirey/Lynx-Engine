@@ -58,10 +58,21 @@ namespace lynx::editor::ui
 
     // ---- themes ---------------------------------------------------------------
 
-    struct ThemeInfo { std::string name; std::string label; };
-    // Themes of the editor : Pixel (Aseprite, the default), Pixel Dark, Lynx (warm dark), Dark, Light.
+    // `file` : the theme file of the user ("" for the themes of the editor).
+    struct ThemeInfo { std::string name; std::string label; std::filesystem::path file; };
+    // Themes of the editor : Pixel (Aseprite, the default), Pixel Dark, Lynx (warm dark), Dark, Light,
+    // then the user's own themes (every .xml of UserThemesFolder()).
     const std::vector<ThemeInfo>& Themes();
     void UseTheme(const std::string& name);
+
+    // Themes written by the user : %APPDATA%/Lynx/themes (~/.config/lynx/themes).
+    std::filesystem::path UserThemesFolder();
+    // Loads the user themes again (new, removed or edited files). true when
+    // something changed (the list or a file).
+    bool ReloadUserThemes();
+    // A new theme file in UserThemesFolder(), from themes/template.xml, with a
+    // free name ("My Theme", "My Theme 2"...). Its path, empty on error.
+    std::filesystem::path CreateUserTheme();
 
     // ---- callbacks owned by the widgets --------------------------------------
 
@@ -126,6 +137,12 @@ namespace lynx::editor::ui
     Rid FileTexture(const std::filesystem::path& path);
     // An Image widget showing an editor icon.
     Rid MakeIcon(icons::Icon icon, float size);
+    // Another icon of the atlas in an <Icon> / MakeIcon image (Play -> Stop...).
+    void SetIcon(Rid image, icons::Icon icon);
+    // Editor icons on the tab of a docked panel, and before the text of a menu item.
+    void SetPanelIcon(Rid dock, Rid panel, icons::Icon icon);
+    void SetMenuIcon(Rid item, icons::Icon icon);
+    void SetMenuFileIcon(Rid item, file_icons::Kind kind);
     icons::Icon IconFromName(const char* name, bool* found = nullptr);
 
     // ---- context menus -----------------------------------------------------------

@@ -9,7 +9,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <unordered_map>
 
@@ -210,6 +212,74 @@ namespace lynx::editor::ui
 
         std::vector<ThemeInfo> g_themes;
 
+        // Themes of the user : file -> last write time, to load them again
+        // when they change (the editor applies a theme as soon as it is saved).
+        struct UserThemeFile { std::filesystem::path file; std::filesystem::file_time_type time; };
+        std::vector<UserThemeFile> g_user_theme_files;
+
+        std::vector<UserThemeFile> ScanUserThemes()
+        {
+            std::vector<UserThemeFile> files;
+            std::error_code error;
+            const std::filesystem::path folder = UserThemesFolder();
+            if (!std::filesystem::is_directory(folder, error))
+                return files;
+            for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+            {
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (ext != ".xml" || !entry.is_regular_file(error))
+                    continue;
+                files.push_back({ entry.path(), entry.last_write_time(error) });
+            }
+            std::sort(files.begin(), files.end(), [](const UserThemeFile& a, const UserThemeFile& b) { return a.file < b.file; });
+            return files;
+        }
+
+        void LoadUserThemes(const std::vector<UserThemeFile>& files)
+        {
+            g_themes.erase(std::remove_if(g_themes.begin(), g_themes.end(),
+                                          [](const ThemeInfo& t) { return !t.file.empty(); }),
+                           g_themes.end());
+            for (const UserThemeFile& f : files)
+            {
+                const std::string path = f.file.string();
+                const char* loaded = Rtheme_load(path.c_str());
+                if (!loaded)
+                {
+                    std::cerr << "[UI] Could not load the theme " << path << " (check its XML)\n";
+                    continue;
+                }
+                const std::string name = loaded;
+                // Same name as a theme of the editor : the user's file replaces it in the list.
+                g_themes.erase(std::remove_if(g_themes.begin(), g_themes.end(),
+                                              [&](const ThemeInfo& t) { return t.name == name; }),
+                               g_themes.end());
+                g_themes.push_back({ name, name + "  (custom)", f.file });
+            }
+            g_user_theme_files = files;
+        }
+
+        // An interface file (embedded, or from LYNX_UI_DIR) as text.
+        std::string ReadInterfaceFile(const char* file)
+        {
+            if (!g_disk_folder.empty())
+            {
+                std::ifstream in(std::filesystem::path(g_disk_folder) / file, std::ios::binary);
+                std::stringstream text;
+                text << in.rdbuf();
+                return text.str();
+            }
+            const std::string wanted = std::string("ui/") + file;
+            for (size_t i = 0; i < kLynxEmbeddedFileCount; ++i)
+            {
+                const LynxEmbeddedFile& embedded = kLynxEmbeddedFiles[i];
+                if (wanted == embedded.path)
+                    return std::string(reinterpret_cast<const char*>(embedded.data), static_cast<size_t>(embedded.size));
+            }
+            return {};
+        }
+
         void LoadThemes()
         {
             struct Entry { const char* file; const char* label; };
@@ -224,12 +294,14 @@ namespace lynx::editor::ui
             {
                 const std::string path = Path(e.file);
                 if (const char* name = Rtheme_load(path.c_str()))
-                    g_themes.push_back({ name, e.label });
+                    g_themes.push_back({ name, e.label, {} });
                 else
                     std::cerr << "[UI] Could not load the theme " << path << "\n";
             }
-            g_themes.push_back({ "Dark", "Dark" });
-            g_themes.push_back({ "Light", "Light" });
+            g_themes.push_back({ "Dark", "Dark", {} });
+            g_themes.push_back({ "Light", "Light", {} });
+
+            LoadUserThemes(ScanUserThemes());
         }
     }
 
@@ -375,6 +447,80 @@ namespace lynx::editor::ui
     {
         if (!Rtheme_use(name.c_str()))
             std::cerr << "[UI] Unknown theme " << name << "\n";
+    }
+
+    std::filesystem::path UserThemesFolder()
+    {
+        std::filesystem::path dir;
+#ifdef _WIN32
+        if (const char* appdata = std::getenv("APPDATA"))
+            dir = std::filesystem::path(appdata) / "Lynx";
+#else
+        if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
+            dir = std::filesystem::path(xdg) / "lynx";
+        else if (const char* home = std::getenv("HOME"))
+            dir = std::filesystem::path(home) / ".config" / "lynx";
+#endif
+        if (dir.empty())
+            dir = std::filesystem::current_path();
+        return dir / "themes";
+    }
+
+    bool ReloadUserThemes()
+    {
+        std::vector<UserThemeFile> files = ScanUserThemes();
+        bool changed = files.size() != g_user_theme_files.size();
+        for (size_t i = 0; !changed && i < files.size(); ++i)
+            changed = files[i].file != g_user_theme_files[i].file || files[i].time != g_user_theme_files[i].time;
+        if (changed)
+            LoadUserThemes(files);
+        return changed;
+    }
+
+    std::filesystem::path CreateUserTheme()
+    {
+        std::string text = ReadInterfaceFile("themes/template.xml");
+        const std::string marker = "Name=\"My Theme\"";
+        const size_t at = text.find(marker);
+        if (text.empty() || at == std::string::npos)
+        {
+            std::cerr << "[UI] themes/template.xml is missing\n";
+            return {};
+        }
+
+        std::error_code error;
+        const std::filesystem::path folder = UserThemesFolder();
+        std::filesystem::create_directories(folder, error);
+
+        // A name (and a file) nobody uses yet.
+        auto name_used = [](const std::string& name)
+        {
+            for (const ThemeInfo& t : g_themes)
+                if (t.name == name)
+                    return true;
+            return false;
+        };
+        std::string name = "My Theme";
+        std::filesystem::path file = folder / "my_theme.xml";
+        for (int n = 2; name_used(name) || std::filesystem::exists(file, error); ++n)
+        {
+            name = "My Theme " + std::to_string(n);
+            file = folder / ("my_theme_" + std::to_string(n) + ".xml");
+        }
+
+        text.replace(at, marker.size(), "Name=\"" + name + "\"");
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            std::cerr << "[UI] Could not write " << file.string() << "\n";
+            return {};
+        }
+        out << text;
+        out.close();
+
+        ReloadUserThemes();
+        std::cout << "[UI] New theme \"" << name << "\" : " << file.string() << "\n";
+        return file;
     }
 
 
@@ -700,6 +846,42 @@ namespace lynx::editor::ui
         uv[3] = (index / kIconColumns + 1) * ch - iv;
     }
 
+    void SetIcon(Rid image, icons::Icon icon)
+    {
+        if (image == R_INVALID_ID)
+            return;
+        float uv[4];
+        IconRegion(icon, uv);
+        Rimage_set_region(image, uv[0], uv[1], uv[2], uv[3]);
+    }
+
+    void SetPanelIcon(Rid dock, Rid panel, icons::Icon icon)
+    {
+        if (dock == R_INVALID_ID || panel == R_INVALID_ID)
+            return;
+        float uv[4];
+        IconRegion(icon, uv);
+        Rdock_area_set_panel_icon(dock, panel, IconTexture(), uv[0], uv[1], uv[2], uv[3], R_TRUE);
+    }
+
+    void SetMenuIcon(Rid item, icons::Icon icon)
+    {
+        if (item == R_INVALID_ID)
+            return;
+        float uv[4];
+        IconRegion(icon, uv);
+        Rmenu_item_set_icon(item, IconTexture(), uv[0], uv[1], uv[2], uv[3], R_TRUE);
+    }
+
+    void SetMenuFileIcon(Rid item, file_icons::Kind kind)
+    {
+        if (item == R_INVALID_ID)
+            return;
+        float uv[4];
+        FileIconRegion(kind, uv);
+        Rmenu_item_set_icon(item, FileIconTexture(), uv[0], uv[1], uv[2], uv[3], R_FALSE);
+    }
+
     Rid FileIconTexture()
     {
         if (g_file_texture == R_INVALID_ID)
@@ -820,9 +1002,47 @@ namespace lynx::editor::ui
         items_ = 0;
     }
 
+    // The icon the ImGui menus showed before these entries (SetMenuIcon gives another one).
+    static bool DefaultMenuIcon(const std::string& text, icons::Icon& icon)
+    {
+        static const std::pair<const char*, icons::Icon> kIcons[] = {
+            { "Copy", icons::Icon::Copy },
+            { "Cut", icons::Icon::Copy },
+            { "Duplicate", icons::Icon::Copy },
+            { "Copy path (relative to assets)", icons::Icon::Copy },
+            { "Delete", icons::Icon::Clear },
+            { "Delete folder (the actors go to the parent)", icons::Icon::Clear },
+            { "Show in Explorer", icons::Icon::Folder },
+            { "Open in Explorer", icons::Icon::Folder },
+            { "Open folder", icons::Icon::Folder },
+            { "New folder", icons::Icon::Folder },
+            { "New subfolder", icons::Icon::Folder },
+            { "Open level", icons::Icon::World },
+            { "Convert to voxels...", icons::Icon::World },
+            { "Compile", icons::Icon::Compile },
+            { "Reload Game", icons::Icon::Reload },
+            { "Project settings...", icons::Icon::Settings },
+            { "Open another project...", icons::Icon::Project },
+            { "Ship Game...", icons::Icon::Play },
+            { "Undo", icons::Icon::Undo },
+            { "Redo", icons::Icon::Redo },
+            { "Save", icons::Icon::Save },
+        };
+        for (const auto& [label, value] : kIcons)
+            if (text == label)
+            {
+                icon = value;
+                return true;
+            }
+        return false;
+    }
+
     Rid Menu::Item(const std::string& text, std::function<void()> fn, bool enabled, const char* shortcut)
     {
         const Rid item = Rmenu_add_item(menu_, text.c_str());
+        icons::Icon icon;
+        if (DefaultMenuIcon(text, icon))
+            SetMenuIcon(item, icon);
         if (shortcut)
             Rwidget_set_attribute(item, "Shortcut", shortcut);
         if (!enabled)

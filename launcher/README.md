@@ -1,6 +1,9 @@
 # Lynx Launcher
 
-Petit programme (ImGui + GLFW) qui prépare une machine Windows pour Lynx.
+Petit programme qui prépare une machine Windows pour Lynx. Son interface est en **Raven**
+(Vulkan), comme l'éditeur : mêmes thèmes (celui choisi dans les options de l'éditeur est repris),
+mêmes widgets partagés (`src/editor/interface/widgets.xml`) et même couche C++
+(`src/editor/raven/RavenUi.*`). La fenêtre est décrite dans `interface/launcher.xml`.
 
 ## Onglets
 
@@ -32,6 +35,14 @@ Petit programme (ImGui + GLFW) qui prépare une machine Windows pour Lynx.
   des projets de jeu le trouve. Les versions installées sont réenregistrées au démarrage, la valeur
   est retirée avec la version. *Lancer* ouvre `LynxEditor.exe` de la version. L'installation
   demande que toutes les dépendances soient présentes.
+- **Versions locales** (*Ajouter une version locale...*, onglet Moteur) : un moteur compilé ou modifié
+  soi-même, ou une version déjà installée ailleurs (autre disque, Microsoft Store...). On choisit le
+  dossier de `LynxEditor.exe`, ou la racine d'un clone du moteur (`build-release/`, `build/`,
+  `cmake-build-*/` y sont cherchés). La version est lue dans son SDK
+  (`sdk/cmake/LynxConfigVersion.cmake`). La liste est gardée dans
+  `%LOCALAPPDATA%\Lynx\local-engines.txt` (`tag<TAB>nom<TAB>dossier`, tag `local-<nom>`).
+  Une version locale se lance, reçoit des plugins (son dossier `plugins/`) et est enregistrée pour
+  `find_package(Lynx)` comme les autres ; *Oublier* la retire de la liste sans toucher à ses fichiers.
 
   `curl.exe` et `tar.exe` sont fournis avec Windows 10 (1803+) et 11.
 - **Plugins** : plugins du moteur installés dans une version choisie
@@ -57,22 +68,25 @@ Un journal en bas de la fenêtre affiche la sortie des commandes.
 
 Le launcher est une cible du CMakeLists racine du moteur, comme `LynxEditor`
 et `LynxRuntime` : `cmake --build build --target LynxLauncher` (ou la cible
-`LynxLauncher` dans CLion). Il utilise le Dear ImGui de `third-party/imgui`
-(style pixel compris) et le GLFW précompilé de `third-party/glfw`.
+`LynxLauncher` dans CLion). Il utilise Raven (`RAVEN_DIR`, à côté du moteur comme pour l'éditeur).
 
 Il ne dépend pas de `lynx.dll` et il est lié en statique (`-static`) : il doit
-démarrer sur un ordinateur où MinGW n'est pas encore installé.
-Police : `normal-font.ttf` à côté de l'exécutable (comme l'éditeur, en 24 px), sinon Segoe UI.
-Les tailles de l'interface sont calculées à partir du texte (pas de largeurs en pixels).
+démarrer sur un ordinateur où MinGW n'est pas encore installé. Vulkan vient du pilote
+graphique (`vulkan-1.dll`) ; sans Vulkan, un message le dit au démarrage.
+`interface/launcher.xml`, les fichiers d'interface de l'éditeur, les icônes et la police sont
+intégrés à l'exécutable (`cmake/LynxEmbedFiles.cmake`, en-tête `generated-launcher/EditorUiFiles.h`) :
+rien à livrer à côté.
 
 ## Code
 
 ```
-main.cpp              fenêtre GLFW, boucle ImGui, style, polices
-Launcher.*        interface et tâches en arrière-plan (un thread à la fois)
+main.cpp          démarrage de Raven, fenêtre, boucle (Tick ~10 fois par seconde), glisser-déposer
+interface/launcher.xml  la fenêtre : barre latérale, les 4 pages, le journal
+Launcher.*        tâches en arrière-plan (un thread à la fois) et interface : les listes sont
+                  reconstruites quand l'état change, barres de progression et journal mis à jour à chaque Tick
 Dependencies.*    liste des dépendances, détection, installation winget
 Models.*          catalogue de modèles, ollama list / pull / rm / serve
-Engine.*          releases GitHub, téléchargement, extraction, lancement
+Engine.*          releases GitHub, téléchargement, extraction, lancement, versions locales
 PluginStore.*     catalogue des plugins, tags, installation / import / retrait
 Process.*         lancement de commandes avec lecture de la sortie, PATH
 ```

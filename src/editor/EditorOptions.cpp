@@ -11,6 +11,13 @@
 #include <string>
 #include <system_error>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 namespace lynx::editor::options
 {
 	namespace
@@ -21,6 +28,7 @@ namespace lynx::editor::options
 		Rid g_scale_value = R_INVALID_ID;
 		Rid g_theme = R_INVALID_ID;
 		Rid g_rounded = R_INVALID_ID;
+		Rid g_theme_edit = R_INVALID_ID;
 
 		constexpr float kMinScale = 0.5f;
 		constexpr float kMaxScale = 2.f;
@@ -132,6 +140,35 @@ namespace lynx::editor::options
 			Rset_ui_scale(g_options.ui_scale);
 		}
 
+		// A file or a folder in its default application (Explorer, the XML editor...).
+		void OpenPath(const std::filesystem::path& path)
+		{
+#ifdef _WIN32
+			ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+			const std::string command = "xdg-open \"" + path.string() + "\" &";
+			std::system(command.c_str());
+#endif
+		}
+
+		const ui::ThemeInfo* CurrentTheme()
+		{
+			for (const ui::ThemeInfo& theme : ui::Themes())
+				if (theme.name == g_options.theme)
+					return &theme;
+			return nullptr;
+		}
+
+		// The theme list changed (user themes added, removed, renamed).
+		void FillThemeList()
+		{
+			if (g_theme == R_INVALID_ID)
+				return;
+			Rcombo_box_clear_items(g_theme);
+			for (const ui::ThemeInfo& theme : ui::Themes())
+				Rcombo_box_add_item(g_theme, theme.label.c_str());
+		}
+
 		void Changed()
 		{
 			Save();
@@ -141,6 +178,8 @@ namespace lynx::editor::options
 				ui::SetValue(g_scale, g_options.ui_scale * 100.f);
 				ui::SetText(g_scale_value, std::to_string(static_cast<int>(std::lround(g_options.ui_scale * 100.f))) + " %");
 				ui::SetChecked(g_rounded, g_options.rounded);
+				const ui::ThemeInfo* current = CurrentTheme();
+				ui::SetEnabled(g_theme_edit, current && !current->file.empty());
 				for (int i = 0; i < static_cast<int>(ui::Themes().size()); ++i)
 					if (ui::Themes()[i].name == g_options.theme && Rcombo_box_get_selected(g_theme) != i)
 						Rcombo_box_set_selected(g_theme, i);
@@ -166,10 +205,43 @@ namespace lynx::editor::options
 		g_scale_value = ui::Find(panel, "options.scale.value");
 		g_theme = ui::Find(panel, "options.theme");
 		g_rounded = ui::Find(panel, "options.rounded");
+		g_theme_edit = ui::Find(panel, "options.theme.edit");
 
-		Rcombo_box_clear_items(g_theme);
-		for (const ui::ThemeInfo& theme : ui::Themes())
-			Rcombo_box_add_item(g_theme, theme.label.c_str());
+		FillThemeList();
+
+		// Own themes : a new one from the template, open the file / the folder.
+		ui::OnClick(ui::Find(panel, "options.theme.new"), []()
+		{
+			const std::filesystem::path file = ui::CreateUserTheme();
+			if (file.empty())
+				return;
+			FillThemeList();
+			// The new theme is the last one of the list : use it, and open its file.
+			if (!ui::Themes().empty())
+				g_options.theme = ui::Themes().back().name;
+			Changed();
+			OpenPath(file);
+		});
+		ui::OnClick(g_theme_edit, []()
+		{
+			if (const ui::ThemeInfo* current = CurrentTheme(); current && !current->file.empty())
+				OpenPath(current->file);
+		});
+		ui::OnClick(ui::Find(panel, "options.theme.folder"), []()
+		{
+			const std::filesystem::path folder = ui::UserThemesFolder();
+			std::error_code ec;
+			std::filesystem::create_directories(folder, ec);
+			OpenPath(folder);
+		});
+		// A theme file saved (or added / removed) : loaded again and applied.
+		ui::Every(1.0, []()
+		{
+			if (!ui::ReloadUserThemes())
+				return;
+			FillThemeList();
+			Changed();
+		});
 
 		// The scale is applied when the slider is released (it would run away under the mouse).
 		ui::OnValue(g_scale, [](double value)

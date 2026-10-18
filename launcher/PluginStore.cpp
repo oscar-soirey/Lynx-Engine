@@ -239,6 +239,17 @@ namespace PluginStore
 		std::sort(out.begin(), out.end(), [](const InstalledEngine& a, const InstalledEngine& b) {
 			return CompareVersions(a.version, b.version) > 0;
 		});
+		// Versions locales (build modifié, copie installée ailleurs) : après celles du launcher.
+		// Sans version lue dans leur SDK, les plugins les voient comme une version très récente.
+		for (const LocalEngine& local : Engine::LocalEngines())
+		{
+			if (!local.present)
+				continue;
+			InstalledEngine engine;
+			engine.tag = local.tag;
+			engine.version = local.version.empty() ? std::string("9999.0.0") : local.version;
+			out.push_back(std::move(engine));
+		}
 		return out;
 	}
 

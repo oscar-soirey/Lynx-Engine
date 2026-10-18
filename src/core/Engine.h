@@ -50,6 +50,13 @@ namespace lynx
 		static void SetReleaseMode(bool release);
 		static bool IsReleaseMode();
 
+		// Where CreateScene() renders : false (default) = an off-screen
+		// texture (editor Viewport, OpenGL runtime that blits it), true = the
+		// window itself (HRL presents it in HRL_EndFrame : Vulkan runtime).
+		// BEFORE CreateScene().
+		static void SetSceneOnScreen(bool on_screen);
+		static bool IsSceneOnScreen();
+
 		// Creates the engine (once ; a second call returns the same one).
 		static Engine* Create();
 
@@ -202,6 +209,7 @@ namespace lynx
 
 		static Engine* instance_;
 		static bool release_mode_;
+		static bool scene_on_screen_;
 
 
 		//async functions registered

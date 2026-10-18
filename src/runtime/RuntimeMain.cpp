@@ -5,6 +5,8 @@
 //
 //   LynxRuntime.exe                    -> project = working directory
 //   LynxRuntime.exe "C:/path/MyGame"   -> project = this folder
+//   ... --opengl / --vulkan             -> render backend (else settings.cfg,
+//                                          Vulkan by default, see host/RenderBackend.h)
 //
 // The project root holds assets/ (and input.json, settings.cfg). The game DLL
 // is looked for next to this executable first (shipped game), then in the
@@ -19,6 +21,7 @@
 #include <glfw/glfw3.h>
 #include <hrl/hrl.h>
 #include <hrl/hrl_gl.h>
+#include <hrl/hrl_vulkan.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../third-party/stb/stb_image.h"
 
@@ -44,6 +47,12 @@
 #include "../gameplay/CameraShake.h"
 #include "../host/GamepadInput.h"
 #include "../host/GameProject.h"
+#include "../host/RenderBackend.h"
+
+// GLFW declares it only with <vulkan/vulkan.h> : the same function, with the
+// Vulkan handles as opaque pointers (VkInstance, VkSurfaceKHR*).
+extern "C" int glfwCreateWindowSurface(void* instance, GLFWwindow* window,
+                                       const void* allocator, void* surface);
 
 static HRL_id scene;
 
@@ -64,6 +73,7 @@ struct AppSettings
     float cameraSpeed = 50.f;
     HRL_EVoxelRenderMode voxelRenderMode = HRL_VOXEL_BLOCKY;
     float voxelPhysicalSize = 0.3f;
+    lynx::host::RenderBackend renderer = lynx::host::kDefaultRenderBackend;
 };
 
 static AppSettings appSettings;
@@ -116,6 +126,12 @@ static void LoadSettings()
                 appSettings.voxelRenderMode =
                     static_cast<HRL_EVoxelRenderMode>(value);
             }
+        }
+        else if (key == "renderer")
+        {
+            std::string value;
+            if (file >> value)
+                appSettings.renderer = lynx::host::ParseRenderBackend(value);
         }
         else if (key == "physical_voxel_size")
         {
@@ -394,6 +410,13 @@ static LONG WINAPI ShippedCrashHandler(EXCEPTION_POINTERS* info)
 #endif
 
 
+// HRL (Vulkan backend) asks for the VkSurfaceKHR of the window.
+static int CreateVulkanSurface(void* instance, void* surface_out, void* user_data)
+{
+    return glfwCreateWindowSurface(instance, static_cast<GLFWwindow*>(user_data), nullptr, surface_out);
+}
+
+
 int main(int argc, char** argv)
 {
     // ------------------------------------------------------------
@@ -401,6 +424,18 @@ int main(int argc, char** argv)
     // ------------------------------------------------------------
 
     std::error_code path_error;
+
+    // --vulkan / --opengl anywhere ; the first other argument is the project.
+    bool backend_forced = false;
+    lynx::host::RenderBackend forced_backend = lynx::host::kDefaultRenderBackend;
+    const char* project_arg = nullptr;
+    for (int i = 1; i < argc; ++i)
+    {
+        if (lynx::host::ParseRenderBackendArg(argv[i], forced_backend))
+            backend_forced = true;
+        else if (!project_arg && argv[i] && argv[i][0] != '\0')
+            project_arg = argv[i];
+    }
 
     // Shipped game (editor > Ship Game) : the assets are packed in this
     // executable ; the game DLL, the engine DLLs and input.json are next to it.
@@ -429,13 +464,13 @@ int main(int argc, char** argv)
 #endif
         std::cout << "[RUNTIME] Shipped game : assets read from the executable\n";
     }
-    else if (argc > 1 && argv[1] && argv[1][0] != '\0')
+    else if (project_arg)
     {
-        std::filesystem::current_path(argv[1], path_error);
+        std::filesystem::current_path(project_arg, path_error);
 
         if (path_error)
         {
-            std::cerr << "[RUNTIME] Could not open the project folder " << argv[1]
+            std::cerr << "[RUNTIME] Could not open the project folder " << project_arg
                       << " : " << path_error.message() << "\n";
             return 1;
         }
@@ -464,6 +499,8 @@ int main(int argc, char** argv)
               << "[RUNTIME] Game DLL : " << game_module_path.string() << "\n";
 
     LoadSettings();
+    if (backend_forced)
+        appSettings.renderer = forced_backend;
 
     // Release mode (packed assets) : lynx::Engine::SetReleaseMode(true) before.
     lynx::Engine* engine =
@@ -504,9 +541,25 @@ int main(int argc, char** argv)
 
     glfwInit();
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // Vulkan without a Vulkan driver / loader : OpenGL instead.
+    bool useVulkan = appSettings.renderer == lynx::host::RenderBackend::Vulkan;
+    if (useVulkan && !glfwVulkanSupported())
+    {
+        std::cerr << "[RENDER] Vulkan is not available on this computer : OpenGL 3.3 instead\n";
+        useVulkan = false;
+    }
+    std::cout << "[RENDER] Backend : " << (useVulkan ? "Vulkan" : "OpenGL 3.3") << "\n";
+
+    if (useVulkan)
+    {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);   // HRL owns the swapchain
+    }
+    else
+    {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    }
 
     // Window title : the project (folder) name.
     // Window title : the executable name for a shipped game, else the project folder.
@@ -543,11 +596,14 @@ int main(int argc, char** argv)
 
     glfwMaximizeWindow(win);
 
-    glfwMakeContextCurrent(win);
+    if (!useVulkan)
+    {
+        glfwMakeContextCurrent(win);
 
-    glfwSwapInterval(
-        appSettings.vsync ? 1 : 0
-    );
+        glfwSwapInterval(
+            appSettings.vsync ? 1 : 0
+        );
+    }
 
     // Icon chosen in Ship Game : written in the executable as "GLFW_ICON",
     // which GLFW uses for the window and the taskbar. assets/icon.png only
@@ -580,7 +636,24 @@ int main(int argc, char** argv)
     glfwSetKeyCallback(win, KeyCallback);
 
 
-    HRL_Init(HRL_OPENGL_33);
+    if (useVulkan)
+    {
+        // The instance extensions GLFW needs for its surface, and the surface itself.
+        uint32_t extension_count = 0;
+        const char** extensions = glfwGetRequiredInstanceExtensions(&extension_count);
+        HRL_Vulkan_SetInstanceExtensions(extensions, extension_count);
+        HRL_Vulkan_SetSurfaceCallback(CreateVulkanSurface, win);
+
+        HRL_Init(HRL_VULKAN);
+
+        // No off-screen copy in Vulkan : the scene renders into the window,
+        // HRL presents it in HRL_EndFrame.
+        lynx::Engine::SetSceneOnScreen(true);
+    }
+    else
+    {
+        HRL_Init(HRL_OPENGL_33);
+    }
 
     // Physical pixels (the framebuffer : DPI scale of Windows), like the
     // FramebufferSizeCallback (registered after the maximize : it may have
@@ -591,7 +664,7 @@ int main(int argc, char** argv)
     HRL_InitContext(
         winX,
         winY,
-        (void*)glfwGetProcAddress
+        useVulkan ? nullptr : (void*)glfwGetProcAddress
     );
 
     // Size known by the widgets too.
@@ -601,7 +674,8 @@ int main(int argc, char** argv)
         ErrorCallback
     );
 
-    scenePresenter.Init();
+    if (!useVulkan)
+        scenePresenter.Init();
 
     HRL_SetDebugLineThickness(
         3.f
@@ -748,8 +822,11 @@ int main(int argc, char** argv)
         lastFrameTime = currentFrameTime;
         dt = std::min(dt, 0.1f);
 
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if (!useVulkan)
+        {
+            glClearColor(0.f, 0.f, 0.f, 1.f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
 
         // FPS counter
         fpsFrames++;
@@ -782,14 +859,18 @@ int main(int argc, char** argv)
             }
         }
 
+        // Vulkan : already presented by HRL_EndFrame (engine->ProgressOneFrame).
+        if (!useVulkan)
         {
-            LYNX_PROFILE_SCOPE("Present scene");
-            scenePresenter.Present(scene, win);
-        }
+            {
+                LYNX_PROFILE_SCOPE("Present scene");
+                scenePresenter.Present(scene, win);
+            }
 
-        {
-            LYNX_PROFILE_SCOPE("Swap buffers");
-            glfwSwapBuffers(win);
+            {
+                LYNX_PROFILE_SCOPE("Swap buffers");
+                glfwSwapBuffers(win);
+            }
         }
 
         // Tracy : one frame (the runtime has no built-in Profiler window).

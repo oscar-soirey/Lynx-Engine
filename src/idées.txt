@@ -1,24 +1,26 @@
 obligé:
 
+passer lynx en Vulkan + opengl toujours disponible
+
+revoir le splash quand on ouvre un projet (bien ecrire Lynx 2027, avec la version exacte en petit)
+
+ecrire son propre theme pour l'application
+
 actions github pour compiler et tout
 
 le launcher devrait accepter une version modifiée ou préinstallée du moteur
 
 ameliorer le zorder entre les sprites
 
-le jeu en shipped crash quand on quitte
+le jeu en shipped crash silencieusement quand on quitte
 
 parfois le sky light fonctionne dans l'editeur mais pas dans le jeu, parfois l'inverse
 
 permettre d'editer et de distrubuer en cross platform windows/linux/macos (et plus tard distribuer aux consoles mais on en est loin)
 
-pipeline vulkan voxels complet
-
 compiler hrl en release
 
 mettre une vraie toolbar
-
-prévenir au premier lancement d'un projet que Lynx est 100% gratuit et local, mais pour les jeux commercials, y'a 5% de royalties a renverser a lynx (voir licence complete)
 
 les liquident buguent pas mal
 

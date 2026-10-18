@@ -52,28 +52,30 @@ namespace editor_ui
         Rid* panel;
         bool* flag;
         const char* label;
+        lynx::editor::icons::Icon icon;
     };
 
     static bool g_build_panel_open = false;    // game_build::WindowOpen() follows it
 
     static std::vector<PanelEntry> PanelEntries()
     {
+        using lynx::editor::icons::Icon;
         return {
-            { &g.viewport_panel, &editorWindows.viewport, "Viewport" },
-            { &g.outliner, &editorWindows.outliner, "Outliner" },
-            { &g.place_actors, &editorWindows.placeActors, "Place Actors" },
-            { &g.content_browser, &editorWindows.contentBrowser, "Content Browser" },
-            { &g.details, &editorWindows.details, "Details" },
-            { &g.color_picking, &editorWindows.colorPicking, "Color Picking" },
-            { &g.paint, &editorWindows.config, "Paint" },
-            { &g.camera_shake, &editorWindows.cameraShake, "Camera Shake" },
-            { &g.post_process, &editorWindows.postProcess, "Post Process" },
-            { &g.lighting2d, &editorWindows.lighting2D, "2D Lighting" },
-            { &g.voxel_world, &editorWindows.voxelWorld, "Voxel World" },
-            { &g.console, &editorWindows.console, "Console" },
-            { &g.build, &g_build_panel_open, "Build" },
-            { &g.commands, &editorWindows.commands, "Commands" },
-            { &g.options, &showEditorOptions, "Options" },
+            { &g.viewport_panel, &editorWindows.viewport, "Viewport", Icon::Camera },
+            { &g.outliner, &editorWindows.outliner, "Outliner", Icon::Outliner },
+            { &g.place_actors, &editorWindows.placeActors, "Place Actors", Icon::PlaceActors },
+            { &g.content_browser, &editorWindows.contentBrowser, "Content Browser", Icon::ContentBrowser },
+            { &g.details, &editorWindows.details, "Details", Icon::Details },
+            { &g.color_picking, &editorWindows.colorPicking, "Color Picking", Icon::ColorPick },
+            { &g.paint, &editorWindows.config, "Paint", Icon::Paint },
+            { &g.camera_shake, &editorWindows.cameraShake, "Camera Shake", Icon::Shake },
+            { &g.post_process, &editorWindows.postProcess, "Post Process", Icon::Eye },
+            { &g.lighting2d, &editorWindows.lighting2D, "2D Lighting", Icon::Eye },
+            { &g.voxel_world, &editorWindows.voxelWorld, "Voxel World", Icon::World },
+            { &g.console, &editorWindows.console, "Console", Icon::Console },
+            { &g.build, &g_build_panel_open, "Build", Icon::Compile },
+            { &g.commands, &editorWindows.commands, "Commands", Icon::Commands },
+            { &g.options, &showEditorOptions, "Options", Icon::Settings },
         };
     }
 
@@ -426,6 +428,7 @@ namespace editor_ui
 #include "PanelPaint.inl"
 #include "PanelConsole.inl"
 #include "PanelTools.inl"
+#include "GraphEditors.inl"
 
 
 // =============================================================================
@@ -520,6 +523,14 @@ namespace editor
         tools::Init();
         lynx::editor::commands_window::BindPanel(g.commands);
 
+        // Behavior Tree / Anim Graph editors : tabs of the dock (they ask before closing).
+        graphs::Init();
+
+        // Icons of the tabs (the ImGui windows had them in their title).
+        for (const PanelEntry& e : PanelEntries())
+            if (*e.panel != R_INVALID_ID && !IsSeparate(*e.panel))
+                eui::SetPanelIcon(g.dock, *e.panel, e.icon);
+
         // Layout of the project, then the panels of editor_windows.txt.
         shell::LoadLayout();
     }
@@ -541,6 +552,9 @@ namespace editor
         paint::Update();
         tools::Update(dt);
         console::Update();
+
+        // Behavior Tree / Anim Graph editors.
+        graphs::Update();
 
         // Commands (Scripts, Lynxie, Console, Reference, AI / MCP).
         lynx::editor::commands_window::UpdatePanel(IsPanelShown(g.commands));

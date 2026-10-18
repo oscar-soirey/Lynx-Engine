@@ -3,10 +3,13 @@
 
 #include <json/json.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <regex>
+#include <sstream>
 
 #ifdef _WIN32
 	#ifndef NOMINMAX
@@ -73,7 +76,171 @@ namespace Engine
 
 	fs::path VersionDirectory(const std::string& tag)
 	{
+		if (IsLocalTag(tag))
+		{
+			for (const LocalEngine& local : LocalEngines())
+				if (local.tag == tag)
+					return local.folder;
+			return {};
+		}
 		return VersionsDirectory() / tag;
+	}
+
+	// -------------------------------------------------------------------------
+	// Versions locales
+	// -------------------------------------------------------------------------
+
+	namespace
+	{
+		fs::path LocalListFile()
+		{
+			return VersionsDirectory().parent_path() / "local-engines.txt";
+		}
+
+		void SaveLocal(const std::vector<LocalEngine>& engines)
+		{
+			std::error_code error;
+			fs::create_directories(LocalListFile().parent_path(), error);
+			std::ofstream out(LocalListFile(), std::ios::binary | std::ios::trunc);
+			out << "# Lynx launcher : versions locales du moteur (tag<TAB>nom<TAB>dossier)\n";
+			for (const LocalEngine& e : engines)
+				out << e.tag << '\t' << e.name << '\t' << reinterpret_cast<const char*>(e.folder.u8string().c_str()) << '\n';
+		}
+
+		// Le dossier de LynxEditor.exe : `folder` lui-même, sinon un dossier de build connu dedans.
+		fs::path FindEditorFolder(const fs::path& folder)
+		{
+			std::error_code error;
+			if (fs::is_regular_file(folder / kEditorExecutable, error))
+				return folder;
+			const char* known[] = { "build-release", "build", "out/build", "bin" };
+			for (const char* sub : known)
+				if (fs::is_regular_file(folder / sub / kEditorExecutable, error))
+					return folder / sub;
+			// cmake-build-debug, cmake-build-release... (CLion)
+			for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error))
+				if (it->is_directory(error) && it->path().filename().string().rfind("cmake-build", 0) == 0 &&
+				    fs::is_regular_file(it->path() / kEditorExecutable, error))
+					return it->path();
+			return {};
+		}
+
+		std::string Slug(const std::string& text)
+		{
+			std::string out;
+			for (char c : text)
+			{
+				const unsigned char u = static_cast<unsigned char>(c);
+				if (std::isalnum(u) || c == '.' || c == '_')
+					out += static_cast<char>(std::tolower(u));
+				else if (!out.empty() && out.back() != '-')
+					out += '-';
+			}
+			while (!out.empty() && out.back() == '-')
+				out.pop_back();
+			return out.empty() ? std::string("engine") : out;
+		}
+	}
+
+	bool IsLocalTag(const std::string& tag)
+	{
+		return tag.rfind("local-", 0) == 0;
+	}
+
+	std::string ReadVersion(const fs::path& engine_folder)
+	{
+		// write_basic_package_version_file : set(PACKAGE_VERSION "27.0.0")
+		std::ifstream in(engine_folder / "sdk" / "cmake" / "LynxConfigVersion.cmake", std::ios::binary);
+		if (!in)
+			return {};
+		std::stringstream text;
+		text << in.rdbuf();
+		static const std::regex version(R"(set\(PACKAGE_VERSION\s+"([0-9][0-9.]*)\"\))");
+		std::smatch match;
+		const std::string content = text.str();
+		return std::regex_search(content, match, version) ? match.str(1) : std::string();
+	}
+
+	std::vector<LocalEngine> LocalEngines()
+	{
+		std::vector<LocalEngine> out;
+		std::ifstream in(LocalListFile(), std::ios::binary);
+		std::string line;
+		while (std::getline(in, line))
+		{
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (line.empty() || line[0] == '#')
+				continue;
+			const size_t a = line.find('\t');
+			const size_t b = a == std::string::npos ? a : line.find('\t', a + 1);
+			if (b == std::string::npos)
+				continue;
+			LocalEngine e;
+			e.tag = line.substr(0, a);
+			e.name = line.substr(a + 1, b - a - 1);
+			const std::string folder = line.substr(b + 1);
+			e.folder = fs::path(std::u8string(folder.begin(), folder.end()));
+			if (!IsLocalTag(e.tag))
+				continue;
+			std::error_code error;
+			e.present = fs::is_regular_file(e.folder / kEditorExecutable, error);
+			e.version = ReadVersion(e.folder);
+			out.push_back(std::move(e));
+		}
+		return out;
+	}
+
+	std::string AddLocal(const fs::path& folder, std::string& error, const LogFn& log)
+	{
+		const fs::path editor = FindEditorFolder(folder);
+		if (editor.empty())
+		{
+			error = "Pas de LynxEditor.exe dans " + folder.string() + " (ni dans build/, build-release/, cmake-build-*/).";
+			log(error);
+			return {};
+		}
+
+		std::vector<LocalEngine> engines = LocalEngines();
+		std::error_code ec;
+		for (const LocalEngine& e : engines)
+			if (fs::equivalent(e.folder, editor, ec))
+			{
+				log("Cette version locale est déjà dans la liste (" + e.name + ").");
+				return e.tag;
+			}
+
+		LocalEngine e;
+		e.folder = editor;
+		// Nom : le dossier du moteur (S:/Horizon/Lynx/build -> "Lynx (build)").
+		const std::string leaf = editor.filename().string();
+		const std::string parent = editor.parent_path().filename().string();
+		e.name = folder == editor ? leaf : parent + " (" + leaf + ")";
+		e.version = ReadVersion(editor);
+		std::string base = "local-" + Slug(folder == editor ? leaf : parent + "-" + leaf);
+		e.tag = base;
+		for (int n = 2; std::any_of(engines.begin(), engines.end(), [&](const LocalEngine& o) { return o.tag == e.tag; }); ++n)
+			e.tag = base + "-" + std::to_string(n);
+		e.present = true;
+		engines.push_back(e);
+		SaveLocal(engines);
+
+		log("Version locale ajoutée : " + e.name + (e.version.empty() ? "" : " (Lynx " + e.version + ")") + " - " + editor.string());
+		RegisterCMakePackage(e.tag, log);
+		return e.tag;
+	}
+
+	void RemoveLocal(const std::string& tag, const LogFn& log)
+	{
+		std::vector<LocalEngine> engines = LocalEngines();
+		const size_t before = engines.size();
+		engines.erase(std::remove_if(engines.begin(), engines.end(), [&](const LocalEngine& e) { return e.tag == tag; }),
+		              engines.end());
+		if (engines.size() == before)
+			return;
+		UnregisterCMakePackage(tag);
+		SaveLocal(engines);
+		log("Version locale retirée de la liste (ses fichiers n'ont pas été touchés).");
 	}
 
 	bool IsInstalled(const std::string& tag)
@@ -220,6 +387,12 @@ namespace Engine
 
 	bool Uninstall(const std::string& tag, const LogFn& log)
 	{
+		// Une version locale n'appartient pas au launcher : on l'oublie seulement.
+		if (IsLocalTag(tag))
+		{
+			RemoveLocal(tag, log);
+			return true;
+		}
 		UnregisterCMakePackage(tag);
 		std::error_code error;
 		fs::remove_all(VersionDirectory(tag), error);
@@ -295,6 +468,9 @@ namespace Engine
 			if (it->is_directory(error) && fs::is_regular_file(SdkConfigDirectory(tag) / "LynxConfig.cmake", error))
 				RegisterCMakePackage(tag, log);
 		}
+		for (const LocalEngine& local : LocalEngines())
+			if (local.present && fs::is_regular_file(SdkConfigDirectory(local.tag) / "LynxConfig.cmake", error))
+				RegisterCMakePackage(local.tag, log);
 	}
 
 	bool Launch(const std::string& tag, const LogFn& log)

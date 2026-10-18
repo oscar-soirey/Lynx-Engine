@@ -337,12 +337,23 @@ target_link_libraries(LynxRuntime PRIVATE
 ## Lynx launcher (installs the dependencies : Python, CMake, MinGW, Git, Ollama + models,
 ## then the engine versions from the GitHub releases, see launcher/README.md)
 # Independent from lynx.dll : it must start on a computer where nothing is installed yet.
+# Interface in Raven, like the editor : same themes, shared widgets and C++ layer
+# (src/editor/raven/RavenUi.cpp), the theme chosen in the editor options.
+# Its window (launcher/interface/launcher.xml) and the editor interface files it
+# uses are embedded in the executable.
 
-# The launcher keeps its ImGui interface (only the editor uses Raven).
-file(GLOB ImGUI_SOURCE "${CMAKE_SOURCE_DIR}/third-party/imgui/*.cpp")
+set(LYNX_LAUNCHER_UI_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated-launcher/EditorUiFiles.h")
+lynx_embed_files("${LYNX_LAUNCHER_UI_HEADER}" "${LYNX_UI_ROOT}"
+		${LYNX_UI_FILES}
+		"${CMAKE_CURRENT_SOURCE_DIR}/launcher/interface/launcher.xml=launcher.xml"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/editor_icons.png=icons/editor_icons.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/file_icons.png=icons/file_icons.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/editor/resources/lynxie.png=icons/lynxie.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/fonts/VCR-OSD-MONO.ttf=fonts/VCR-OSD-MONO.ttf"
+)
 
 add_executable(LynxLauncher src/editor_icon.rc
-		${ImGUI_SOURCE}
+		"${LYNX_LAUNCHER_UI_HEADER}"
 
 		launcher/main.cpp
 		launcher/Launcher.cpp
@@ -351,21 +362,27 @@ add_executable(LynxLauncher src/editor_icon.rc
 		launcher/Engine.cpp
 		launcher/PluginStore.cpp
 		launcher/Process.cpp
-		src/editor/MarkdownText.cpp    # notes de version / descriptions en Markdown
-		launcher/MarkdownShims.cpp     # polices et sélection de l'éditeur remplacées
+
+		# Raven layer of the editor (callbacks, themes, icons, dialogs) and its options (theme, scale)
+		src/editor/raven/RavenUi.cpp
+		src/editor/EditorIcons.cpp
+		src/editor/FileIcons.cpp
+		src/editor/EditorOptions.cpp
 )
 
+target_include_directories(LynxLauncher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated-launcher")
+
 target_link_libraries(LynxLauncher PRIVATE
-		${GLFW_LIB}
-		opengl32
+		raven::raven
 		gdi32
 		shell32     # ShellExecute (links to the websites)
-		advapi32    # registry (PATH refresh after an install)
-		ole32       # folder picker (Plugins > Import a folder)
+		advapi32    # registry (PATH refresh after an install, CMake package registry)
+		ole32       # folder picker (Plugins > Import a folder, local engine versions)
 		uuid
 )
 
 # Static libstdc++ / libgcc and no console : the launcher runs before MinGW is installed.
+# (Vulkan itself comes with the graphics driver : vulkan-1.dll.)
 target_link_options(LynxLauncher PRIVATE -static -mwindows)
 
 

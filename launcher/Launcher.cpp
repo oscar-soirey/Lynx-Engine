@@ -1,81 +1,190 @@
 #include "Launcher.h"
 #include "Process.h"
-#include "../src/editor/MarkdownText.h"
-
-#include <imgui/imgui.h>
-#include <imgui/imgui_internal.h>   // DC.CurrLineTextBaseOffset (alignement des pastilles)
+#include "../src/editor/raven/RavenUi.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+
+namespace ui = lynx::editor::ui;
 
 namespace
 {
-	const ImVec4 kAccent   = ImVec4(0.96f, 0.56f, 0.20f, 1.0f);   // orange « lynx »
-	const ImVec4 kGreen    = ImVec4(0.40f, 0.80f, 0.45f, 1.0f);
-	const ImVec4 kRed      = ImVec4(0.92f, 0.38f, 0.36f, 1.0f);
-	const ImVec4 kYellow   = ImVec4(0.95f, 0.80f, 0.35f, 1.0f);
-	const ImVec4 kMuted    = ImVec4(0.58f, 0.60f, 0.66f, 1.0f);
+	std::string LowerCase(std::string text)
+	{
+		for (char& c : text)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		return text;
+	}
 
-	ImVec4 StateColor(DepState state)
+	bool ContainsI(const std::string& text, const std::string& lower_needle)
+	{
+		return lower_needle.empty() || LowerCase(text).find(lower_needle) != std::string::npos;
+	}
+
+	// Un morceau d'interface (XML sans texte de l'utilisateur : les textes sont posés
+	// ensuite avec ui::SetText, rien à échapper).
+	Rid Make(const char* xml)
+	{
+		return Rwidget_create_from_xml(xml, std::strlen(xml));
+	}
+
+	Rid Child(Rid scope, const char* name)
+	{
+		return Rwidget_find(scope, name);
+	}
+
+	// Couleur d'un texte d'état : une des classes des thèmes (success, warning, error, dim).
+	void SetTone(Rid label, const char* tone)
+	{
+		for (const char* c : { "success", "warning", "error", "dim" })
+			ui::SetClass(label, c, tone && std::strcmp(c, tone) == 0);
+	}
+
+	const char* StateTone(DepState state)
 	{
 		switch (state)
 		{
-		case DepState::Installed:  return kGreen;
+		case DepState::Installed:  return "success";
 		case DepState::Missing:
-		case DepState::Failed:     return kRed;
+		case DepState::Failed:     return "error";
 		case DepState::Installing:
-		case DepState::Checking:   return kYellow;
-		default:                   return kMuted;
+		case DepState::Checking:   return "warning";
+		default:                   return "dim";
 		}
 	}
 
-	// Petite pastille de couleur suivie d'un texte.
-	void StatusDot(const ImVec4& color)
+	std::string Percent(float p)
 	{
-		ImVec2 p = ImGui::GetCursorScreenPos();
-		p.y += ImGui::GetCurrentWindow()->DC.CurrLineTextBaseOffset;
-		float h = ImGui::GetTextLineHeight();
-		float r = h * 0.22f;   // proportionnel à la police
-		ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, p.y + h * 0.5f), r,
-		                                           ImGui::ColorConvertFloat4ToU32(color));
-		ImGui::Dummy(ImVec2(r * 2.0f + h * 0.3f, h));
-		ImGui::SameLine();
+		return std::to_string(static_cast<int>(p * 100.0f)) + " %";
 	}
 
-	bool AccentButton(const char* label, const ImVec2& size = ImVec2(0, 0))
-	{
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(kAccent.x * 0.85f, kAccent.y * 0.85f, kAccent.z * 0.85f, 1));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccent);
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(kAccent.x * 0.7f, kAccent.y * 0.7f, kAccent.z * 0.7f, 1));
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.08f, 0.10f, 1));
-		bool pressed = ImGui::Button(label, size);
-		ImGui::PopStyleColor(4);
-		return pressed;
-	}
+	// ---- Morceaux d'interface des listes ------------------------------------
 
-	void SectionTitle(const char* title, const char* subtitle)
-	{
-		ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.6f);   // ImGui 1.92 : taille dynamique
-		ImGui::TextUnformatted(title);
-		ImGui::PopFont();
-		ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-		ImGui::TextWrapped("%s", subtitle);
-		ImGui::PopStyleColor();
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-	}
+	const char* kDependencyRow = R"xml(
+<Border Class="toolgroup" BorderWidth="1" Padding="14,10">
+	<HBox Spacing="12">
+		<VBox Spacing="2" Slot.Fill="1">
+			<HBox Spacing="6">
+				<Label Name="name"/>
+				<Label Name="optional" Text="(optionnel)" Class="dim" Visibility="Collapsed"/>
+			</HBox>
+			<Label Name="desc" Class="dim" Wrap="true"/>
+		</VBox>
+		<Label Name="state" Width="230" Slot.VAlign="Center"/>
+		<Button Name="install" Text="Installer" Slot.VAlign="Center" Visibility="Collapsed"/>
+		<Button Name="site" Text="Site" Slot.VAlign="Center"/>
+	</HBox>
+</Border>)xml";
+
+	const char* kModelRow = R"xml(
+<Border Class="toolgroup" BorderWidth="1" Padding="14,10">
+	<HBox Spacing="12">
+		<Checkbox Name="select" Slot.VAlign="Center"/>
+		<VBox Spacing="2" Slot.Fill="1">
+			<HBox Spacing="8">
+				<Label Name="name"/>
+				<Label Name="recommended" Text="conseillé" Class="section" Visibility="Collapsed"/>
+			</HBox>
+			<Label Name="desc" Class="dim" Wrap="true"/>
+		</VBox>
+		<Label Name="size" Width="90" Slot.VAlign="Center"/>
+		<VBox Spacing="4" Width="200" Slot.VAlign="Center">
+			<Label Name="state"/>
+			<ProgressBar Name="progress" Visibility="Collapsed"/>
+			<Button Name="remove" Text="Supprimer" Slot.HAlign="Left" Visibility="Collapsed"/>
+		</VBox>
+	</HBox>
+</Border>)xml";
+
+	const char* kOtherModelRow = R"xml(
+<HBox Spacing="8">
+	<Label Name="name" Slot.VAlign="Center"/>
+	<Button Name="remove" Text="Supprimer"/>
+</HBox>)xml";
+
+	const char* kLocalEngineCard = R"xml(
+<Border Class="toolgroup" BorderWidth="1" Padding="16,12">
+	<HBox Spacing="10">
+		<VBox Spacing="2" Slot.Fill="1">
+			<HBox Spacing="8">
+				<Label Name="name" Class="dialog-title"/>
+				<Label Name="badge" Text="Locale" Class="warning" Slot.VAlign="Center"/>
+				<Label Name="state" Slot.VAlign="Center"/>
+			</HBox>
+			<Label Name="info" Class="dim" Wrap="true"/>
+		</VBox>
+		<Button Name="launch" Text="Lancer" Style="Primary" Slot.VAlign="Center"/>
+		<Button Name="folder" Text="Dossier" Slot.VAlign="Center"/>
+		<Button Name="remove" Text="Oublier" Tooltip="Retire cette version de la liste. Ses fichiers ne sont pas supprimés." Slot.VAlign="Center"/>
+	</HBox>
+</Border>)xml";
+
+	const char* kReleaseCard = R"xml(
+<Border Class="toolgroup" BorderWidth="1" Padding="16,12">
+	<VBox Spacing="6">
+		<HBox Spacing="8">
+			<Label Name="version" Class="dialog-title" Slot.VAlign="Center"/>
+			<Label Name="kind" Slot.VAlign="Center"/>
+			<Label Name="latest" Text="Dernière" Class="section" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Spacer Slot.Fill="1"/>
+			<Label Name="state" Slot.VAlign="Center"/>
+		</HBox>
+		<Label Name="info" Class="dim"/>
+		<Label Name="notes" Wrap="true" Visibility="Collapsed" Slot.Padding="0,4"/>
+		<HBox Spacing="6">
+			<ProgressBar Name="progress" Slot.Fill="1" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Button Name="install" Text="Installer" Style="Primary" Visibility="Collapsed"/>
+			<Button Name="launch" Text="Lancer" Style="Primary" Visibility="Collapsed"/>
+			<Button Name="folder" Text="Dossier" Visibility="Collapsed"/>
+			<Button Name="remove" Text="Retirer" Tooltip="Désinstaller cette version" Visibility="Collapsed"/>
+			<Spacer Name="spacer" Slot.Fill="1"/>
+			<Button Name="notes.toggle" Text="Notes de version"/>
+			<Button Name="page" Text="Page GitHub"/>
+		</HBox>
+	</VBox>
+</Border>)xml";
+
+	const char* kPluginCard = R"xml(
+<Border Class="toolgroup" BorderWidth="1" Padding="16,12">
+	<VBox Spacing="4">
+		<HBox Spacing="8">
+			<Label Name="name" Class="dialog-title" Slot.VAlign="Center"/>
+			<Label Name="category" Class="dim" Slot.VAlign="Center"/>
+			<Label Name="badge" Class="section" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Label Name="beta" Text="Beta" Class="warning" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Spacer Slot.Fill="1"/>
+			<Label Name="state" Slot.VAlign="Center"/>
+		</HBox>
+		<Label Name="info" Class="dim"/>
+		<Label Name="older" Class="warning" Wrap="true" Visibility="Collapsed"/>
+		<Label Name="desc" Wrap="true" Slot.Padding="0,4"/>
+		<HBox Spacing="6">
+			<ProgressBar Name="progress" Slot.Fill="1" Slot.VAlign="Center" Visibility="Collapsed"/>
+			<Button Name="install" Text="Installer" Style="Primary" Visibility="Collapsed"/>
+			<Button Name="folder" Text="Dossier" Visibility="Collapsed"/>
+			<Button Name="remove" Text="Retirer" Visibility="Collapsed"/>
+			<Spacer Slot.Fill="1"/>
+			<Button Name="repo" Text="Dépôt" Visibility="Collapsed"/>
+		</HBox>
+	</VBox>
+</Border>)xml";
 }
 
-Launcher::Launcher()
+Launcher::Launcher(Rid window)
+	: m_window(window)
 {
 	m_deps = Dependencies::CreateList();
 	m_models = Models::Catalog();
 	for (ModelInfo& model : m_models)
 		model.selected = model.recommended;
+	m_local_engines = Engine::LocalEngines();
+
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	BindUi();
 	CheckAll();
 }
 
@@ -96,11 +205,19 @@ Launcher::~Launcher()
 
 void Launcher::Log(const std::string& line)
 {
-	std::lock_guard<std::mutex> lock(m_mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	LogLocked(line);
+}
+
+void Launcher::LogLocked(const std::string& line)
+{
 	m_log.push_back(line);
+	++m_log_total;
 	if (m_log.size() > 5000)
+	{
 		m_log.erase(m_log.begin(), m_log.begin() + 1000);
-	m_scroll_log = true;
+		m_log_refill = true;
+	}
 }
 
 void Launcher::RunTask(const std::string& label, std::function<void()> task)
@@ -109,15 +226,17 @@ void Launcher::RunTask(const std::string& label, std::function<void()> task)
 		return;
 	if (m_worker.joinable())
 		m_worker.join();
-	// Appelé depuis Draw (m_mutex déjà tenu) ou le constructeur : pas de verrou ici.
+	// Appelé depuis l'interface (m_mutex déjà tenu) ou le constructeur.
 	m_task_label = label;
+	Changed();
 	m_worker = std::thread([this, task = std::move(task)] {
 		task();
 		{
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			m_task_label.clear();
 		}
 		m_busy = false;
+		Changed();
 	});
 }
 
@@ -129,7 +248,7 @@ void Launcher::CheckAll()
 
 		std::vector<Dependency> deps;
 		{
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			m_package_manager = available;
 			m_package_manager_info = info;
 			for (Dependency& dep : m_deps)
@@ -139,9 +258,10 @@ void Launcher::CheckAll()
 		for (size_t i = 0; i < deps.size(); ++i)
 		{
 			Dependencies::Check(deps[i]);
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			m_deps[i].state = deps[i].state;
 			m_deps[i].version = deps[i].version;
+			Changed();
 		}
 		Log("Vérification terminée.");
 	});
@@ -156,13 +276,14 @@ void Launcher::InstallDependencies(std::vector<size_t> indices)
 		{
 			Dependency dep;
 			{
-				std::lock_guard<std::mutex> lock(m_mutex);
+				std::lock_guard<std::recursive_mutex> lock(m_mutex);
 				m_deps[index].state = DepState::Installing;
 				dep = m_deps[index];
+				Changed();
 			}
 			bool ok = Dependencies::Install(dep, [this](const std::string& l) { Log(l); });
 			failures += ok ? 0 : 1;
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			m_deps[index].state = dep.state;
 			m_deps[index].version = dep.version;
 		}
@@ -176,7 +297,7 @@ void Launcher::RefreshModels()
 	RunTask("Recherche des modèles installés", [this] {
 		bool running = Models::EnsureServer([this](const std::string& l) { Log(l); });
 		std::vector<std::string> installed = running ? Models::ListInstalled() : std::vector<std::string>{};
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		m_server_running = running;
 		m_models_loaded = true;
 		m_other_models.clear();
@@ -203,7 +324,7 @@ void Launcher::PullModels(std::vector<std::string> tags)
 		for (const std::string& tag : tags)
 		{
 			auto set_progress = [this, &tag](float p) {
-				std::lock_guard<std::mutex> lock(m_mutex);
+				std::lock_guard<std::recursive_mutex> lock(m_mutex);
 				for (ModelInfo& model : m_models)
 					if (model.tag == tag)
 						model.progress = p;
@@ -211,7 +332,7 @@ void Launcher::PullModels(std::vector<std::string> tags)
 			};
 			set_progress(0.0f);
 			bool ok = Models::Pull(tag, [this](const std::string& l) { Log(l); }, set_progress);
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			for (ModelInfo& model : m_models)
 				if (model.tag == tag)
 				{
@@ -234,7 +355,7 @@ void Launcher::RemoveModel(const std::string& tag)
 		if (!Models::Remove(tag, [this](const std::string& l) { Log(l); }))
 			return;
 		Log(tag + " supprimé.");
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		for (ModelInfo& model : m_models)
 			if (Models::SameModel(model.tag, tag))
 				model.installed = false;
@@ -258,7 +379,7 @@ bool Launcher::OllamaInstalled() const
 }
 
 // -----------------------------------------------------------------------------
-// Interface
+// Moteur
 // -----------------------------------------------------------------------------
 
 void Launcher::RefreshReleases()
@@ -270,7 +391,9 @@ void Launcher::RefreshReleases()
 		std::vector<EngineRelease> releases;
 		std::string error;
 		bool ok = Engine::FetchReleases(releases, error, [this](const std::string& l) { Log(l); });
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::vector<LocalEngine> local = Engine::LocalEngines();
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		m_local_engines = std::move(local);
 		m_releases_loaded = true;
 		m_releases_error = ok ? "" : error;
 		if (ok)
@@ -280,7 +403,7 @@ void Launcher::RefreshReleases()
 
 void Launcher::InstallRelease(size_t index)
 {
-	EngineRelease release = m_releases[index];   // appelé depuis Draw : m_mutex tenu
+	EngineRelease release = m_releases[index];   // appelé depuis l'interface : m_mutex tenu
 	m_releases[index].progress = 0.0f;
 	RunTask("Installation de Lynx " + release.version, [this, release] {
 		auto find = [this, &release]() -> EngineRelease* {
@@ -290,12 +413,12 @@ void Launcher::InstallRelease(size_t index)
 			return nullptr;
 		};
 		bool ok = Engine::Install(release, [this](const std::string& l) { Log(l); }, [&](float p) {
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			if (EngineRelease* r = find())
 				r->progress = p;
 			m_task_label = "Installation de Lynx " + release.version + " (" + std::to_string(int(p * 100)) + " %)";
 		});
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		if (EngineRelease* r = find())
 		{
 			r->progress = -1.0f;
@@ -307,10 +430,10 @@ void Launcher::InstallRelease(size_t index)
 
 void Launcher::UninstallRelease(size_t index)
 {
-	std::string tag = m_releases[index].tag;   // appelé depuis Draw : m_mutex tenu
+	std::string tag = m_releases[index].tag;   // appelé depuis l'interface : m_mutex tenu
 	RunTask("Désinstallation de " + tag, [this, tag] {
 		bool ok = Engine::Uninstall(tag, [this](const std::string& l) { Log(l); });
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		for (EngineRelease& r : m_releases)
 			if (r.tag == tag)
 				r.installed = !ok && Engine::IsInstalled(tag);
@@ -324,11 +447,12 @@ void Launcher::UninstallRelease(size_t index)
 
 void Launcher::OnDrop(const std::vector<std::string>& paths)
 {
-	std::lock_guard<std::mutex> lock(m_mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
 	for (const std::string& p : paths)
-		// GLFW donne de l'UTF-8 : u8string pour les accents sous Windows
+		// Raven donne de l'UTF-8 : u8string pour les accents sous Windows
 		m_dropped.emplace_back(std::u8string(p.begin(), p.end()));
 	m_page = Page::Plugins;
+	Changed();
 }
 
 void Launcher::ScanPlugins()
@@ -362,7 +486,7 @@ void Launcher::RefreshCatalog()
 		std::vector<CatalogPlugin> catalog;
 		std::string error;
 		bool ok = PluginStore::FetchCatalog(catalog, error, [this](const std::string& l) { Log(l); });
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		m_catalog_loaded = true;
 		m_catalog_error = ok ? "" : error;
 		if (ok)
@@ -372,7 +496,7 @@ void Launcher::RefreshCatalog()
 
 void Launcher::InstallPlugin(size_t catalog_index, const std::string& release_tag)
 {
-	// appelé depuis Draw : m_mutex tenu
+	// appelé depuis l'interface : m_mutex tenu
 	CatalogPlugin plugin = m_catalog[catalog_index];
 	const std::string engine = m_plugin_engine;
 	auto it = std::find_if(plugin.releases.begin(), plugin.releases.end(),
@@ -384,14 +508,14 @@ void Launcher::InstallPlugin(size_t catalog_index, const std::string& release_ta
 
 	RunTask("Installation de " + plugin.name, [this, plugin, release, engine] {
 		auto set_progress = [this, &plugin](float p) {
-			std::lock_guard<std::mutex> lock(m_mutex);
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
 			for (CatalogPlugin& c : m_catalog)
 				if (c.name == plugin.name)
 					c.progress = p;
 			m_task_label = "Installation de " + plugin.name + " (" + std::to_string(int(p * 100)) + " %)";
 		};
 		PluginStore::Install(plugin, release, engine, [this](const std::string& l) { Log(l); }, set_progress);
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		for (CatalogPlugin& c : m_catalog)
 			if (c.name == plugin.name)
 				c.progress = -1.0f;
@@ -401,13 +525,13 @@ void Launcher::InstallPlugin(size_t catalog_index, const std::string& release_ta
 
 void Launcher::ImportPlugins(std::vector<std::filesystem::path> sources)
 {
-	const std::string engine = m_plugin_engine;   // appelé depuis Draw : m_mutex tenu
+	const std::string engine = m_plugin_engine;   // appelé depuis l'interface : m_mutex tenu
 	if (engine.empty() || sources.empty())
 		return;
 	RunTask("Import de plugin(s)", [this, sources, engine] {
 		for (const std::filesystem::path& source : sources)
 			PluginStore::Import(source, engine, [this](const std::string& l) { Log(l); });
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		m_plugins_scan = true;
 	});
 }
@@ -416,752 +540,690 @@ void Launcher::RemovePlugin(const InstalledPlugin& plugin)
 {
 	RunTask("Retrait de " + plugin.name, [this, plugin] {
 		PluginStore::Remove(plugin, [this](const std::string& l) { Log(l); });
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 		m_plugins_scan = true;
 	});
 }
 
 // -----------------------------------------------------------------------------
-// Interface
-// -----------------------------------------------------------------------------
-// Aucune largeur en pixels « en dur » : tout est calculé à partir de la taille
-// du texte (CalcTextSize / GetFrameHeight), pour que rien ne déborde quelle que
-// soit la police.
 
-namespace
+void Launcher::AddLocalEngine()
 {
-	// Largeur d'un bouton pour un libellé donné.
-	float ButtonWidth(const char* label)
-	{
-		return ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-	}
-
-	// SameLine seulement s'il reste la place pour le prochain élément.
-	void SameLineIfFits(float next_width)
-	{
-		float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-		ImGui::SameLine();
-		if (ImGui::GetCursorScreenPos().x + next_width > right)
-			ImGui::NewLine();
-	}
-
-	// Petite étiquette colorée (« Beta », « conseillé »...)
-	void Badge(const char* text, const ImVec4& color)
-	{
-		ImVec2 size = ImGui::CalcTextSize(text);
-		ImVec2 pad(ImGui::GetStyle().FramePadding.x * 0.6f, 1.0f);
-		ImVec2 p = ImGui::GetCursorScreenPos();
-		ImDrawList* draw = ImGui::GetWindowDrawList();
-		draw->AddRectFilled(p, ImVec2(p.x + size.x + pad.x * 2, p.y + size.y + pad.y * 2),
-		                    ImGui::ColorConvertFloat4ToU32(ImVec4(color.x, color.y, color.z, 0.18f)), 2.0f);
-		draw->AddText(ImVec2(p.x + pad.x, p.y + pad.y), ImGui::ColorConvertFloat4ToU32(color), text);
-		ImGui::Dummy(ImVec2(size.x + pad.x * 2, size.y + pad.y * 2));
-	}
-}
-
-void Launcher::Draw()
-{
-	const ImGuiViewport* viewport = ImGui::GetMainViewport();
-	ImGui::SetNextWindowPos(viewport->WorkPos);
-	ImGui::SetNextWindowSize(viewport->WorkSize);
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-	ImGui::Begin("##launcher", nullptr,
-	             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-	             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings);
-	ImGui::PopStyleVar(2);
-
-	std::lock_guard<std::mutex> lock(m_mutex);
-
-	DrawSidebar();
-	ImGui::SameLine(0, 0);
-
-	const float line = ImGui::GetTextLineHeightWithSpacing();
-	float log_height = m_show_log ? line * 5.5f : ImGui::GetFrameHeightWithSpacing() + 12.0f;
-	ImGui::BeginGroup();
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(line * 1.2f, line));
-	ImGui::BeginChild("##content", ImVec2(0, -log_height), ImGuiChildFlags_AlwaysUseWindowPadding);
-	switch (m_page)
-	{
-	case Page::Dependencies: DrawDependencies(); break;
-	case Page::Models:       DrawModels();       break;
-	case Page::Engine:       DrawEngine();       break;
-	case Page::Plugins:      DrawPlugins();      break;
-	}
-	ImGui::EndChild();
-	ImGui::PopStyleVar();
-	DrawLog();
-	ImGui::EndGroup();
-
-	ImGui::End();
-}
-
-void Launcher::DrawSidebar()
-{
-	int installed = 0;
-	for (const Dependency& dep : m_deps)
-		installed += dep.state == DepState::Installed;
-	std::string dep_badge = std::to_string(installed) + "/" + std::to_string(m_deps.size());
-	bool ready = RequiredInstalled();
-
-	int models = static_cast<int>(m_other_models.size());
-	for (const ModelInfo& model : m_models)
-		models += model.installed;
-	std::string model_badge = m_models_loaded ? std::to_string(models) : "";
-
-	int versions = 0;
-	for (const EngineRelease& release : m_releases)
-		versions += release.installed;
-	std::string engine_badge = m_releases_loaded ? std::to_string(versions) + "/" + std::to_string(m_releases.size()) : "";
-
-	std::string plugin_badge = m_plugin_engine.empty() ? "" : std::to_string(m_installed_plugins.size());
-
-	struct Item { const char* label; Page page; bool enabled; std::string badge; ImVec4 color; };
-	Item items[] = {
-		{ "Dépendances", Page::Dependencies, true, dep_badge, ready ? kGreen : kYellow },
-		{ "Modèles IA",  Page::Models, OllamaInstalled(), model_badge, kMuted },
-		{ "Moteur",      Page::Engine, true, engine_badge, kMuted },
-		{ "Plugins",     Page::Plugins, true, plugin_badge, kMuted },
-	};
-
-	// largeur : le plus long « libellé + badge », et le texte d'état du bas
-	const ImGuiStyle& style = ImGui::GetStyle();
-	const float pad = ImGui::GetTextLineHeight();
-	float width = 0.0f;
-	for (const Item& item : items)
-		width = std::max(width, ImGui::CalcTextSize(item.label).x + ImGui::CalcTextSize("0/0").x + pad * 1.8f);
-	width += pad * 2;
-
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.075f, 0.08f, 0.095f, 1));
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
-	ImGui::BeginChild("##sidebar", ImVec2(width, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
-
-	ImGui::PushFont(nullptr, style.FontSizeBase * 1.8f);
-	ImGui::TextColored(kAccent, "LYNX");
-	ImGui::PopFont();
-	ImGui::TextColored(kMuted, "launcher");
-	ImGui::Dummy(ImVec2(0, pad));
-
-	const float row = ImGui::GetFrameHeight() * 1.3f;
-	for (const Item& item : items)
-	{
-		bool active = m_page == item.page;
-		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.17f, 0.18f, 0.21f, 1));
-		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.14f, 0.15f, 0.18f, 1));
-		ImGui::BeginDisabled(!item.enabled);
-		ImVec2 pos = ImGui::GetCursorScreenPos();
-		float avail = ImGui::GetContentRegionAvail().x;
-		ImGui::PushID(item.label);
-		if (ImGui::Selectable("##nav", active, 0, ImVec2(avail, row)))
-		{
-			m_page = item.page;
-			if (item.page == Page::Plugins)
-				m_plugins_scan = true;   // une version a pu être installée / un plugin ajouté à la main
-		}
-		ImGui::PopID();
-		ImDrawList* draw = ImGui::GetWindowDrawList();
-		float text_y = pos.y + (row - ImGui::GetTextLineHeight()) * 0.5f;
-		if (active)
-			draw->AddRectFilled(pos, ImVec2(pos.x + 3, pos.y + row), ImGui::ColorConvertFloat4ToU32(kAccent));
-		draw->AddText(ImVec2(pos.x + pad * 0.7f, text_y), ImGui::GetColorU32(ImGuiCol_Text), item.label);
-		if (!item.badge.empty())
-		{
-			ImVec2 size = ImGui::CalcTextSize(item.badge.c_str());
-			draw->AddText(ImVec2(pos.x + avail - size.x - pad * 0.4f, text_y),
-			              ImGui::ColorConvertFloat4ToU32(item.color), item.badge.c_str());
-		}
-		ImGui::EndDisabled();
-		ImGui::PopStyleColor(2);
-	}
-
-	// bas de la barre : état général
-	float bottom = ImGui::GetWindowHeight() - ImGui::GetTextLineHeightWithSpacing() * 2.0f - pad;
-	if (ImGui::GetCursorPosY() < bottom)
-		ImGui::SetCursorPosY(bottom);
-	ImGui::Separator();
-	ImGui::Spacing();
-	if (Busy())
-	{
-		const char* spinner = "|/-\\";
-		ImGui::TextColored(kYellow, "%c Travail en cours", spinner[int(ImGui::GetTime() * 8) % 4]);
-	}
-	else
-	{
-		StatusDot(ready ? kGreen : kYellow);
-		ImGui::TextUnformatted(ready ? "Prêt" : "À compléter");
-	}
-
-	ImGui::EndChild();
-	ImGui::PopStyleVar();
-	ImGui::PopStyleColor();
-}
-
-void Launcher::DrawDependencies()
-{
-	SectionTitle("Dépendances",
-	             "Outils nécessaires pour compiler et utiliser le moteur Lynx. "
-	             "Ollama est installé par défaut ; les modèles se choisissent dans l'onglet Modèles IA.");
-
-	if (!m_package_manager && !m_package_manager_info.empty())
-	{
-		ImGui::PushStyleColor(ImGuiCol_Text, kRed);
-		ImGui::TextWrapped("%s", m_package_manager_info.c_str());
-		ImGui::PopStyleColor();
-		ImGui::Spacing();
-	}
-
-	// « Tout installer » : les outils nécessaires (les optionnels ont leur bouton).
-	std::vector<size_t> missing;
-	for (size_t i = 0; i < m_deps.size(); ++i)
-		if (m_deps[i].required && (m_deps[i].state == DepState::Missing || m_deps[i].state == DepState::Failed))
-			missing.push_back(i);
-
-	const float tall = ImGui::GetFrameHeight() * 1.3f;
-	ImGui::BeginDisabled(Busy() || missing.empty() || !m_package_manager);
-	std::string install_label = missing.empty() ? "Tout est installé"
-	                                            : "Tout installer (" + std::to_string(missing.size()) + ")";
-	if (AccentButton(install_label.c_str(), ImVec2(0, tall)))
-		InstallDependencies(missing);
-	ImGui::EndDisabled();
-	SameLineIfFits(ButtonWidth("Revérifier"));
-	ImGui::BeginDisabled(Busy());
-	if (ImGui::Button("Revérifier", ImVec2(0, tall)))
-		CheckAll();
-	ImGui::EndDisabled();
-	if (m_package_manager && !m_package_manager_info.empty())
-	{
-		std::string via = "via " + m_package_manager_info;
-		SameLineIfFits(ImGui::CalcTextSize(via.c_str()).x);
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextColored(kMuted, "%s", via.c_str());
-	}
-	ImGui::Spacing();
-
-	ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_PadOuterX;
-	if (ImGui::BeginTable("##deps", 3, flags))
-	{
-		// colonnes fixes ajustées automatiquement à leur contenu
-		ImGui::TableSetupColumn("Outil", ImGuiTableColumnFlags_WidthStretch);
-		float dot = ImGui::GetTextLineHeight() * 0.75f;
-		ImGui::TableSetupColumn("État", ImGuiTableColumnFlags_WidthFixed,
-		                        dot + std::max(ImGui::CalcTextSize("Installé 00.00.0").x, ImGui::CalcTextSize("Vérification...").x));
-		ImGui::TableSetupColumn("##action", ImGuiTableColumnFlags_WidthFixed,
-		                        ButtonWidth("Installer") + ImGui::GetStyle().ItemSpacing.x + ButtonWidth("Site"));
-		ImGui::TableHeadersRow();
-
-		for (size_t i = 0; i < m_deps.size(); ++i)
-		{
-			Dependency& dep = m_deps[i];
-			ImGui::PushID(static_cast<int>(i));
-			ImGui::TableNextRow();
-
-			ImGui::TableNextColumn();
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(dep.name.c_str());
-			if (!dep.required)
-			{
-				ImGui::SameLine();
-				ImGui::TextColored(kMuted, "(optionnel)");
-			}
-			ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-			ImGui::TextWrapped("%s", dep.description.c_str());
-			ImGui::PopStyleColor();
-
-			ImGui::TableNextColumn();
-			ImGui::AlignTextToFramePadding();
-			StatusDot(StateColor(dep.state));
-			if (dep.state == DepState::Installed)
-				ImGui::Text("%s %s", Dependencies::StateLabel(dep.state), dep.version.c_str());
-			else if (dep.state == DepState::Missing && !dep.version.empty())
-			{
-				ImGui::TextColored(kRed, "%s", Dependencies::StateLabel(dep.state));
-				ImGui::TextColored(kMuted, "(%s trouvé)", dep.version.c_str());
-			}
-			else
-				ImGui::TextUnformatted(Dependencies::StateLabel(dep.state));
-
-			ImGui::TableNextColumn();
-			if (dep.state == DepState::Missing || dep.state == DepState::Failed)
-			{
-				ImGui::BeginDisabled(Busy() || (!m_package_manager && dep.download_url.empty()));
-				if (ImGui::Button("Installer"))
-					InstallDependencies({ i });
-				ImGui::EndDisabled();
-				ImGui::SameLine();
-			}
-			if (ImGui::Button("Site"))
-				Process::OpenUrl(dep.url);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", dep.url.c_str());
-
-			ImGui::PopID();
-		}
-		ImGui::EndTable();
-	}
-
-	ImGui::Spacing();
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	ImGui::TextWrapped("Les installations passent par winget et peuvent demander une confirmation "
-	                   "administrateur (UAC). Si un outil reste « Manquant » après son installation, "
-	                   "relance le launcher pour recharger le PATH.");
-	ImGui::PopStyleColor();
-}
-
-void Launcher::DrawModels()
-{
-	SectionTitle("Modèles IA",
-	             "Modèles locaux utilisés par Lynxie, l'assistant de l'éditeur (Commands > Local AI). "
-	             "Aucun n'est installé par défaut : choisis ceux que ta machine peut faire tourner.");
-
-	if (!OllamaInstalled())
-	{
-		ImGui::PushStyleColor(ImGuiCol_Text, kYellow);
-		ImGui::TextWrapped("Ollama n'est pas installé : installe-le depuis l'onglet Dépendances.");
-		ImGui::PopStyleColor();
+#ifdef _WIN32
+	// appelé depuis l'interface : m_mutex tenu
+	const std::filesystem::path folder = PluginStore::PickFolder();
+	if (folder.empty())
 		return;
-	}
-
-	// première ouverture : on interroge Ollama une fois
-	if (!m_models_loaded && !Busy())
-		RefreshModels();
-
-	// état du serveur
-	ImGui::AlignTextToFramePadding();
-	StatusDot(m_server_running ? kGreen : kMuted);
-	const char* server = m_server_running ? "Serveur Ollama actif (localhost:11434)" : "Serveur Ollama non contacté";
-	ImGui::TextUnformatted(server);
-	const char* refresh = m_server_running ? "Actualiser" : "Démarrer / actualiser";
-	SameLineIfFits(ButtonWidth(refresh));
-	ImGui::BeginDisabled(Busy());
-	if (ImGui::Button(refresh))
-		RefreshModels();
-	ImGui::EndDisabled();
-	ImGui::Spacing();
-
-	std::vector<std::string> selected;
-	for (const ModelInfo& model : m_models)
-		if (model.selected && !model.installed)
-			selected.push_back(model.tag);
-
-	ImGui::BeginDisabled(Busy() || selected.empty());
-	std::string pull_label = selected.empty() ? "Aucun modèle sélectionné"
-	                                          : "Télécharger la sélection (" + std::to_string(selected.size()) + ")";
-	if (AccentButton(pull_label.c_str(), ImVec2(0, ImGui::GetFrameHeight() * 1.3f)))
-		PullModels(selected);
-	ImGui::EndDisabled();
-	ImGui::Spacing();
-
-	ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_PadOuterX;
-	if (ImGui::BeginTable("##models", 4, flags))
-	{
-		const ImGuiStyle& style = ImGui::GetStyle();
-		ImGui::TableSetupColumn("##sel", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
-		ImGui::TableSetupColumn("Modèle", ImGuiTableColumnFlags_WidthStretch);
-		ImGui::TableSetupColumn("Taille", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("~19.0 Go").x);
-		ImGui::TableSetupColumn("État", ImGuiTableColumnFlags_WidthFixed,
-		                        std::max(ImGui::CalcTextSize("Non installé").x + ImGui::GetTextLineHeight() * 0.75f,
-		                                 ButtonWidth("Supprimer")));
-		ImGui::TableHeadersRow();
-
-		for (size_t i = 0; i < m_models.size(); ++i)
-		{
-			ModelInfo& model = m_models[i];
-			ImGui::PushID(static_cast<int>(i));
-			ImGui::TableNextRow();
-
-			ImGui::TableNextColumn();
-			ImGui::BeginDisabled(model.installed || Busy());
-			ImGui::Checkbox("##s", &model.selected);
-			ImGui::EndDisabled();
-
-			ImGui::TableNextColumn();
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(model.tag.c_str());
-			if (model.recommended)
-			{
-				SameLineIfFits(ImGui::CalcTextSize("conseillé").x + style.FramePadding.x * 2);
-				Badge("conseillé", kAccent);
-			}
-			ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-			ImGui::TextWrapped("%s VRAM conseillée : %s.", model.description.c_str(), model.vram.c_str());
-			ImGui::PopStyleColor();
-
-			ImGui::TableNextColumn();
-			ImGui::AlignTextToFramePadding();
-			ImGui::TextUnformatted(model.size.c_str());
-
-			ImGui::TableNextColumn();
-			ImGui::AlignTextToFramePadding();
-			if (model.progress >= 0.0f)
-			{
-				char overlay[16];
-				std::snprintf(overlay, sizeof(overlay), "%d %%", int(model.progress * 100));
-				ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccent);
-				ImGui::ProgressBar(model.progress, ImVec2(-1, 0), overlay);
-				ImGui::PopStyleColor();
-			}
-			else if (model.installed)
-			{
-				StatusDot(kGreen);
-				ImGui::TextUnformatted("Installé");
-				ImGui::BeginDisabled(Busy());
-				if (ImGui::Button("Supprimer"))
-					RemoveModel(model.tag);
-				ImGui::EndDisabled();
-			}
-			else
-			{
-				StatusDot(kMuted);
-				ImGui::TextColored(kMuted, "Non installé");
-			}
-			ImGui::PopID();
-		}
-		ImGui::EndTable();
-	}
-
-	ImGui::Spacing();
-	ImGui::Spacing();
-	ImGui::TextUnformatted("Autre modèle Ollama");
-	ImGui::SetNextItemWidth(ImGui::CalcTextSize("qwen2.5-coder:14b-instruct").x + 20.0f);
-	ImGui::InputTextWithHint("##custom", "ex : llama3.1:8b", m_custom_model, sizeof(m_custom_model));
-	SameLineIfFits(ButtonWidth("Télécharger"));
-	ImGui::BeginDisabled(Busy() || m_custom_model[0] == '\0');
-	if (ImGui::Button("Télécharger"))
-	{
-		PullModels({ m_custom_model });
-		m_custom_model[0] = '\0';
-	}
-	ImGui::EndDisabled();
-	SameLineIfFits(ButtonWidth("Catalogue Ollama"));
-	if (ImGui::Button("Catalogue Ollama"))
-		Process::OpenUrl("https://ollama.com/library");
-
-	if (!m_other_models.empty())
-	{
-		ImGui::Spacing();
-		ImGui::TextColored(kMuted, "Autres modèles installés :");
-		for (const std::string& name : m_other_models)
-		{
-			ImGui::PushID(name.c_str());
-			ImGui::AlignTextToFramePadding();
-			ImGui::BulletText("%s", name.c_str());
-			ImGui::SameLine();
-			ImGui::BeginDisabled(Busy());
-			if (ImGui::Button("Supprimer"))
-				RemoveModel(name);
-			ImGui::EndDisabled();
-			ImGui::PopID();
-		}
-	}
+	RunTask("Ajout d'une version locale", [this, folder] {
+		std::string error;
+		const std::string tag = Engine::AddLocal(folder, error, [this](const std::string& l) { Log(l); });
+		std::vector<LocalEngine> local = Engine::LocalEngines();
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		m_local_engines = std::move(local);
+		if (!tag.empty())
+			m_plugin_engine = tag;   // les plugins visent la version qu'on vient d'ajouter
+		m_plugins_scan = true;
+	});
+#endif
 }
 
-void Launcher::DrawEngine()
+void Launcher::RemoveLocalEngine(const std::string& tag)
 {
-	SectionTitle("Moteur",
-	             "Versions de Lynx publiées sur GitHub (releases de oscar-soirey/Lynx-Engine). "
-	             "Chaque version s'installe dans son propre dossier : on peut en garder plusieurs.");
+	Engine::RemoveLocal(tag, [this](const std::string& l) { LogLocked(l); });
+	m_local_engines = Engine::LocalEngines();
+	m_plugins_scan = true;
+	Changed();
+}
 
-	if (!m_releases_loaded && !Busy())
-		RefreshReleases();
+std::string Launcher::EngineLabel(const std::string& tag) const
+{
+	for (const LocalEngine& local : m_local_engines)
+		if (local.tag == tag)
+			return local.name + " (locale" + (local.version.empty() ? "" : ", " + local.version) + ")";
+	return tag;
+}
 
-	ImGui::BeginDisabled(Busy());
-	if (ImGui::Button("Actualiser"))
-		RefreshReleases();
-	ImGui::EndDisabled();
-	SameLineIfFits(ButtonWidth("Dossier des versions"));
-	if (ImGui::Button("Dossier des versions"))
+// -----------------------------------------------------------------------------
+// Interface : la fenêtre (interface/launcher.xml)
+// -----------------------------------------------------------------------------
+
+Rid Launcher::W(const char* name) const
+{
+	return ui::Find(m_window, name);
+}
+
+void Launcher::OnClick(Rid button, std::function<void()> fn)
+{
+	ui::OnClick(button, [this, fn = std::move(fn)] {
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		fn();
+		Changed();
+	});
+}
+
+void Launcher::BindUi()
+{
+	Rimage_set_texture(W("side.logo"), ui::Texture("icons/lynxie.png"));
+
+	// Barre latérale
+	const std::pair<const char*, Page> nav[] = {
+		{ "nav.deps", Page::Dependencies }, { "nav.models", Page::Models },
+		{ "nav.engine", Page::Engine }, { "nav.plugins", Page::Plugins },
+	};
+	for (const auto& [name, page] : nav)
 	{
+		const Page target = page;
+		OnClick(W(name), [this, target] {
+			m_page = target;
+			if (target == Page::Plugins)
+				m_plugins_scan = true;   // une version a pu être installée / un plugin ajouté à la main
+		});
+	}
+
+	// Dépendances
+	OnClick(W("deps.install"), [this] {
+		std::vector<size_t> missing;
+		for (size_t i = 0; i < m_deps.size(); ++i)
+			if (m_deps[i].required && (m_deps[i].state == DepState::Missing || m_deps[i].state == DepState::Failed))
+				missing.push_back(i);
+		if (!missing.empty() && m_package_manager && !Busy())
+			InstallDependencies(missing);
+	});
+	OnClick(W("deps.check"), [this] { if (!Busy()) CheckAll(); });
+
+	// Modèles
+	OnClick(W("models.refresh"), [this] { if (!Busy()) RefreshModels(); });
+	OnClick(W("models.pull"), [this] {
+		std::vector<std::string> selected;
+		for (const ModelInfo& model : m_models)
+			if (model.selected && !model.installed)
+				selected.push_back(model.tag);
+		if (!selected.empty() && !Busy())
+			PullModels(selected);
+	});
+	OnClick(W("models.custom.pull"), [this] {
+		Rid input = W("models.custom");
+		const char* text = Rtext_input_get_text(input);
+		std::string tag = text ? text : "";
+		tag.erase(0, tag.find_first_not_of(" \t"));
+		while (!tag.empty() && (tag.back() == ' ' || tag.back() == '\t'))
+			tag.pop_back();
+		if (tag.empty() || Busy())
+			return;
+		PullModels({ tag });
+		ui::SetText(input, "");
+	});
+	OnClick(W("models.catalog"), [] { Process::OpenUrl("https://ollama.com/library"); });
+
+	// Moteur
+	OnClick(W("engine.refresh"), [this] { if (!Busy()) RefreshReleases(); });
+	OnClick(W("engine.add_local"), [this] { if (!Busy()) AddLocalEngine(); });
+	OnClick(W("engine.folder"), [] {
 		std::error_code error;
 		std::filesystem::create_directories(Engine::VersionsDirectory(), error);
 		Process::OpenFolder(Engine::VersionsDirectory());
-	}
-	SameLineIfFits(ButtonWidth("Page GitHub"));
-	if (ImGui::Button("Page GitHub"))
+	});
+	OnClick(W("engine.github"), [] {
 		Process::OpenUrl(std::string("https://github.com/") + Engine::kRepository + "/releases");
+	});
+	OnClick(W("engine.goto_deps"), [this] { m_page = Page::Dependencies; });
 
-	if (!RequiredInstalled())
-	{
-		ImGui::Spacing();
-		ImGui::AlignTextToFramePadding();
-		StatusDot(kYellow);
-		ImGui::PushStyleColor(ImGuiCol_Text, kYellow);
-		ImGui::TextWrapped("Installe toutes les dépendances pour pouvoir installer une version.");
-		ImGui::PopStyleColor();
-		SameLineIfFits(ButtonWidth("Aller aux dépendances"));
-		if (ImGui::Button("Aller aux dépendances"))
-			m_page = Page::Dependencies;
-	}
-	if (!m_releases_error.empty())
-	{
-		ImGui::Spacing();
-		ImGui::PushStyleColor(ImGuiCol_Text, kRed);
-		ImGui::TextWrapped("%s", m_releases_error.c_str());
-		ImGui::PopStyleColor();
-	}
-	ImGui::Spacing();
-	ImGui::Spacing();
-
-	if (m_releases.empty())
-	{
-		ImGui::TextColored(kMuted, m_releases_loaded ? "Aucune version publiée pour l'instant."
-		                                             : "Lecture des versions...");
-		return;
-	}
-
-	// Grille de cartes : autant de colonnes que la largeur le permet.
-	const ImGuiStyle& style = ImGui::GetStyle();
-	const float line = ImGui::GetTextLineHeightWithSpacing();
-	const float gap = style.ItemSpacing.x * 2.0f;
-	const float card_pad = ImGui::GetTextLineHeight() * 0.9f;
-	const float min_width = std::max(ButtonWidth("Lancer") + ButtonWidth("Dossier") + ButtonWidth("Retirer") +
-	                                 style.ItemSpacing.x * 2 + card_pad * 2 + 4.0f,
-	                                 ImGui::GetTextLineHeight() * 20.0f);   // assez large pour les notes
-	const float avail = ImGui::GetContentRegionAvail().x;
-	const int columns = std::max(1, int((avail + gap) / (min_width + gap)));
-	const float width = (avail - gap * (columns - 1)) / columns;
-	const float height = line * 15.0f + ImGui::GetFrameHeight();   // ~10 lignes de notes
-
-	for (size_t i = 0; i < m_releases.size(); ++i)
-	{
-		if (i % columns != 0)
-			ImGui::SameLine(0, gap);
-		DrawReleaseCard(i, ImVec2(width, height));
-		if ((i + 1) % columns == 0)
-			ImGui::Dummy(ImVec2(0, gap * 0.5f));
-	}
-}
-
-void Launcher::DrawReleaseCard(size_t index, const ImVec2& size)
-{
-	EngineRelease& release = m_releases[index];
-	const ImGuiStyle& style = ImGui::GetStyle();
-	const bool latest = index == 0;
-	const bool installing = release.progress >= 0.0f;
-
-	ImGui::PushID(release.tag.c_str());
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.135f, 0.14f, 0.165f, 1));
-	ImGui::PushStyleColor(ImGuiCol_Border, latest ? kAccent : ImVec4(0.24f, 0.25f, 0.29f, 1));
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, latest ? 2.0f : 1.0f);
-	const float pad = ImGui::GetTextLineHeight() * 0.9f;
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
-	ImGui::BeginChild("##card", size, ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
-	                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-	// En-tête : « 26.0.1 (Beta) »
-	const float top = ImGui::GetCursorPosY();
-	ImGui::PushFont(nullptr, style.FontSizeBase * 1.5f);
-	ImGui::TextUnformatted(release.version.c_str());
-	const float title_height = ImGui::GetItemRectSize().y;
-	ImGui::PopFont();
-	// badges centrés verticalement sur le numéro de version
-	const float badge_y = top + (title_height - ImGui::GetTextLineHeight() - 2.0f) * 0.5f;
-	ImGui::SameLine();
-	ImGui::SetCursorPosY(badge_y);
-	Badge(release.prerelease ? "Beta" : "Stable", release.prerelease ? kYellow : kGreen);
-	if (latest)
-	{
-		ImGui::SameLine();
-		ImGui::SetCursorPosY(badge_y);
-		Badge("Dernière", kAccent);
-	}
-	ImGui::SetCursorPosY(top + title_height + style.ItemSpacing.y);
-
-	// Infos
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	std::string info = release.date;
-	if (release.asset_size > 0)
-		info += "  |  " + Engine::FormatSize(release.asset_size);
-	ImGui::TextUnformatted(info.c_str());
-	ImGui::PopStyleColor();
-
-	ImGui::AlignTextToFramePadding();
-	if (installing)
-	{
-		StatusDot(kYellow);
-		ImGui::TextUnformatted("Installation...");
-	}
-	else if (release.installed)
-	{
-		StatusDot(kGreen);
-		ImGui::TextUnformatted("Installée");
-	}
-	else
-	{
-		StatusDot(kMuted);
-		ImGui::TextColored(kMuted, release.asset_url.empty() ? "Pas d'archive Windows" : "Non installée");
-	}
-
-	// Notes de version : zone qui prend la place restante, au-dessus des boutons
-	const float buttons_height = ImGui::GetFrameHeight() + style.ItemSpacing.y;
-	float notes_height = ImGui::GetContentRegionAvail().y - buttons_height - style.ItemSpacing.y;
-	if (notes_height > ImGui::GetTextLineHeight())
-	{
-		ImGui::BeginChild("##notes", ImVec2(0, notes_height), ImGuiChildFlags_None);
-		std::string notes = release.body.empty() ? release.name : release.body;
-		if (notes.empty())
-			notes = "Pas de notes pour cette version.";
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.81f, 0.85f, 1));
-		lynx::editor::markdown::Render(notes);
-		ImGui::PopStyleColor();
-		ImGui::EndChild();
-	}
-
-	// Actions, en bas de la carte
-	ImGui::SetCursorPosY(ImGui::GetWindowHeight() - pad - ImGui::GetFrameHeight());
-	if (installing)
-	{
-		char overlay[16];
-		std::snprintf(overlay, sizeof(overlay), "%d %%", int(release.progress * 100));
-		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccent);
-		ImGui::ProgressBar(release.progress, ImVec2(-1, 0), overlay);
-		ImGui::PopStyleColor();
-	}
-	else if (release.installed)
-	{
-		ImGui::BeginDisabled(Busy());
-		if (AccentButton("Lancer"))
-			Engine::Launch(release.tag, [this](const std::string& l) {
-				m_log.push_back(l);   // m_mutex déjà tenu (Draw)
-				m_scroll_log = true;
-			});
-		ImGui::SameLine();
-		if (ImGui::Button("Dossier"))
-			Process::OpenFolder(Engine::VersionDirectory(release.tag));
-		ImGui::SameLine();
-		if (ImGui::Button("Retirer"))
-			UninstallRelease(index);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Désinstaller cette version");
-		ImGui::EndDisabled();
-	}
-	else
-	{
-		ImGui::BeginDisabled(Busy() || !RequiredInstalled() || release.asset_url.empty());
-		if (AccentButton("Installer"))
-			InstallRelease(index);
-		ImGui::EndDisabled();
-		if (!RequiredInstalled() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Installe d'abord les dépendances.");
-		ImGui::SameLine();
-		if (ImGui::Button("Notes complètes"))
-			Process::OpenUrl(release.page_url);
-	}
-
-	ImGui::EndChild();
-	ImGui::PopStyleVar(2);
-	ImGui::PopStyleColor(2);
-	ImGui::PopID();
-}
-
-namespace
-{
-	std::string LowerCase(std::string text)
-	{
-		for (char& c : text)
-			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		return text;
-	}
-
-	bool ContainsI(const std::string& text, const std::string& lower_needle)
-	{
-		return lower_needle.empty() || LowerCase(text).find(lower_needle) != std::string::npos;
-	}
-}
-
-void Launcher::DrawPlugins()
-{
-	SectionTitle("Plugins",
-	             "Plugins du moteur, installés dans une version de Lynx (dossier plugins de la version). "
-	             "Une fois installé, un plugin s'active par projet dans l'éditeur : Options > Plugins.");
-
-	if (m_plugins_scan)
-		ScanPlugins();
-	if (!m_catalog_loaded && !Busy())
-		RefreshCatalog();
-
-	auto log = [this](const std::string& line) {   // m_mutex déjà tenu (Draw)
-		m_log.push_back(line);
-		m_scroll_log = true;
-	};
-
-	// Dossiers / archives glissés sur la fenêtre
-	if (!m_dropped.empty() && !Busy())
-	{
-		if (m_plugin_engine.empty())
-			log("Échec de l'import : installe d'abord une version du moteur (onglet Moteur).");
-		else
-			ImportPlugins(m_dropped);
-		m_dropped.clear();
-	}
-
-	if (m_engines.empty())
-	{
-		ImGui::AlignTextToFramePadding();
-		StatusDot(kYellow);
-		ImGui::TextColored(kYellow, "Aucune version du moteur installée : les plugins s'installent dans une version.");
-		SameLineIfFits(ButtonWidth("Aller au moteur"));
-		if (ImGui::Button("Aller au moteur"))
-			m_page = Page::Engine;
-		ImGui::Spacing();
-	}
-
-	// --- Version cible + actions ---
-	ImGui::AlignTextToFramePadding();
-	ImGui::TextUnformatted("Version du moteur");
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(ImGui::CalcTextSize("v00.00.00 (dernière)").x + ImGui::GetFrameHeight() * 2.0f);
-	ImGui::BeginDisabled(Busy() || m_engines.empty());
-	if (ImGui::BeginCombo("##engine", m_plugin_engine.empty() ? "aucune" : m_plugin_engine.c_str()))
-	{
-		for (size_t i = 0; i < m_engines.size(); ++i)
-		{
-			std::string label = m_engines[i].tag + (i == 0 ? " (dernière)" : "");
-			if (ImGui::Selectable(label.c_str(), m_engines[i].tag == m_plugin_engine))
-			{
-				m_plugin_engine = m_engines[i].tag;
-				m_plugins_scan = true;
-			}
-		}
-		ImGui::EndCombo();
-	}
-	ImGui::EndDisabled();
-
-	SameLineIfFits(ButtonWidth("Actualiser"));
-	ImGui::BeginDisabled(Busy());
-	if (ImGui::Button("Actualiser"))
-	{
+	// Plugins
+	OnClick(W("plugins.goto_engine"), [this] { m_page = Page::Engine; });
+	OnClick(W("plugins.refresh"), [this] {
 		m_plugins_scan = true;
-		RefreshCatalog();
-	}
-	ImGui::EndDisabled();
-
-	SameLineIfFits(ButtonWidth("Importer un dossier..."));
-	ImGui::BeginDisabled(Busy() || m_plugin_engine.empty());
-	if (ImGui::Button("Importer un dossier..."))
-	{
+		if (!Busy())
+			RefreshCatalog();
+	});
+	OnClick(W("plugins.import"), [this] {
 #ifdef _WIN32
+		if (Busy() || m_plugin_engine.empty())
+			return;
 		std::filesystem::path folder = PluginStore::PickFolder();
 		if (!folder.empty())
 			ImportPlugins({ folder });
 #endif
-	}
-	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip("Un dossier contenant plugin.json (et bin/).\n"
-		                  "On peut aussi glisser un dossier ou un .zip sur la fenêtre.");
-
-	SameLineIfFits(ButtonWidth("Dossier des plugins"));
-	ImGui::BeginDisabled(m_plugin_engine.empty());
-	if (ImGui::Button("Dossier des plugins"))
-	{
+	});
+	OnClick(W("plugins.folder"), [this] {
+		if (m_plugin_engine.empty())
+			return;
 		std::error_code error;
 		std::filesystem::path dir = PluginStore::PluginsDirectory(m_plugin_engine);
 		std::filesystem::create_directories(dir, error);
 		Process::OpenFolder(dir);
-	}
-	ImGui::EndDisabled();
+	});
+	ui::OnSelect(W("plugins.engine"), [this](int index) {
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		if (m_updating || index < 0 || index >= static_cast<int>(m_engines.size()))
+			return;
+		if (m_engines[static_cast<size_t>(index)].tag != m_plugin_engine)
+		{
+			m_plugin_engine = m_engines[static_cast<size_t>(index)].tag;
+			m_plugins_scan = true;
+			Changed();
+		}
+	});
+	ui::OnSelect(W("plugins.category"), [this](int index) {
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		if (m_updating)
+			return;
+		m_plugin_category = index <= 0 || index > static_cast<int>(m_category_items.size())
+			? std::string() : m_category_items[static_cast<size_t>(index - 1)];
+		Changed();
+	});
+	ui::OnText(W("plugins.search"), [this](const std::string& text) {
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		m_plugin_search = text;
+		Changed();
+	});
+	ui::OnToggle(W("plugins.beta"), [this](bool on) {
+		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+		m_plugin_prerelease = on;
+		Changed();
+	});
 
-	// --- Filtres ---
+	// Journal
+	OnClick(W("log.toggle"), [this] {
+		m_log_visible = !m_log_visible;
+		ui::SetVisible(W("log.lines"), m_log_visible);
+		ui::SetText(W("log.toggle"), m_log_visible ? "Masquer le journal" : "Journal");
+	});
+	OnClick(W("log.copy"), [this] {
+		std::string all;
+		for (const std::string& line : m_log)
+			all += line + "\n";
+		Rclipboard_set_text(all.c_str());
+	});
+	OnClick(W("log.clear"), [this] {
+		m_log.clear();
+		m_log_refill = true;
+	});
+}
+
+void Launcher::ShowPage(Page page)
+{
+	m_shown_page = page;
+	ui::SetVisible(W("page.deps"), page == Page::Dependencies);
+	ui::SetVisible(W("page.models"), page == Page::Models);
+	ui::SetVisible(W("page.engine"), page == Page::Engine);
+	ui::SetVisible(W("page.plugins"), page == Page::Plugins);
+	ui::SetClass(W("nav.deps"), "active", page == Page::Dependencies);
+	ui::SetClass(W("nav.models"), "active", page == Page::Models);
+	ui::SetClass(W("nav.engine"), "active", page == Page::Engine);
+	ui::SetClass(W("nav.plugins"), "active", page == Page::Plugins);
+}
+
+void Launcher::Tick()
+{
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+	// Chargements à la première ouverture d'une page
+	if (m_page == Page::Models && OllamaInstalled() && !m_models_loaded && !Busy())
+		RefreshModels();
+	if (m_page == Page::Engine && !m_releases_loaded && !Busy())
+		RefreshReleases();
+	if (m_page == Page::Plugins)
+	{
+		if (m_plugins_scan)
+		{
+			ScanPlugins();
+			Changed();
+		}
+		if (!m_catalog_loaded && !Busy())
+			RefreshCatalog();
+		// Dossiers / archives glissés sur la fenêtre
+		if (!m_dropped.empty() && !Busy())
+		{
+			if (m_plugin_engine.empty())
+				LogLocked("Échec de l'import : installe d'abord une version du moteur (onglet Moteur).");
+			else
+				ImportPlugins(m_dropped);
+			m_dropped.clear();
+		}
+	}
+
+	if (m_page != m_shown_page)
+	{
+		ShowPage(m_page);
+		m_built_version = 0;   // la page affichée est reconstruite
+	}
+
+	const std::uint64_t version = m_version;
+	if (version != m_built_version)
+	{
+		m_built_version = version;
+		switch (m_page)
+		{
+		case Page::Dependencies: BuildDependencies(); break;
+		case Page::Models:       BuildModels();       break;
+		case Page::Engine:       BuildEngine();       break;
+		case Page::Plugins:      BuildPlugins();      break;
+		}
+		UpdateSidebar();
+	}
+
+	UpdateProgress();
+	UpdateLog();
+}
+
+void Launcher::UpdateSidebar()
+{
+	int installed = 0;
+	for (const Dependency& dep : m_deps)
+		installed += dep.state == DepState::Installed;
+	const bool ready = RequiredInstalled();
+	Rid deps_badge = W("nav.deps.badge");
+	ui::SetText(deps_badge, std::to_string(installed) + "/" + std::to_string(m_deps.size()));
+	SetTone(deps_badge, ready ? "success" : "warning");
+
+	int models = static_cast<int>(m_other_models.size());
+	for (const ModelInfo& model : m_models)
+		models += model.installed;
+	ui::SetText(W("nav.models.badge"), m_models_loaded ? std::to_string(models) : "");
+	ui::SetEnabled(W("nav.models"), OllamaInstalled() || m_page == Page::Models);
+
+	int versions = 0;
+	for (const EngineRelease& release : m_releases)
+		versions += release.installed;
+	for (const LocalEngine& local : m_local_engines)
+		versions += local.present;
+	ui::SetText(W("nav.engine.badge"), m_releases_loaded || !m_local_engines.empty() ? std::to_string(versions) : "");
+
+	ui::SetText(W("nav.plugins.badge"), m_plugin_engine.empty() ? "" : std::to_string(m_installed_plugins.size()));
+
+	Rid state = W("side.state");
+	if (Busy())
+	{
+		ui::SetText(state, "Travail en cours...");
+		SetTone(state, "warning");
+	}
+	else
+	{
+		ui::SetText(state, ready ? "Prêt" : "Dépendances à compléter");
+		SetTone(state, ready ? "success" : "warning");
+	}
+}
+
+void Launcher::UpdateProgress()
+{
+	for (const auto& [tag, bar] : m_release_bars)
+		for (const EngineRelease& r : m_releases)
+			if (r.tag == tag && r.progress >= 0.0f && Rwidget_is_valid(bar))
+				Rprogress_bar_set_value(bar, r.progress);
+	for (const auto& [tag, bar] : m_model_bars)
+		for (const ModelInfo& m : m_models)
+			if (m.tag == tag && m.progress >= 0.0f && Rwidget_is_valid(bar))
+				Rprogress_bar_set_value(bar, m.progress);
+	for (const auto& [name, bar] : m_plugin_bars)
+		for (const CatalogPlugin& c : m_catalog)
+			if (c.name == name && c.progress >= 0.0f && Rwidget_is_valid(bar))
+				Rprogress_bar_set_value(bar, c.progress);
+
+	Rid task = W("log.task");
+	if (!m_task_label.empty())
+	{
+		ui::SetText(task, m_task_label);
+		SetTone(task, "warning");
+	}
+	else
+	{
+		ui::SetText(task, std::to_string(m_log.size()) + " lignes");
+		SetTone(task, "dim");
+	}
+}
+
+void Launcher::UpdateLog()
+{
+	Rid tree = W("log.lines");
+	if (m_log_refill)
+	{
+		Rtree_view_clear_items(tree);
+		m_log_shown = m_log_total - m_log.size();
+		m_log_refill = false;
+	}
+	if (m_log_shown >= m_log_total)
+		return;
+
+	const size_t first = m_log.size() - static_cast<size_t>(std::min<std::uint64_t>(m_log_total - m_log_shown, m_log.size()));
+	Rid last = R_INVALID_ID;
+	for (size_t i = first; i < m_log.size(); ++i)
+	{
+		const std::string& line = m_log[i];
+		last = Rtree_view_add_item(tree, R_INVALID_ID, line.c_str());
+		if (line.find("chec") != std::string::npos)         // « Échec », « échec »
+			Rtree_item_set_text_color(last, 0.95f, 0.45f, 0.45f, 1.0f);
+		else if (line.rfind("==", 0) == 0)                   // titres
+			Rtree_item_set_text_color(last, 0.96f, 0.62f, 0.25f, 1.0f);
+	}
+	m_log_shown = m_log_total;
+	if (last != R_INVALID_ID)
+		Rtree_view_scroll_to_item(tree, last);
+}
+
+// -----------------------------------------------------------------------------
+// Pages
+// -----------------------------------------------------------------------------
+
+void Launcher::BuildDependencies()
+{
+	Rid pm_error = W("deps.pm_error");
+	ui::SetVisible(pm_error, !m_package_manager && !m_package_manager_info.empty());
+	ui::SetText(pm_error, m_package_manager_info);
+
+	size_t missing = 0;
+	for (const Dependency& dep : m_deps)
+		missing += dep.required && (dep.state == DepState::Missing || dep.state == DepState::Failed);
+	Rid install = W("deps.install");
+	ui::SetText(install, missing == 0 ? "Tout est installé" : "Tout installer (" + std::to_string(missing) + ")");
+	ui::SetEnabled(install, !Busy() && missing > 0 && m_package_manager);
+	ui::SetEnabled(W("deps.check"), !Busy());
+	ui::SetText(W("deps.via"), m_package_manager && !m_package_manager_info.empty() ? "via " + m_package_manager_info : "");
+
+	Rid list = W("deps.list");
+	Rwidget_clear_children(list);
+	for (size_t i = 0; i < m_deps.size(); ++i)
+	{
+		const Dependency& dep = m_deps[i];
+		Rid row = Make(kDependencyRow);
+		if (row == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(list, row);
+		ui::SetText(Child(row, "name"), dep.name);
+		ui::SetVisible(Child(row, "optional"), !dep.required);
+		ui::SetText(Child(row, "desc"), dep.description);
+
+		Rid state = Child(row, "state");
+		std::string text = Dependencies::StateLabel(dep.state);
+		if (dep.state == DepState::Installed && !dep.version.empty())
+			text += " " + dep.version;
+		else if (dep.state == DepState::Missing && !dep.version.empty())
+			text += " (" + dep.version + " trouvé)";
+		ui::SetText(state, text);
+		SetTone(state, StateTone(dep.state));
+
+		Rid install_one = Child(row, "install");
+		const bool can_install = dep.state == DepState::Missing || dep.state == DepState::Failed;
+		ui::SetVisible(install_one, can_install);
+		ui::SetEnabled(install_one, !Busy() && (m_package_manager || !dep.download_url.empty()));
+		OnClick(install_one, [this, i] { if (!Busy()) InstallDependencies({ i }); });
+
+		Rid site = Child(row, "site");
+		ui::SetTooltip(site, dep.url);
+		const std::string url = dep.url;
+		OnClick(site, [url] { Process::OpenUrl(url); });
+	}
+}
+
+void Launcher::BuildModels()
+{
+	const bool ollama = OllamaInstalled();
+	ui::SetVisible(W("models.no_ollama"), !ollama);
+	ui::SetVisible(W("models.body"), ollama);
+	if (!ollama)
+		return;
+
+	Rid server = W("models.server");
+	ui::SetText(server, m_server_running ? "Serveur Ollama actif (localhost:11434)"
+	                    : m_models_loaded ? "Serveur Ollama non contacté" : "Recherche des modèles...");
+	SetTone(server, m_server_running ? "success" : "dim");
+	Rid refresh = W("models.refresh");
+	ui::SetText(refresh, m_server_running ? "Actualiser" : "Démarrer / actualiser");
+	ui::SetEnabled(refresh, !Busy());
+
+	size_t selected = 0;
+	for (const ModelInfo& model : m_models)
+		selected += model.selected && !model.installed;
+	Rid pull = W("models.pull");
+	ui::SetText(pull, selected == 0 ? "Aucun modèle sélectionné" : "Télécharger la sélection (" + std::to_string(selected) + ")");
+	ui::SetEnabled(pull, !Busy() && selected > 0);
+	ui::SetEnabled(W("models.custom.pull"), !Busy());
+
+	m_model_bars.clear();
+	Rid list = W("models.list");
+	Rwidget_clear_children(list);
+	for (size_t i = 0; i < m_models.size(); ++i)
+	{
+		const ModelInfo& model = m_models[i];
+		Rid row = Make(kModelRow);
+		if (row == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(list, row);
+
+		Rid check = Child(row, "select");
+		ui::SetChecked(check, model.selected);
+		ui::SetEnabled(check, !model.installed && !Busy());
+		ui::OnToggle(check, [this, i](bool on) {
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
+			if (i < m_models.size())
+				m_models[i].selected = on;
+			Changed();
+		});
+
+		ui::SetText(Child(row, "name"), model.tag);
+		ui::SetVisible(Child(row, "recommended"), model.recommended);
+		ui::SetText(Child(row, "desc"), model.description + " VRAM conseillée : " + model.vram + ".");
+		ui::SetText(Child(row, "size"), model.size);
+
+		Rid state = Child(row, "state");
+		Rid bar = Child(row, "progress");
+		Rid remove = Child(row, "remove");
+		if (model.progress >= 0.0f)
+		{
+			ui::SetText(state, "Téléchargement...");
+			SetTone(state, "warning");
+			ui::SetVisible(bar, true);
+			Rprogress_bar_set_value(bar, model.progress);
+			m_model_bars[model.tag] = bar;
+		}
+		else if (model.installed)
+		{
+			ui::SetText(state, "Installé");
+			SetTone(state, "success");
+			ui::SetVisible(remove, true);
+			ui::SetEnabled(remove, !Busy());
+			const std::string tag = model.tag;
+			OnClick(remove, [this, tag] { if (!Busy()) RemoveModel(tag); });
+		}
+		else
+		{
+			ui::SetText(state, "Non installé");
+			SetTone(state, "dim");
+		}
+	}
+
+	Rid others = W("models.others");
+	Rwidget_clear_children(others);
+	ui::SetVisible(W("models.others.title"), !m_other_models.empty());
+	for (const std::string& name : m_other_models)
+	{
+		Rid row = Make(kOtherModelRow);
+		if (row == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(others, row);
+		ui::SetText(Child(row, "name"), name);
+		Rid remove = Child(row, "remove");
+		ui::SetEnabled(remove, !Busy());
+		OnClick(remove, [this, name] { if (!Busy()) RemoveModel(name); });
+	}
+}
+
+void Launcher::BuildEngine()
+{
+	const bool deps_ok = RequiredInstalled();
+	ui::SetVisible(W("engine.deps_warning"), !deps_ok);
+	ui::SetEnabled(W("engine.refresh"), !Busy());
+	ui::SetEnabled(W("engine.add_local"), !Busy());
+	Rid error = W("engine.error");
+	ui::SetVisible(error, !m_releases_error.empty());
+	ui::SetText(error, m_releases_error);
+
+	// Versions locales
+	Rid local_list = W("engine.local");
+	Rwidget_clear_children(local_list);
+	ui::SetVisible(W("engine.local.section"), !m_local_engines.empty());
+	for (const LocalEngine& local : m_local_engines)
+	{
+		Rid card = Make(kLocalEngineCard);
+		if (card == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(local_list, card);
+		ui::SetText(Child(card, "name"), local.name);
+		Rid state = Child(card, "state");
+		ui::SetText(state, local.present ? (local.version.empty() ? "version inconnue" : "Lynx " + local.version)
+		                                 : "LynxEditor.exe introuvable");
+		SetTone(state, local.present ? "dim" : "error");
+		std::error_code ec;
+		const bool sdk = std::filesystem::is_regular_file(Engine::SdkConfigDirectory(local.tag) / "LynxConfig.cmake", ec);
+		ui::SetText(Child(card, "info"), local.folder.string() +
+		            (sdk ? "" : "   (pas de SDK : les projets C++ ne la trouvent pas avec find_package)"));
+
+		const std::string tag = local.tag;
+		const std::filesystem::path folder = local.folder;
+		Rid launch = Child(card, "launch");
+		ui::SetEnabled(launch, local.present);
+		OnClick(launch, [this, tag] { Engine::Launch(tag, [this](const std::string& l) { LogLocked(l); }); });
+		OnClick(Child(card, "folder"), [folder] { Process::OpenFolder(folder); });
+		Rid remove = Child(card, "remove");
+		ui::SetEnabled(remove, !Busy());
+		OnClick(remove, [this, tag] { if (!Busy()) RemoveLocalEngine(tag); });
+	}
+
+	// Versions publiées
+	m_release_bars.clear();
+	Rid list = W("engine.list");
+	Rwidget_clear_children(list);
+	Rid empty = W("engine.empty");
+	ui::SetVisible(empty, m_releases.empty());
+	ui::SetText(empty, m_releases_loaded ? "Aucune version publiée pour l'instant." : "Lecture des versions...");
+
+	for (size_t i = 0; i < m_releases.size(); ++i)
+	{
+		const EngineRelease& release = m_releases[i];
+		const bool installing = release.progress >= 0.0f;
+		Rid card = Make(kReleaseCard);
+		if (card == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(list, card);
+
+		ui::SetText(Child(card, "version"), "Lynx " + release.version);
+		Rid kind = Child(card, "kind");
+		ui::SetText(kind, release.prerelease ? "Beta" : "Stable");
+		SetTone(kind, release.prerelease ? "warning" : "success");
+		ui::SetVisible(Child(card, "latest"), i == 0);
+
+		std::string info = release.date;
+		if (release.asset_size > 0)
+			info += "  |  " + Engine::FormatSize(release.asset_size);
+		if (!release.name.empty() && release.name != release.tag)
+			info += "  |  " + release.name;
+		ui::SetText(Child(card, "info"), info);
+
+		Rid state = Child(card, "state");
+		if (installing)
+		{
+			ui::SetText(state, "Installation...");
+			SetTone(state, "warning");
+		}
+		else if (release.installed)
+		{
+			ui::SetText(state, "Installée");
+			SetTone(state, "success");
+		}
+		else
+		{
+			ui::SetText(state, release.asset_url.empty() ? "Pas d'archive Windows" : "Non installée");
+			SetTone(state, "dim");
+		}
+
+		// Notes de version (Markdown), dépliées à la demande
+		Rid notes = Child(card, "notes");
+		Rlabel_set_markdown(notes, R_TRUE);
+		std::string text = release.body.empty() ? release.name : release.body;
+		ui::SetText(notes, text.empty() ? std::string("Pas de notes pour cette version.") : text);
+		const std::string tag = release.tag;
+		const bool open = m_open_notes.count(tag) > 0;
+		ui::SetVisible(notes, open);
+		Rid toggle = Child(card, "notes.toggle");
+		ui::SetText(toggle, open ? "Masquer les notes" : "Notes de version");
+		ui::OnClick(toggle, [this, tag, notes, toggle] {
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
+			const bool now_open = m_open_notes.count(tag) == 0;
+			if (now_open)
+				m_open_notes.insert(tag);
+			else
+				m_open_notes.erase(tag);
+			ui::SetVisible(notes, now_open);
+			ui::SetText(toggle, now_open ? "Masquer les notes" : "Notes de version");
+		});
+		const std::string page_url = release.page_url;
+		OnClick(Child(card, "page"), [page_url] { Process::OpenUrl(page_url); });
+
+		// Actions
+		if (installing)
+		{
+			Rid bar = Child(card, "progress");
+			ui::SetVisible(bar, true);
+			ui::SetVisible(Child(card, "spacer"), false);
+			Rprogress_bar_set_value(bar, release.progress);
+			m_release_bars[tag] = bar;
+		}
+		else if (release.installed)
+		{
+			Rid launch = Child(card, "launch");
+			Rid folder = Child(card, "folder");
+			Rid remove = Child(card, "remove");
+			ui::SetVisible(launch, true);
+			ui::SetVisible(folder, true);
+			ui::SetVisible(remove, true);
+			ui::SetEnabled(launch, !Busy());
+			ui::SetEnabled(remove, !Busy());
+			OnClick(launch, [this, tag] { Engine::Launch(tag, [this](const std::string& l) { LogLocked(l); }); });
+			OnClick(folder, [tag] { Process::OpenFolder(Engine::VersionDirectory(tag)); });
+			OnClick(remove, [this, i] { if (!Busy() && i < m_releases.size()) UninstallRelease(i); });
+		}
+		else
+		{
+			Rid install = Child(card, "install");
+			ui::SetVisible(install, true);
+			ui::SetEnabled(install, !Busy() && deps_ok && !release.asset_url.empty());
+			if (!deps_ok)
+				ui::SetTooltip(install, "Installe d'abord les dépendances.");
+			OnClick(install, [this, i] {
+				if (!Busy() && RequiredInstalled() && i < m_releases.size())
+					InstallRelease(i);
+			});
+		}
+	}
+}
+
+void Launcher::BuildPlugins()
+{
+	m_updating = true;   // les combos remplis ici ne déclenchent rien
+
+	ui::SetVisible(W("plugins.no_engine"), m_engines.empty());
+
+	// Version cible
+	std::vector<std::string> engine_items;
+	for (size_t i = 0; i < m_engines.size(); ++i)
+		engine_items.push_back(Engine::IsLocalTag(m_engines[i].tag) ? EngineLabel(m_engines[i].tag)
+		                       : m_engines[i].tag + (i == 0 ? " (dernière)" : ""));
+	Rid engine_combo = W("plugins.engine");
+	if (engine_items != m_engine_items)
+	{
+		m_engine_items = engine_items;
+		Rcombo_box_clear_items(engine_combo);
+		for (const std::string& item : engine_items)
+			Rcombo_box_add_item(engine_combo, item.c_str());
+	}
+	for (size_t i = 0; i < m_engines.size(); ++i)
+		if (m_engines[i].tag == m_plugin_engine && Rcombo_box_get_selected(engine_combo) != static_cast<int>(i))
+			Rcombo_box_set_selected(engine_combo, static_cast<int>(i));
+	ui::SetEnabled(engine_combo, !Busy() && !m_engines.empty());
+	ui::SetEnabled(W("plugins.refresh"), !Busy());
+	ui::SetEnabled(W("plugins.import"), !Busy() && !m_plugin_engine.empty());
+	ui::SetEnabled(W("plugins.folder"), !m_plugin_engine.empty());
+
+	// Catégories
 	std::vector<std::string> categories;
 	for (const CatalogPlugin& c : m_catalog)
 		if (!c.category.empty() && std::find(categories.begin(), categories.end(), c.category) == categories.end())
@@ -1170,37 +1232,31 @@ void Launcher::DrawPlugins()
 		if (!p.category.empty() && std::find(categories.begin(), categories.end(), p.category) == categories.end())
 			categories.push_back(p.category);
 	std::sort(categories.begin(), categories.end());
-
-	ImGui::SetNextItemWidth(ImGui::CalcTextSize("nom, auteur, description...").x + ImGui::GetFrameHeight());
-	ImGui::InputTextWithHint("##search", "Rechercher", m_plugin_search, sizeof(m_plugin_search));
-	ImGui::SameLine();
-	float category_width = ImGui::CalcTextSize("Toutes les catégories").x;
-	for (const std::string& c : categories)
-		category_width = std::max(category_width, ImGui::CalcTextSize(c.c_str()).x);
-	ImGui::SetNextItemWidth(category_width + ImGui::GetFrameHeight() * 1.5f);
-	if (ImGui::BeginCombo("##category", m_plugin_category.empty() ? "Toutes les catégories" : m_plugin_category.c_str()))
+	Rid category_combo = W("plugins.category");
+	if (categories != m_category_items || Rcombo_box_get_selected(category_combo) < 0)
 	{
-		if (ImGui::Selectable("Toutes les catégories", m_plugin_category.empty()))
-			m_plugin_category.clear();
+		m_category_items = categories;
+		Rcombo_box_clear_items(category_combo);
+		Rcombo_box_add_item(category_combo, "Toutes les catégories");
 		for (const std::string& c : categories)
-			if (ImGui::Selectable(c.c_str(), c == m_plugin_category))
-				m_plugin_category = c;
-		ImGui::EndCombo();
+			Rcombo_box_add_item(category_combo, c.c_str());
 	}
-	SameLineIfFits(ImGui::CalcTextSize("Versions bêta").x + ImGui::GetFrameHeight() * 1.5f);
-	ImGui::Checkbox("Versions bêta", &m_plugin_prerelease);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Proposer aussi les pré-releases des plugins.");
+	int category_index = 0;
+	for (size_t i = 0; i < categories.size(); ++i)
+		if (categories[i] == m_plugin_category)
+			category_index = static_cast<int>(i) + 1;
+	if (category_index == 0)
+		m_plugin_category.clear();
+	if (Rcombo_box_get_selected(category_combo) != category_index)
+		Rcombo_box_set_selected(category_combo, category_index);
 
-	if (!m_catalog_error.empty())
-	{
-		ImGui::PushStyleColor(ImGuiCol_Text, kRed);
-		ImGui::TextWrapped("%s", m_catalog_error.c_str());
-		ImGui::PopStyleColor();
-	}
-	ImGui::Spacing();
+	m_updating = false;
 
-	// --- Liste : catalogue + plugins installés absents du catalogue (intégrés, importés) ---
+	Rid error = W("plugins.error");
+	ui::SetVisible(error, !m_catalog_error.empty());
+	ui::SetText(error, m_catalog_error);
+
+	// Liste : catalogue + plugins installés absents du catalogue (intégrés, importés)
 	struct Entry { const CatalogPlugin* catalog; size_t index; const InstalledPlugin* installed; };
 	std::vector<Entry> entries;
 	for (size_t i = 0; i < m_catalog.size(); ++i)
@@ -1237,288 +1293,180 @@ void Launcher::DrawPlugins()
 		return !(ContainsI(name, needle) || ContainsI(desc, needle) || ContainsI(author, needle));
 	}), entries.end());
 
-	if (entries.empty())
-	{
-		ImGui::TextColored(kMuted, "%s", !m_catalog_loaded ? "Lecture du catalogue..."
-		                                 : (needle.empty() && m_plugin_category.empty()) ? "Aucun plugin."
-		                                 : "Aucun plugin ne correspond à la recherche.");
-		return;
-	}
+	Rid empty = W("plugins.empty");
+	ui::SetVisible(empty, entries.empty());
+	ui::SetText(empty, !m_catalog_loaded ? "Lecture du catalogue..."
+	                   : (needle.empty() && m_plugin_category.empty()) ? "Aucun plugin."
+	                   : "Aucun plugin ne correspond à la recherche.");
 
-	// Grille de cartes, comme l'onglet Moteur
-	const ImGuiStyle& style = ImGui::GetStyle();
-	const float line = ImGui::GetTextLineHeightWithSpacing();
-	const float gap = style.ItemSpacing.x * 2.0f;
-	const float card_pad = ImGui::GetTextLineHeight() * 0.9f;
-	const float min_width = ButtonWidth("Mettre à jour") + ButtonWidth("Dossier") + ButtonWidth("Retirer") +
-	                        ButtonWidth("Dépôt") + style.ItemSpacing.x * 3 + card_pad * 2 + 4.0f;
-	const float avail = ImGui::GetContentRegionAvail().x;
-	const int columns = std::max(1, int((avail + gap) / (min_width + gap)));
-	const float width = (avail - gap * (columns - 1)) / columns;
-	const float height = line * 8.5f + ImGui::GetFrameHeight();
-
-	for (size_t i = 0; i < entries.size(); ++i)
-	{
-		if (i % columns != 0)
-			ImGui::SameLine(0, gap);
-		DrawPluginCard(entries[i].catalog, entries[i].index, entries[i].installed, ImVec2(width, height));
-		if ((i + 1) % columns == 0)
-			ImGui::Dummy(ImVec2(0, gap * 0.5f));
-	}
-}
-
-void Launcher::DrawPluginCard(const CatalogPlugin* catalog, size_t catalog_index,
-                              const InstalledPlugin* installed, const ImVec2& size)
-{
-	const ImGuiStyle& style = ImGui::GetStyle();
+	m_plugin_bars.clear();
+	Rid list = W("plugins.list");
+	Rwidget_clear_children(list);
 	const std::string engine_version = PluginEngineVersion();
-	const std::string& name = catalog ? catalog->name : installed->name;
-	const std::string& description = catalog && !catalog->description.empty() ? catalog->description
-	                                 : installed ? installed->description : catalog->description;
-	const std::string& author = catalog && !catalog->author.empty() ? catalog->author
-	                            : installed ? installed->author : catalog->author;
-	const std::string category = catalog && !catalog->category.empty() ? catalog->category
-	                             : installed ? installed->category : std::string();
+	const std::string engine_label = EngineLabel(m_plugin_engine);
 
-	const bool builtin = installed && installed->builtin;
-	const bool installing = catalog && catalog->progress >= 0.0f;
-	const PluginRelease* best = catalog && !engine_version.empty()
-		? PluginStore::BestRelease(*catalog, engine_version, m_plugin_prerelease) : nullptr;
-	const bool update = installed && !builtin && best &&
-	                    PluginStore::CompareVersions(best->version, installed->version) > 0;
+	for (const Entry& entry : entries)
+	{
+		const CatalogPlugin* catalog = entry.catalog;
+		const InstalledPlugin* installed = entry.installed;
+		const size_t catalog_index = entry.index;
 
-	// version du moteur visée : celle de la release proposée, sinon celle de l'installation
-	std::string engine_min;
-	if (installed && !update)
-		engine_min = installed->engine_min;
-	else if (best)
-		engine_min = best->engine_min;
-	const bool older_engine = !engine_min.empty() && !engine_version.empty() &&
-	                          PluginStore::CompareVersions(engine_min, engine_version) < 0;
+		const std::string& name = catalog ? catalog->name : installed->name;
+		const std::string& description = catalog && !catalog->description.empty() ? catalog->description
+		                                 : installed ? installed->description : catalog->description;
+		const std::string& author = catalog && !catalog->author.empty() ? catalog->author
+		                            : installed ? installed->author : catalog->author;
+		const std::string category = catalog && !catalog->category.empty() ? catalog->category
+		                             : installed ? installed->category : std::string();
 
-	ImGui::PushID(name.c_str());
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.135f, 0.14f, 0.165f, 1));
-	ImGui::PushStyleColor(ImGuiCol_Border, installed ? ImVec4(0.30f, 0.45f, 0.33f, 1) : ImVec4(0.24f, 0.25f, 0.29f, 1));
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-	const float pad = ImGui::GetTextLineHeight() * 0.9f;
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
-	ImGui::BeginChild("##plugin", size, ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
-	                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		const bool builtin = installed && installed->builtin;
+		const bool installing = catalog && catalog->progress >= 0.0f;
+		const PluginRelease* best = catalog && !engine_version.empty()
+			? PluginStore::BestRelease(*catalog, engine_version, m_plugin_prerelease) : nullptr;
+		const bool update = installed && !builtin && best &&
+		                    PluginStore::CompareVersions(best->version, installed->version) > 0;
 
-	// En-tête : nom + badges
-	const float top = ImGui::GetCursorPosY();
-	ImGui::PushFont(nullptr, style.FontSizeBase * 1.35f);
-	ImGui::TextUnformatted(name.c_str());
-	const float title_height = ImGui::GetItemRectSize().y;
-	ImGui::PopFont();
-	const float badge_y = top + (title_height - ImGui::GetTextLineHeight() - 2.0f) * 0.5f;
-	auto badge = [&](const char* text, const ImVec4& color) {
-		SameLineIfFits(ImGui::CalcTextSize(text).x + style.FramePadding.x * 2);
-		ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), badge_y));
-		Badge(text, color);
-	};
-	if (!category.empty())
-		badge(category.c_str(), kMuted);
-	if (builtin)
-		badge("Intégré", kAccent);
-	else if (installed && installed->source == "local")
-		badge("Local", kYellow);
-	if (best && best->prerelease)
-		badge("Beta", kYellow);
-	ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), top + title_height + style.ItemSpacing.y));
+		// version du moteur visée : celle de la release proposée, sinon celle de l'installation
+		std::string engine_min;
+		if (installed && !update)
+			engine_min = installed->engine_min;
+		else if (best)
+			engine_min = best->engine_min;
+		const bool older_engine = !engine_min.empty() && !engine_version.empty() &&
+		                          PluginStore::CompareVersions(engine_min, engine_version) < 0;
 
-	// Auteur / dépôt
-	std::string info;
-	if (!author.empty())
-		info = "par " + author;
-	if (catalog)
-		info += (info.empty() ? "" : "  |  ") + catalog->repo;
-	if (!info.empty())
-		ImGui::TextColored(kMuted, "%s", info.c_str());
+		Rid card = Make(kPluginCard);
+		if (card == R_INVALID_ID)
+			continue;
+		Rwidget_add_child(list, card);
 
-	// État
-	ImGui::AlignTextToFramePadding();
-	if (installing)
-	{
-		StatusDot(kYellow);
-		ImGui::TextUnformatted("Installation...");
-	}
-	else if (update)
-	{
-		StatusDot(kYellow);
-		ImGui::TextColored(kYellow, "Mise à jour : %s -> %s",
-		                   installed->version.empty() ? "?" : installed->version.c_str(), best->version.c_str());
-	}
-	else if (installed)
-	{
-		StatusDot(kGreen);
-		ImGui::Text("Installé %s", installed->version.c_str());
-	}
-	else if (best)
-	{
-		StatusDot(kMuted);
-		ImGui::TextColored(kMuted, "Non installé  |  %s%s", best->version.c_str(),
-		                   best->asset_size ? ("  |  " + Engine::FormatSize(best->asset_size)).c_str() : "");
-	}
-	else if (catalog && !catalog->error.empty())
-	{
-		StatusDot(kRed);
-		ImGui::TextColored(kRed, "Dépôt illisible");
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("%s", catalog->error.c_str());
-	}
-	else if (catalog && !catalog->releases.empty())
-	{
-		// des releases, mais aucune pour cette version : la plus ancienne version du moteur demandée
-		std::string needed;
-		for (const PluginRelease& r : catalog->releases)
-			if (!r.asset_url.empty() && (m_plugin_prerelease || !r.prerelease) &&
-			    (needed.empty() || PluginStore::CompareVersions(r.engine_min, needed) < 0))
-				needed = r.engine_min;
-		StatusDot(kRed);
-		if (needed.empty())
-			ImGui::TextColored(kRed, "Aucune release téléchargeable");
+		ui::SetText(Child(card, "name"), name);
+		ui::SetText(Child(card, "category"), category);
+		Rid badge = Child(card, "badge");
+		if (builtin)
+		{
+			ui::SetText(badge, "Intégré");
+			ui::SetVisible(badge, true);
+		}
+		else if (installed && installed->source == "local")
+		{
+			ui::SetText(badge, "Local");
+			ui::SetVisible(badge, true);
+		}
+		ui::SetVisible(Child(card, "beta"), best && best->prerelease);
+
+		std::string info;
+		if (!author.empty())
+			info = "par " + author;
+		if (catalog)
+			info += (info.empty() ? "" : "  |  ") + catalog->repo;
+		ui::SetText(Child(card, "info"), info);
+		ui::SetVisible(Child(card, "info"), !info.empty());
+
+		// État
+		Rid state = Child(card, "state");
+		std::string state_text;
+		const char* tone = "dim";
+		if (installing)
+		{
+			state_text = "Installation...";
+			tone = "warning";
+		}
+		else if (update)
+		{
+			state_text = "Mise à jour : " + (installed->version.empty() ? std::string("?") : installed->version) + " -> " + best->version;
+			tone = "warning";
+		}
+		else if (installed)
+		{
+			state_text = "Installé " + installed->version;
+			tone = "success";
+		}
+		else if (best)
+		{
+			state_text = "Non installé  |  " + best->version;
+			if (best->asset_size)
+				state_text += "  |  " + Engine::FormatSize(best->asset_size);
+		}
+		else if (catalog && !catalog->error.empty())
+		{
+			state_text = "Dépôt illisible";
+			tone = "error";
+			ui::SetTooltip(state, catalog->error);
+		}
+		else if (catalog && !catalog->releases.empty())
+		{
+			// des releases, mais aucune pour cette version : la plus ancienne version du moteur demandée
+			std::string needed;
+			for (const PluginRelease& r : catalog->releases)
+				if (!r.asset_url.empty() && (m_plugin_prerelease || !r.prerelease) &&
+				    (needed.empty() || PluginStore::CompareVersions(r.engine_min, needed) < 0))
+					needed = r.engine_min;
+			state_text = needed.empty() ? "Aucune release téléchargeable" : "Demande Lynx " + needed + " ou plus";
+			tone = "error";
+		}
 		else
-			ImGui::TextColored(kRed, "Demande Lynx %s ou plus", needed.c_str());
-	}
-	else
-	{
-		StatusDot(kMuted);
-		ImGui::TextColored(kMuted, engine_version.empty() ? "Aucune version du moteur" : "Aucune release publiée");
-	}
+		{
+			state_text = engine_version.empty() ? "Aucune version du moteur" : "Aucune release publiée";
+		}
+		ui::SetText(state, state_text);
+		SetTone(state, tone);
 
-	if (older_engine && !builtin)
-	{
-		ImGui::PushStyleColor(ImGuiCol_Text, kYellow);
-		ImGui::TextWrapped("Conçu pour Lynx %s : l'éditeur préviendra à l'activation.", engine_min.c_str());
-		ImGui::PopStyleColor();
-	}
+		if (older_engine && !builtin)
+		{
+			Rid older = Child(card, "older");
+			ui::SetText(older, "Conçu pour Lynx " + engine_min + " : l'éditeur préviendra à l'activation.");
+			ui::SetVisible(older, true);
+		}
 
-	// Description : la place restante au-dessus des boutons
-	const float buttons_height = ImGui::GetFrameHeight() + style.ItemSpacing.y;
-	float desc_height = ImGui::GetContentRegionAvail().y - buttons_height - style.ItemSpacing.y;
-	if (desc_height > ImGui::GetTextLineHeight())
-	{
-		ImGui::BeginChild("##desc", ImVec2(0, desc_height), ImGuiChildFlags_None);
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.81f, 0.85f, 1));
-		lynx::editor::markdown::Render(description.empty() ? std::string("Pas de description.") : description);
-		ImGui::PopStyleColor();
-		ImGui::EndChild();
-	}
+		Rid desc = Child(card, "desc");
+		Rlabel_set_markdown(desc, R_TRUE);
+		ui::SetText(desc, description.empty() ? std::string("Pas de description.") : description);
 
-	// Actions
-	ImGui::SetCursorPosY(ImGui::GetWindowHeight() - pad - ImGui::GetFrameHeight());
-	if (installing)
-	{
-		char overlay[16];
-		std::snprintf(overlay, sizeof(overlay), "%d %%", int(catalog->progress * 100));
-		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccent);
-		ImGui::ProgressBar(catalog->progress, ImVec2(-1, 0), overlay);
-		ImGui::PopStyleColor();
-	}
-	else
-	{
-		bool first = true;
-		auto same_line = [&](const char* label) {
-			if (!first)
-				SameLineIfFits(ButtonWidth(label));
-			first = false;
-		};
-
-		ImGui::BeginDisabled(Busy());
+		// Actions
+		if (installing)
+		{
+			Rid bar = Child(card, "progress");
+			ui::SetVisible(bar, true);
+			Rprogress_bar_set_value(bar, catalog->progress);
+			m_plugin_bars[name] = bar;
+			continue;
+		}
 		if (catalog && best && !builtin && (!installed || update))
 		{
-			const char* label = update ? "Mettre à jour" : "Installer";
-			same_line(label);
-			if (AccentButton(label))
-				InstallPlugin(catalog_index, best->tag);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s (%s) dans Lynx %s", best->tag.c_str(), best->date.c_str(), m_plugin_engine.c_str());
+			Rid install = Child(card, "install");
+			ui::SetVisible(install, true);
+			ui::SetText(install, update ? "Mettre à jour" : "Installer");
+			ui::SetEnabled(install, !Busy());
+			ui::SetTooltip(install, best->tag + " (" + best->date + ") dans " + engine_label);
+			const std::string tag = best->tag;
+			OnClick(install, [this, catalog_index, tag] {
+				if (!Busy() && catalog_index < m_catalog.size())
+					InstallPlugin(catalog_index, tag);
+			});
 		}
 		if (installed)
 		{
-			same_line("Dossier");
-			if (ImGui::Button("Dossier"))
-				Process::OpenFolder(installed->folder);
+			Rid folder = Child(card, "folder");
+			ui::SetVisible(folder, true);
+			const std::filesystem::path path = installed->folder;
+			OnClick(folder, [path] { Process::OpenFolder(path); });
 			if (!builtin)
 			{
-				same_line("Retirer");
-				if (ImGui::Button("Retirer"))
-					RemovePlugin(*installed);
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Supprimer ce plugin de Lynx %s", m_plugin_engine.c_str());
+				Rid remove = Child(card, "remove");
+				ui::SetVisible(remove, true);
+				ui::SetEnabled(remove, !Busy());
+				ui::SetTooltip(remove, "Supprimer ce plugin de " + engine_label);
+				const InstalledPlugin plugin = *installed;
+				OnClick(remove, [this, plugin] { if (!Busy()) RemovePlugin(plugin); });
 			}
 		}
-		ImGui::EndDisabled();
 		if (catalog)
 		{
-			same_line("Dépôt");
-			if (ImGui::Button("Dépôt"))
-				Process::OpenUrl(best && !best->page_url.empty() ? best->page_url
-				                                                  : "https://github.com/" + catalog->repo);
+			Rid repo = Child(card, "repo");
+			ui::SetVisible(repo, true);
+			const std::string url = best && !best->page_url.empty() ? best->page_url : "https://github.com/" + catalog->repo;
+			OnClick(repo, [url] { Process::OpenUrl(url); });
 		}
 	}
-
-	ImGui::EndChild();
-	ImGui::PopStyleVar(2);
-	ImGui::PopStyleColor(2);
-	ImGui::PopID();
-}
-
-void Launcher::DrawLog()
-{
-	const float pad = ImGui::GetTextLineHeight() * 0.8f;
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.06f, 0.065f, 0.075f, 1));
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad * 0.5f));
-	ImGui::BeginChild("##logpanel", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
-
-	if (ImGui::Button(m_show_log ? "Masquer le journal" : "Journal"))
-		m_show_log = !m_show_log;
-	ImGui::SameLine();
-	ImGui::AlignTextToFramePadding();
-	if (!m_task_label.empty())
-		ImGui::TextColored(kYellow, "%s", m_task_label.c_str());
-	else
-		ImGui::TextColored(kMuted, "%d lignes", static_cast<int>(m_log.size()));
-
-	// boutons alignés à droite
-	const float right_width = ButtonWidth("Copier") + ButtonWidth("Effacer") + ImGui::GetStyle().ItemSpacing.x;
-	ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - right_width));
-	if (ImGui::Button("Copier"))
-	{
-		std::string all;
-		for (const std::string& line : m_log)
-			all += line + "\n";
-		ImGui::SetClipboardText(all.c_str());
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Effacer"))
-		m_log.clear();
-
-	if (m_show_log)
-	{
-		ImGui::BeginChild("##log", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
-		ImGuiListClipper clipper;
-		clipper.Begin(static_cast<int>(m_log.size()));
-		while (clipper.Step())
-			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-			{
-				const std::string& line = m_log[i];
-				bool error = line.find("chec") != std::string::npos;   // « Échec », « échec »
-				bool title = line.rfind("==", 0) == 0;
-				if (error)      ImGui::TextColored(kRed, "%s", line.c_str());
-				else if (title) ImGui::TextColored(kAccent, "%s", line.c_str());
-				else            ImGui::TextUnformatted(line.c_str());
-			}
-		if (m_scroll_log)
-		{
-			ImGui::SetScrollHereY(1.0f);
-			m_scroll_log = false;
-		}
-		ImGui::EndChild();
-	}
-
-	ImGui::EndChild();
-	ImGui::PopStyleVar();
-	ImGui::PopStyleColor();
 }

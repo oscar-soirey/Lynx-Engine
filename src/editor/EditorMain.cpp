@@ -65,6 +65,7 @@
 #include "../gameplay/CameraShake.h"
 
 #include "../host/GameProject.h"
+#include "../host/RenderBackend.h"
 #include "InputSettingsEditor.h"
 #include "GameBuild.h"
 #include "ProjectBrowser.h"
@@ -2056,6 +2057,10 @@ struct AppSettings
     // Hot reload of the game DLL.
     bool reloadAfterBuild = true;     // "Compile" -> reload when it succeeded
     bool autoReloadOnChange = true;   // build/<game>.dll rebuilt outside the editor
+
+    // Renderer of the game (LynxRuntime, shipped game) : Vulkan or OpenGL.
+    // The editor Viewport itself stays rendered by OpenGL (GlBridge).
+    lynx::host::RenderBackend renderer = lynx::host::kDefaultRenderBackend;
 };
 
 static AppSettings appSettings;
@@ -2084,6 +2089,7 @@ static void SaveSettings()
          << "\n";
     file << "reload_after_build " << (appSettings.reloadAfterBuild ? 1 : 0) << "\n";
     file << "auto_reload_on_change " << (appSettings.autoReloadOnChange ? 1 : 0) << "\n";
+    file << "renderer " << lynx::host::RenderBackendKey(appSettings.renderer) << "\n";
 }
 
 static void LoadSettings()
@@ -2159,6 +2165,12 @@ static void LoadSettings()
             int value = 1;
             if (file >> value)
                 appSettings.autoReloadOnChange = value != 0;
+        }
+        else if (key == "renderer")
+        {
+            std::string value;
+            if (file >> value)
+                appSettings.renderer = lynx::host::ParseRenderBackend(value);
         }
         else
         {

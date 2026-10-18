@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lynx launcher (Raven) : the main window.
+
+  Sidebar (pages + state), the four pages, the log at the bottom. The lists
+  (dependencies, models, versions, plugins) are filled by launcher/Launcher.cpp ;
+  their frame is here. Same themes and shared widgets as the editor
+  (src/editor/interface : widgets.xml, themes/), the theme chosen in the
+  editor options is used here too.
+-->
+<Window Title="Lynx Launcher" Width="1320" Height="860" MinWidth="980" MinHeight="640" Hidden="true">
+<HBox>
+	<!-- Sidebar -->
+	<Border Class="toolbar" Padding="14,16" Width="240">
+		<VBox Spacing="4">
+			<HBox Spacing="10" Slot.Padding="0,0,0,14">
+				<Image Name="side.logo" Width="34" Height="30" Stretch="Fit" TintText="true" Slot.VAlign="Center"/>
+				<VBox Spacing="0" Slot.VAlign="Center">
+					<Label Text="Lynx" Class="dialog-title"/>
+					<Label Text="Launcher" Class="dim"/>
+				</VBox>
+			</HBox>
+
+			<Button Name="nav.deps" Class="tool" Focusable="false">
+				<HBox Spacing="6" Slot.Padding="4,4">
+					<Label Text="Dépendances" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Label Name="nav.deps.badge" Text="" Class="dim" Slot.VAlign="Center"/>
+				</HBox>
+			</Button>
+			<Button Name="nav.models" Class="tool" Focusable="false">
+				<HBox Spacing="6" Slot.Padding="4,4">
+					<Label Text="Modèles IA" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Label Name="nav.models.badge" Text="" Class="dim" Slot.VAlign="Center"/>
+				</HBox>
+			</Button>
+			<Button Name="nav.engine" Class="tool" Focusable="false">
+				<HBox Spacing="6" Slot.Padding="4,4">
+					<Label Text="Moteur" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Label Name="nav.engine.badge" Text="" Class="dim" Slot.VAlign="Center"/>
+				</HBox>
+			</Button>
+			<Button Name="nav.plugins" Class="tool" Focusable="false">
+				<HBox Spacing="6" Slot.Padding="4,4">
+					<Label Text="Plugins" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Label Name="nav.plugins.badge" Text="" Class="dim" Slot.VAlign="Center"/>
+				</HBox>
+			</Button>
+
+			<Spacer Slot.Fill="1"/>
+			<Separator/>
+			<Label Name="side.state" Text="" Wrap="true" Slot.Padding="0,6,0,0"/>
+		</VBox>
+	</Border>
+
+	<VBox Slot.Fill="1">
+		<!-- ===================================================== Dependencies -->
+		<ScrollBox Name="page.deps" Slot.Fill="1">
+			<VBox Spacing="8" Slot.Padding="28,22">
+				<Label Text="Dépendances" Class="dialog-title"/>
+				<Label Text="Outils nécessaires pour compiler et utiliser le moteur Lynx. Ollama est installé par défaut ; les modèles se choisissent dans l'onglet Modèles IA." Class="dim" Wrap="true"/>
+				<Label Name="deps.pm_error" Text="" Class="error" Wrap="true" Visibility="Collapsed"/>
+				<HBox Spacing="6" Slot.Padding="0,6">
+					<Button Name="deps.install" Text="Tout installer" Style="Primary"/>
+					<Button Name="deps.check" Text="Revérifier"/>
+					<Label Name="deps.via" Text="" Class="dim" Slot.VAlign="Center" Slot.Padding="6,0,0,0"/>
+				</HBox>
+				<VBox Name="deps.list" Spacing="6"/>
+				<Label Text="Les installations passent par winget et peuvent demander une confirmation administrateur (UAC). Si un outil reste « Manquant » après son installation, relance le launcher pour recharger le PATH." Class="dim" Wrap="true" Slot.Padding="0,8,0,0"/>
+			</VBox>
+		</ScrollBox>
+
+		<!-- ========================================================= AI models -->
+		<ScrollBox Name="page.models" Slot.Fill="1" Visibility="Collapsed">
+			<VBox Spacing="8" Slot.Padding="28,22">
+				<Label Text="Modèles IA" Class="dialog-title"/>
+				<Label Text="Modèles locaux utilisés par Lynxie, l'assistant de l'éditeur (Commands > Lynxie). Aucun n'est installé par défaut : choisis ceux que ta machine peut faire tourner." Class="dim" Wrap="true"/>
+				<Label Name="models.no_ollama" Text="Ollama n'est pas installé : installe-le depuis l'onglet Dépendances." Class="warning" Wrap="true" Visibility="Collapsed"/>
+				<VBox Name="models.body" Spacing="8">
+					<HBox Spacing="8" Slot.Padding="0,6">
+						<Label Name="models.server" Text="" Slot.VAlign="Center"/>
+						<Button Name="models.refresh" Text="Actualiser"/>
+						<Spacer Slot.Fill="1"/>
+						<Button Name="models.pull" Text="Télécharger la sélection" Style="Primary"/>
+					</HBox>
+					<VBox Name="models.list" Spacing="6"/>
+					<Section Text="Autre modèle Ollama"/>
+					<HBox Spacing="6">
+						<TextInput Name="models.custom" Placeholder="ex : llama3.1:8b" Width="320"/>
+						<Button Name="models.custom.pull" Text="Télécharger"/>
+						<Button Name="models.catalog" Text="Catalogue Ollama"/>
+					</HBox>
+					<Label Name="models.others.title" Text="Autres modèles installés" Class="dim" Visibility="Collapsed" Slot.Padding="0,8,0,0"/>
+					<VBox Name="models.others" Spacing="4"/>
+				</VBox>
+			</VBox>
+		</ScrollBox>
+
+		<!-- ============================================================ Engine -->
+		<ScrollBox Name="page.engine" Slot.Fill="1" Visibility="Collapsed">
+			<VBox Spacing="8" Slot.Padding="28,22">
+				<Label Text="Moteur" Class="dialog-title"/>
+				<Label Text="Versions de Lynx publiées sur GitHub (releases de oscar-soirey/Lynx-Engine), chacune dans son propre dossier : on peut en garder plusieurs. « Ajouter une version locale » utilise un moteur que tu as compilé ou modifié toi-même, ou une version déjà installée ailleurs." Class="dim" Wrap="true"/>
+				<HBox Spacing="6" Slot.Padding="0,6">
+					<Button Name="engine.refresh" Text="Actualiser"/>
+					<Button Name="engine.add_local" Text="Ajouter une version locale..." Tooltip="Le dossier de LynxEditor.exe (ou d'un clone du moteur : build/, build-release/, cmake-build-*/ sont cherchés). Ses fichiers ne sont jamais modifiés ni supprimés par le launcher."/>
+					<Button Name="engine.folder" Text="Dossier des versions"/>
+					<Button Name="engine.github" Text="Page GitHub"/>
+				</HBox>
+				<HBox Name="engine.deps_warning" Spacing="8" Visibility="Collapsed">
+					<Label Text="Installe toutes les dépendances pour pouvoir installer une version publiée." Class="warning" Wrap="true" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Button Name="engine.goto_deps" Text="Aller aux dépendances"/>
+				</HBox>
+				<Label Name="engine.error" Text="" Class="error" Wrap="true" Visibility="Collapsed"/>
+
+				<VBox Name="engine.local.section" Spacing="6" Visibility="Collapsed">
+					<Section Text="Versions locales"/>
+					<VBox Name="engine.local" Spacing="6"/>
+				</VBox>
+
+				<Section Text="Versions publiées"/>
+				<Label Name="engine.empty" Text="Lecture des versions..." Class="dim"/>
+				<VBox Name="engine.list" Spacing="8"/>
+			</VBox>
+		</ScrollBox>
+
+		<!-- =========================================================== Plugins -->
+		<ScrollBox Name="page.plugins" Slot.Fill="1" Visibility="Collapsed">
+			<VBox Spacing="8" Slot.Padding="28,22">
+				<Label Text="Plugins" Class="dialog-title"/>
+				<Label Text="Plugins du moteur, installés dans une version de Lynx (dossier plugins de la version). Une fois installé, un plugin s'active par projet dans l'éditeur : Options > Plugins. On peut aussi glisser un dossier de plugin ou un .zip sur la fenêtre." Class="dim" Wrap="true"/>
+				<HBox Name="plugins.no_engine" Spacing="8" Visibility="Collapsed">
+					<Label Text="Aucune version du moteur installée : les plugins s'installent dans une version." Class="warning" Wrap="true" Slot.Fill="1" Slot.VAlign="Center"/>
+					<Button Name="plugins.goto_engine" Text="Aller au moteur"/>
+				</HBox>
+				<HBox Spacing="6" Slot.Padding="0,6,0,0">
+					<Label Text="Version du moteur" Slot.VAlign="Center"/>
+					<ComboBox Name="plugins.engine" Width="280"/>
+					<Button Name="plugins.refresh" Text="Actualiser"/>
+					<Button Name="plugins.import" Text="Importer un dossier..." Tooltip="Un dossier contenant plugin.json (et bin/). On peut aussi glisser un dossier ou un .zip sur la fenêtre."/>
+					<Button Name="plugins.folder" Text="Dossier des plugins"/>
+				</HBox>
+				<HBox Spacing="6" Slot.Padding="0,0,0,6">
+					<TextInput Name="plugins.search" Placeholder="Rechercher (nom, auteur, description)" Width="320"/>
+					<ComboBox Name="plugins.category" Width="240"/>
+					<Checkbox Name="plugins.beta" Text="Versions bêta" Tooltip="Proposer aussi les pré-releases des plugins." Slot.VAlign="Center"/>
+				</HBox>
+				<Label Name="plugins.error" Text="" Class="error" Wrap="true" Visibility="Collapsed"/>
+				<Label Name="plugins.empty" Text="" Class="dim" Visibility="Collapsed"/>
+				<VBox Name="plugins.list" Spacing="8"/>
+			</VBox>
+		</ScrollBox>
+
+		<!-- =============================================================== Log -->
+		<Border Class="statusbar" Padding="10,6">
+			<VBox Spacing="4">
+				<HBox Spacing="8">
+					<Button Name="log.toggle" Text="Masquer le journal"/>
+					<Label Name="log.task" Text="" Slot.VAlign="Center" Slot.Fill="1"/>
+					<Button Name="log.copy" Text="Copier"/>
+					<Button Name="log.clear" Text="Effacer"/>
+				</HBox>
+				<TreeView Name="log.lines" Height="150"/>
+			</VBox>
+		</Border>
+	</VBox>
+</HBox>
+</Window>

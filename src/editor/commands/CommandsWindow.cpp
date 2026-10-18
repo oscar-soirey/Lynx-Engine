@@ -2247,7 +2247,7 @@ namespace lynx::editor::commands_window
 		{
 			Rid label = Rlabel_create("");
 			if (markdown)
-				Rwidget_set_attribute(label, "Markdown", "true");
+				Rlabel_set_markdown(label, R_TRUE);
 			Rlabel_set_wrap(label, R_TRUE);
 			Rlabel_set_text(label, text.c_str());
 			if (style_class)

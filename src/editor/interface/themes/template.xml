@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Lynx editor : your own theme
+  ============================================================================
+  This file lives in your themes folder (Windows : %APPDATA%\Lynx\themes).
+  Every .xml file of that folder is a theme, listed in Options > Interface >
+  Theme. Save the file : the editor applies it right away (no restart).
+
+  Name    the name shown in the list (unique : two themes with the same name,
+          the last one loaded wins)
+  Base    the theme it starts from : "Dark" or "Light" (what you do not set
+          below comes from it)
+  Dark    true for a dark theme
+  Accent  main color (buttons, selection, focus)
+  CornerRadius  rounded corners, in pixels (0 : square)
+
+  Colors : #RRGGBB or #RRGGBBAA (alpha). Remove a line to keep the Base color.
+
+  <Style> : a color for one kind of widget (Widget="Button" / "Label"...)
+  and / or one class of the editor (Class="toolbar", "dim", "play"...).
+  The classes used by the editor are all listed at the end of this file.
+  ============================================================================
+-->
+<Theme Name="My Theme" Base="Dark" Dark="true" Accent="#4AA8F0" CornerRadius="4">
+	<Colors
+		Window="#16181C" Panel="#1C1F24" Border="#353A42"
+		Text="#E6E9EE" TextDisabled="#7D8590" TextPlaceholder="#646B75"
+		Accent="#4AA8F0" AccentHovered="#6CBAF5" AccentPressed="#2E6E9E" AccentText="#0E1013"
+		Control="#2A2F37" ControlHovered="#353C46" ControlPressed="#2E6E9E" ControlBorder="#353A42"
+		Input="#121418" Focus="#4AA8F0" Selection="#24425C" RowHovered="#262B33"
+		Separator="#353A42" Header="#22262C" HeaderHovered="#2A2F37" TabActive="#1F3346"
+		Popup="#1E2126" PopupBorder="#353A42" Tooltip="#1E2126" TooltipText="#E6E9EE" Switch="#4AA8F0"/>
+
+	<!-- Toolbar, tool groups and their buttons -->
+	<Style Class="toolbar" Panel="#16181C"/>
+	<Style Class="toolgroup" Panel="#1E2126" Border="#2C3138"/>
+	<Style Widget="Button" Class="tool" Control="#1E2126" ControlHovered="#2A2F37" ControlPressed="#24425C"/>
+	<Style Widget="Button" Class="active" Control="#24425C" ControlHovered="#2B4F6E"/>
+	<Style Widget="Button" Class="mode-on" Control="#24425C" ControlBorder="#4AA8F0" BorderWidth="2"/>
+
+	<!-- Play / Stop / Simulate -->
+	<Style Widget="Button" Class="play" Text="#78D184"/>
+	<Style Widget="Button" Class="stop" Text="#F0726B"/>
+	<Style Widget="Button" Class="simulate" Text="#7AB0F0"/>
+
+	<!-- Status bar, viewport bar -->
+	<Style Class="statusbar" Panel="#16181C"/>
+	<Style Class="viewport-bar" Panel="#16181CDD"/>
+
+	<!-- Texts -->
+	<Style Widget="Label" Class="dim" Text="#7D8590"/>
+	<Style Widget="Label" Class="section" Text="#4AA8F0"/>
+	<Style Widget="Label" Class="dialog-title" FontSize="18"/>
+	<Style Widget="Label" Class="error" Text="#F0726B"/>
+	<Style Widget="Label" Class="warning" Text="#F0CC59"/>
+	<Style Widget="Label" Class="success" Text="#78D184"/>
+	<Style Widget="Label" Class="dirty" Text="#4AA8F0"/>
+
+	<!-- X / Y / Z / W fields of the Details panel -->
+	<Style Widget="Label" Class="axis-x" Text="#F0726B"/>
+	<Style Widget="Label" Class="axis-y" Text="#78D184"/>
+	<Style Widget="Label" Class="axis-z" Text="#7AB0F0"/>
+	<Style Widget="Label" Class="axis-w" Text="#A0A7B0"/>
+</Theme>

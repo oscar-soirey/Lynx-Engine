@@ -15,10 +15,11 @@
 //   - the editor window is revealed BEHIND it (kept hidden while loading),
 //     then the splash fades out over the running editor and is destroyed.
 //
-// It owns its GLFW window, OpenGL context and ImGui context. Every frame it
-// draws saves and restores the current GL / ImGui contexts : it can be
-// updated in the middle of the editor startup (HRL, editor ImGui...).
-// Everything runs on the main thread : the splash is redrawn at each step.
+// Look : "Lynx <year>" with the exact engine version in small, the project,
+// the step and a thin progress bar, over an abstract picture computed at
+// opening (warm color fields, silky bands ; seeded by the project name).
+// A Raven window (Vulkan) ; everything runs on the main thread : the splash
+// is redrawn at each step.
 // =============================================================================
 
 #include <string>

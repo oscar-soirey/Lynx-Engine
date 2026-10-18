@@ -27,14 +27,41 @@ struct EngineRelease
 	float progress = -1.0f;   // 0..1 pendant le téléchargement
 };
 
+// Une version du moteur qui n'a pas été installée par le launcher : un build
+// modifié (dossier de build du moteur compilé soi-même), une copie installée
+// ailleurs (Microsoft Store, autre disque...). Le launcher ne fait que la
+// référencer : ses fichiers ne sont jamais supprimés.
+struct LocalEngine
+{
+	std::string tag;               // "local-<nom>" : identifiant dans le launcher
+	std::string name;              // affiché (nom du dossier, modifiable dans le fichier)
+	std::string version;           // lue dans sdk/cmake/LynxConfigVersion.cmake ("" : inconnue)
+	std::filesystem::path folder;  // dossier de LynxEditor.exe
+	bool present = false;          // LynxEditor.exe toujours là
+};
+
 namespace Engine
 {
 	inline constexpr const char* kRepository = "oscar-soirey/Lynx-Engine";
 
 	// Dossier d'installation : %LOCALAPPDATA%\Lynx\versions\<tag>
+	// (versions locales : leur propre dossier, voir LocalEngine).
 	std::filesystem::path VersionsDirectory();
 	std::filesystem::path VersionDirectory(const std::string& tag);
 	bool IsInstalled(const std::string& tag);
+
+	// ---- Versions locales (build modifié ou version déjà installée ailleurs) ----
+	// Liste gardée dans %LOCALAPPDATA%\Lynx\local-engines.txt (une ligne : tag<TAB>nom<TAB>dossier).
+	bool IsLocalTag(const std::string& tag);
+	std::vector<LocalEngine> LocalEngines();
+	// `folder` : le dossier de LynxEditor.exe, ou un dossier qui en contient un (build/,
+	// build-release/, cmake-build-*/ d'un clone du moteur). Bloquant (court).
+	// Renvoie le tag ajouté ("" : échec, `error` dit pourquoi).
+	std::string AddLocal(const std::filesystem::path& folder, std::string& error, const LogFn& log);
+	// Oublie la version locale (ses fichiers restent).
+	void RemoveLocal(const std::string& tag, const LogFn& log);
+	// Version lue dans le SDK d'un dossier de moteur ("" : inconnue).
+	std::string ReadVersion(const std::filesystem::path& engine_folder);
 
 	// Lit les releases via l'API GitHub (curl). Bloquant.
 	bool FetchReleases(std::vector<EngineRelease>& out, std::string& error, const LogFn& log);

@@ -1,13 +1,17 @@
 #include "SplashScreen.h"
 
 #include "raven/RavenUi.h"
+#include "../core/Engine.h"
 
 #include <Raven.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
 #include <filesystem>
 #include <iostream>
 #include <thread>
@@ -23,8 +27,8 @@ namespace lynx::editor::splash
 {
 	namespace
 	{
-		constexpr int kWidth = 640;
-		constexpr int kHeight = 360;
+		constexpr int kWidth = 760;
+		constexpr int kHeight = 430;
 
 		constexpr double kMinVisibleSeconds = 1.0;   // no flash when loading is instant
 		constexpr double kFadeInSeconds = 0.15;
@@ -39,15 +43,14 @@ namespace lynx::editor::splash
 			return { r / 255.f, g / 255.f, b / 255.f, a / 255.f };
 		}
 
-		constexpr Color kOutline = Rgb(15, 15, 15);
-		constexpr Color kDeep = Rgb(30, 30, 30);
-		constexpr Color kBackground = Rgb(37, 37, 37);
-		constexpr Color kBevel = Rgb(61, 61, 61);
-		constexpr Color kText = Rgb(230, 230, 230);
-		constexpr Color kTextDim = Rgb(128, 128, 128);
-		constexpr Color kAccent = Rgb(217, 154, 43);
-		constexpr Color kAccentHot = Rgb(240, 185, 74);
-		constexpr Color kAccentDim = Rgb(120, 86, 26);
+		constexpr Color kBase = Rgb(14, 12, 12);          // behind the artwork
+		constexpr Color kText = Rgb(245, 242, 238);
+		constexpr Color kTextDim = Rgb(170, 162, 155);
+		constexpr Color kTextFaint = Rgb(120, 113, 107);
+		constexpr Color kTrack = Rgb(255, 255, 255, 28);
+		constexpr Color kBarFrom = Rgb(240, 160, 40);     // Lynx orange
+		constexpr Color kBarTo = Rgb(226, 70, 120);       // magenta
+		constexpr Color kFrame = Rgb(255, 255, 255, 22);
 
 		enum class Phase
 		{
@@ -63,10 +66,13 @@ namespace lynx::editor::splash
 			Rid logo = R_INVALID_ID;
 			bool own_logo = false;
 			float logo_ratio = 32.f / 28.f;
+			Rid artwork = R_INVALID_ID;   // abstract background (MakeArtwork)
 
 			std::string project_name;
 			std::string project_path;
 			std::string step = "Starting...";
+			std::string title;            // "Lynx 2027"
+			std::string version;          // "Version 27.0.0"
 
 			float progress = 0.f;   // last value given by SetStep
 			float shown = 0.f;      // value drawn (animated in Complete)
@@ -99,12 +105,137 @@ namespace lynx::editor::splash
 			return 1.f - (1.f - t) * (1.f - t) * (1.f - t);
 		}
 
+		float Smoothstep(float a, float b, float x)
+		{
+			const float t = std::clamp((x - a) / (b - a), 0.f, 1.f);
+			return t * t * (3.f - 2.f * t);
+		}
+
+		Color Mix(Color a, Color b, float t)
+		{
+			return { a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t };
+		}
+
+		// "Lynx 2027" / "Version 27.0.0" from the engine version (CMakeLists.txt :
+		// LYNX_VERSION_YEAR.MAJOR.MINOR, the year on two digits).
+		void MakeTitle()
+		{
+			const std::string version = lynx::GetEngineVersion();
+			int year = std::atoi(version.c_str());
+			if (year > 0 && year < 100)
+				year += 2000;
+			g.title = year > 0 ? "Lynx " + std::to_string(year) : std::string("Lynx");
+			g.version = "Version " + version;
+		}
+
+		// ---- artwork ---------------------------------------------------------------
+		// An abstract picture computed once, in the spirit of the JetBrains / Adobe
+		// splash screens : glowing color fields (warped), silky bands, film grain.
+		// Lynx colors (orange, magenta, violet) ; the project name moves the shapes
+		// a little, so that every project has its own picture. The left and the
+		// bottom stay dark : the texts are drawn there.
+
+		uint32_t Hash(const std::string& text)
+		{
+			uint32_t h = 2166136261u;   // FNV-1a
+			for (unsigned char c : text)
+				h = (h ^ c) * 16777619u;
+			return h;
+		}
+
+		struct Random
+		{
+			uint32_t state;
+			float Next()   // [0, 1)
+			{
+				state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+				return static_cast<float>(state & 0xFFFFFF) / 16777216.f;
+			}
+			float Range(float a, float b) { return a + (b - a) * Next(); }
+		};
+
+		Rid MakeArtwork(int width, int height, uint32_t seed)
+		{
+			Random rnd{ seed ? seed : 0x9E3779B9u };
+
+			struct Blob { float x, y, radius; float r, g, b; };
+			const float aspect = static_cast<float>(width) / static_cast<float>(height);
+			Blob blobs[] = {
+				{ aspect * 0.72f, 0.22f, 0.42f, 0.95f, 0.52f, 0.10f },   // orange
+				{ aspect * 0.92f, 0.08f, 0.30f, 1.00f, 0.78f, 0.32f },   // amber
+				{ aspect * 0.95f, 0.70f, 0.46f, 0.86f, 0.16f, 0.42f },   // magenta
+				{ aspect * 0.62f, 0.95f, 0.40f, 0.36f, 0.18f, 0.86f },   // violet
+				{ aspect * 0.50f, 0.45f, 0.30f, 0.62f, 0.07f, 0.12f },   // deep red
+			};
+			for (Blob& b : blobs)
+			{
+				b.x += rnd.Range(-0.10f, 0.10f);
+				b.y += rnd.Range(-0.10f, 0.10f);
+				b.radius *= rnd.Range(0.85f, 1.15f);
+			}
+			const float s1 = rnd.Range(0.f, 6.28f), s2 = rnd.Range(0.f, 6.28f);
+			const float s3 = rnd.Range(0.f, 6.28f), s4 = rnd.Range(0.f, 6.28f);
+			const float band_angle = rnd.Range(0.7f, 1.1f);
+
+			std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+			Random grain{ seed ^ 0xA5A5A5A5u };
+
+			for (int y = 0; y < height; ++y)
+			{
+				for (int x = 0; x < width; ++x)
+				{
+					const float u = static_cast<float>(x) / static_cast<float>(width);
+					const float v = static_cast<float>(y) / static_cast<float>(height);
+					const float px = static_cast<float>(x) / static_cast<float>(height);
+					const float py = v;
+
+					// Domain warp : organic, flowing shapes.
+					const float wx = px + 0.09f * std::sin(py * 5.5f + s1) + 0.05f * std::sin((px + py) * 9.f + s2);
+					const float wy = py + 0.09f * std::cos(px * 4.5f + s3) + 0.04f * std::sin((px - py) * 11.f + s4);
+
+					float r = 0.f, gg = 0.f, b = 0.f;
+					for (const Blob& blob : blobs)
+					{
+						const float dx = wx - blob.x, dy = wy - blob.y;
+						const float w = std::exp(-(dx * dx + dy * dy) / (blob.radius * blob.radius) * 2.4f);
+						r += blob.r * w; gg += blob.g * w; b += blob.b * w;
+					}
+
+					// Silky bands across the color fields.
+					const float along = wx * std::cos(band_angle) - wy * std::sin(band_angle);
+					const float band = std::pow(0.5f + 0.5f * std::sin(along * 26.f + s2), 28.f);
+					const float glow = std::min(1.f, (r + gg + b) * 0.6f);
+					r += band * glow * 0.35f; gg += band * glow * 0.28f; b += band * glow * 0.30f;
+
+					// Soft tone mapping : glows, never clips.
+					r = 1.f - std::exp(-r * 1.25f);
+					gg = 1.f - std::exp(-gg * 1.25f);
+					b = 1.f - std::exp(-b * 1.25f);
+
+					// Dark on the left (title) and at the bottom (project, progress).
+					const float art = Smoothstep(0.18f, 0.80f, u) * (1.f - 0.65f * Smoothstep(0.55f, 1.f, v));
+					r = kBase.r + (r - kBase.r) * art;
+					gg = kBase.g + (gg - kBase.g) * art;
+					b = kBase.b + (b - kBase.b) * art;
+
+					const float noise = (grain.Next() - 0.5f) * 0.035f;
+					uint8_t* out = &pixels[(static_cast<size_t>(y) * width + x) * 4];
+					out[0] = static_cast<uint8_t>(std::clamp(r + noise, 0.f, 1.f) * 255.f + 0.5f);
+					out[1] = static_cast<uint8_t>(std::clamp(gg + noise, 0.f, 1.f) * 255.f + 0.5f);
+					out[2] = static_cast<uint8_t>(std::clamp(b + noise, 0.f, 1.f) * 255.f + 0.5f);
+					out[3] = 255;
+				}
+			}
+
+			return Rtexture_create_from_pixels(pixels.data(), width, height);
+		}
+
 		// ---- drawing -------------------------------------------------------------
 
-		void Rect(RPainter* p, float x, float y, float w, float h, Color c)
+		void Rect(RPainter* p, float x, float y, float w, float h, Color c, float radius = 0.f)
 		{
 			if (w > 0.f && h > 0.f)
-				Rdraw_rect(p, x, y, w, h, 0.f, c.r, c.g, c.b, c.a);
+				Rdraw_rect(p, x, y, w, h, radius, c.r, c.g, c.b, c.a);
 		}
 
 		void Text(RPainter* p, float size, float x, float y, const std::string& text, Color c)
@@ -116,7 +247,7 @@ namespace lynx::editor::splash
 		{
 			float w = 0.f, h = 0.f;
 			Rfont_measure_text(R_INVALID_ID, size, text.c_str(), &w, &h);
-			if (w <= 0.f)   // no font yet : a rough estimate (monospace pixel font)
+			if (w <= 0.f)   // no font yet : a rough estimate
 				w = size * 0.6f * static_cast<float>(text.size());
 			return w;
 		}
@@ -148,102 +279,80 @@ namespace lynx::editor::splash
 			return "...";
 		}
 
-		// Pixel spinner : 8 blocks on a circle, the bright one turns.
-		void DrawSpinner(RPainter* p, float cx, float cy, float radius, float block, double time)
-		{
-			const int head = static_cast<int>(time * 10.0) % 8;
-			for (int i = 0; i < 8; ++i)
-			{
-				const float angle = static_cast<float>(i) * 3.14159265f / 4.f - 3.14159265f / 2.f;
-				const float x = std::floor(cx + std::cos(angle) * radius - block * 0.5f);
-				const float y = std::floor(cy + std::sin(angle) * radius - block * 0.5f);
-				const int distance = (head - i + 8) % 8;
-				Color c = kAccent;
-				c.a = std::max(255 - distance * 28, 40) / 255.f;
-				Rect(p, x, y, block, block, distance == 0 ? kAccentHot : c);
-			}
-		}
-
+		// Thin bar along the bottom : orange -> magenta, a light running inside.
 		void DrawProgressBar(RPainter* p, float x, float y, float w, float h, float value, double time)
 		{
-			const float px = 1.f;
-			Rect(p, x, y, w, h, kOutline);
-			const float ix = x + px, iy = y + px, iw = w - 2 * px, ih = h - 2 * px;
-			Rect(p, ix, iy, iw, ih, kDeep);
+			Rect(p, x, y, w, h, kTrack, h * 0.5f);
 
-			const float fill = std::floor(iw * std::clamp(value, 0.f, 1.f));
+			const float fill = std::floor(w * std::clamp(value, 0.f, 1.f));
 			if (fill <= 0.f)
 				return;
 
-			Rect(p, ix, iy, fill, ih, kAccent);
-			Rect(p, ix, iy, fill, px, kAccentHot);                // pixel bevel
-			Rect(p, ix, iy + ih - px, fill, px, kAccentDim);
-
-			for (float sx = ix + 10.f; sx < ix + fill; sx += 10.f)   // segments
-				Rect(p, sx, iy, px, ih, kAccentDim);
-
-			// Moving shine inside the filled part.
-			Rdraw_push_clip_rect(p, ix, iy, fill, ih);
-			const float span = iw * 1.4f;
-			const float shine_x = ix - 0.2f * iw + static_cast<float>(std::fmod(time * 0.6, 1.0)) * span;
-			Rect(p, std::floor(shine_x), iy, 36.f, ih, Rgb(255, 230, 170, 70));
+			Rdraw_push_clip_rect(p, x, y, fill, h);
+			const int slices = 48;
+			const float slice_w = w / static_cast<float>(slices);
+			for (int i = 0; i < slices; ++i)
+			{
+				const float sx = x + slice_w * static_cast<float>(i);
+				if (sx >= x + fill)
+					break;
+				Rect(p, std::floor(sx), y, std::ceil(slice_w) + 1.f, h,
+				     Mix(kBarFrom, kBarTo, static_cast<float>(i) / static_cast<float>(slices - 1)));
+			}
+			const float shine_x = x - 80.f + static_cast<float>(std::fmod(time * 0.7, 1.0)) * (fill + 160.f);
+			Rect(p, std::floor(shine_x), y, 80.f, h, Rgb(255, 240, 220, 90));
 			Rdraw_pop_clip_rect(p);
 		}
 
 		void Draw(Rid, RPainter* p, float width, float height, void*)
 		{
 			const double time = Now();
-			const float px = 1.f;
 
-			// Window : outline, bevel, background, accent stripe on top.
-			Rect(p, 0, 0, width, height, kOutline);
-			Rect(p, px, px, width - 2 * px, height - 2 * px, kBevel);
-			Rect(p, 2 * px, 2 * px, width - 3 * px, height - 3 * px, kBackground);
-			Rect(p, px, px, width - 2 * px, 4.f, kAccent);
+			// Artwork, full window, and a hairline frame.
+			Rect(p, 0, 0, width, height, kBase);
+			if (g.artwork != R_INVALID_ID)
+				Rdraw_image(p, g.artwork, 0.f, 0.f, width, height, 1.f, 1.f, 1.f, 1.f);
+			Rect(p, 0, 0, width, 1.f, kFrame);
+			Rect(p, 0, height - 1.f, width, 1.f, kFrame);
+			Rect(p, 0, 0, 1.f, height, kFrame);
+			Rect(p, width - 1.f, 0, 1.f, height, kFrame);
 
-			const float pad = 32.f;
+			const float pad = 40.f;
 			const float content_w = width - pad * 2.f;
 
-			// Lynxie + title.
-			const float logo_h = 112.f;
+			// Lynxie, "Lynx 2027", the exact version in small.
+			const float logo_h = 40.f;
 			const float logo_w = std::floor(logo_h * g.logo_ratio);
-			const float logo_y = pad + 6.f;
+			float x = pad;
 			if (g.logo != R_INVALID_ID)
-				Rdraw_image(p, g.logo, pad, logo_y, logo_w, logo_h, kText.r, kText.g, kText.b, 1.f);
+			{
+				Rdraw_image(p, g.logo, pad, pad + 6.f, logo_w, logo_h, kText.r, kText.g, kText.b, 1.f);
+				x += logo_w + 16.f;
+			}
+			const float title_size = 52.f;
+			Text(p, title_size, x, pad, g.title, kText);
+			Text(p, 13.f, x + 2.f, pad + title_size + 6.f, g.version, kTextDim);
 
-			const float title_x = pad + (g.logo != R_INVALID_ID ? logo_w + 24.f : 0.f);
-			const float title_size = 72.f;
-			Text(p, title_size, title_x, pad, "LYNX", kText);
-
-			const float sub_size = 18.f;
-			const float sub_y = pad + title_size + 4.f;
-			Text(p, sub_size, title_x, sub_y, "ENGINE / EDITOR", kTextDim);
-			Rect(p, title_x, sub_y + sub_size + 8.f, TextWidth(title_size, "LYNX"), 2 * px, kAccent);
-
-			// Busy indicator, top right.
-			DrawSpinner(p, width - pad - 14.f, pad + 14.f, 12.f, 5.f, time);
-
-			// Project.
-			float y = logo_y + logo_h + 30.f;
-			Text(p, 15.f, pad, y, "OPENING PROJECT", kAccent);
-			y += 21.f;
-			Text(p, 30.f, pad, y, FitRight(g.project_name, 30.f, content_w), kText);
-			y += 34.f;
-			Text(p, 15.f, pad, y, FitLeft(g.project_path, 15.f, content_w), kTextDim);
-
-			// Step + progress bar, at the bottom.
-			const float bar_h = 14.f;
-			const float bar_y = height - pad - bar_h;
+			// Bottom : project, current step, progress.
+			const float bar_h = 4.f;
+			const float bar_y = height - pad + 4.f;
+			const float step_size = 13.f;
+			const float step_y = bar_y - 12.f - step_size;
 
 			char percent[16];
 			std::snprintf(percent, sizeof(percent), "%d%%",
 			              static_cast<int>(std::round(std::clamp(g.shown, 0.f, 1.f) * 100.f)));
-
-			const float step_size = 18.f;
-			const float step_y = bar_y - 8.f - step_size;
 			const float percent_w = TextWidth(step_size, percent);
 
-			Text(p, step_size, pad, step_y, FitRight(g.step, step_size, content_w - percent_w - 16.f), kText);
+			const float path_size = 12.f;
+			const float path_y = step_y - 22.f - path_size;
+			const float name_size = 24.f;
+			const float name_y = path_y - 6.f - name_size;
+
+			Text(p, name_size, pad, name_y, FitRight(g.project_name, name_size, content_w * 0.7f), kText);
+			Text(p, path_size, pad, path_y, FitLeft(g.project_path, path_size, content_w * 0.7f), kTextFaint);
+
+			Text(p, step_size, pad, step_y, FitRight(g.step, step_size, content_w - percent_w - 16.f), kTextDim);
 			Text(p, step_size, width - pad - percent_w, step_y, percent, kTextDim);
 
 			DrawProgressBar(p, pad, bar_y, content_w, bar_h, g.shown, time);
@@ -307,15 +416,17 @@ namespace lynx::editor::splash
 		}
 
 		Rwindow_set_close_callback(g.window, RefuseClose, nullptr);
-		Rwindow_set_clear_color(g.window, kBackground.r, kBackground.g, kBackground.b, 1.f);
+		Rwindow_set_clear_color(g.window, kBase.r, kBase.g, kBase.b, 1.f);
 		Rwindow_center(g.window);
 
 		g.canvas = Rwidget_create(R_WIDGET_CUSTOM);
 		Rcustom_set_paint_callback(g.canvas, Draw, nullptr);
 		Rwindow_set_content(g.window, g.canvas);
-		Rwindow_set_continuous_redraw(g.window, R_TRUE);   // spinner, shine
+		Rwindow_set_continuous_redraw(g.window, R_TRUE);   // shine of the bar
 
 		CreateLogo();
+		MakeTitle();
+		g.artwork = MakeArtwork(kWidth, kHeight, Hash(g.project_name));
 
 		g.opened_at = Now();
 		g.phase = Phase::Loading;
@@ -454,6 +565,8 @@ namespace lynx::editor::splash
 
 		if (g.own_logo)
 			Rtexture_destroy(g.logo);
+		if (g.artwork != R_INVALID_ID)
+			Rtexture_destroy(g.artwork);
 		Rwindow_destroy(g.window);
 
 		g = State{};

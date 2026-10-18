@@ -873,6 +873,11 @@ namespace lynx::editor::ship_game
 			if (fs::is_regular_file(root / "input.json", ec) && !CopyInto(root / "input.json", output, error))
 				return fail(error);
 
+			// Project settings (renderer Vulkan / OpenGL, vsync, volume, voxels) :
+			// read by the shipped game at its start.
+			if (fs::is_regular_file(root / "settings.cfg", ec) && !CopyInto(root / "settings.cfg", output, error))
+				return fail(error);
+
 			// Default font of the widgets (texts without a font) : the editor
 			// font, like the Widget Editor preview.
 			{

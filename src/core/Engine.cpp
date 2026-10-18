@@ -47,6 +47,7 @@ namespace lynx
 
 	Engine* Engine::instance_ = nullptr;
 	bool Engine::release_mode_ = false;
+	bool Engine::scene_on_screen_ = false;
 
 	Engine::Engine()
 	{
@@ -641,6 +642,16 @@ namespace lynx
 		return release_mode_;
 	}
 
+	void Engine::SetSceneOnScreen(bool on_screen)
+	{
+		scene_on_screen_ = on_screen;
+	}
+
+	bool Engine::IsSceneOnScreen()
+	{
+		return scene_on_screen_;
+	}
+
 	Engine* Engine::Create()
 	{
 		if (!instance_)
@@ -665,7 +676,7 @@ namespace lynx
 	{
 		if (!scene_created_)
 		{
-			scene_ = HRL_CreateScene(false);
+			scene_ = HRL_CreateScene(scene_on_screen_ ? 1 : 0);
 
 			// One unit in the whole engine : 1 world unit = 1 voxel (positions,
 			// sizes, speeds, cameras, lights... are all in voxels).

@@ -5,7 +5,7 @@
 // phases of the port :
 //   phase 2 : Git, Input Settings, code editors, Profiler,
 //             Ship Game, Sprite -> voxels ;
-//   phase 3 : Widget Editor, Anim Graph / Behavior Tree, Particle Editor, the
+//   phase 3 : Widget Editor, Particle Editor, the
 //             editor modules of the plugins (new Raven API).
 // Until then the editor keeps working without them : the files they would
 // open are opened with the program Windows associates with them, and their
@@ -118,53 +118,7 @@ namespace lynx::editor::widget_editor
 }
 
 
-// ---- Anim Graph / Behavior Tree -------------------------------------------------
-namespace lynx::editor::graph_editors
-{
-    bool CanOpen(const std::filesystem::path&) { return false; }
-    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
-    void DrawAll(unsigned int) {}
-    bool HasFocus() { return false; }
-    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
-    void PathDeleted(const std::filesystem::path&) {}
-    bool HasUnsavedChanges() { return false; }
-    void SaveAll() {}
-    // [Locomotion (State Machine)] -> [Output Pose] ; Locomotion : Entry -> Idle (as GraphEditors.cpp).
-    std::string NewAnimGraphTemplate()
-    {
-        lynx::AnimGraphAsset g;
-        lynx::AnimGraphParameter speed;
-        speed.name = "speed";
-        g.parameters.push_back(speed);
-        lynx::AnimGraphAnimation idle;
-        idle.name = "Idle";
-        g.animations.push_back(idle);
-        lynx::AnimGraphStateMachine m;
-        m.id = 1;
-        m.name = "Locomotion";
-        lynx::AnimGraphState state;
-        state.id = 2;
-        state.name = "Idle";
-        state.motion = "Idle";
-        state.x = 260.f;
-        state.y = 0.f;
-        m.states.push_back(state);
-        m.entry_state = "Idle";
-        g.state_machines.push_back(m);
-        lynx::AnimGraphPoseNode node;
-        node.id = 3;
-        node.type = "statemachine";
-        node.source = "Locomotion";
-        g.pose_nodes.push_back(node);
-        g.output_source = node.id;
-        g.output_x = 360.f;
-        g.output_y = 0.f;
-        return g.SaveToString();
-    }
-    std::string NewBehaviorTreeTemplate() { return lynx::BehaviorTreeAsset::MakeDefault().SaveToString(); }
-    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
-    void Shutdown() {}
-}
+// ---- Anim Graph / Behavior Tree : raven/GraphEditors.inl (Raven NodeGraph) ------------
 
 
 // ---- Particle Editor --------------------------------------------------------------

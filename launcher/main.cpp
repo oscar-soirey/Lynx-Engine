@@ -1,147 +1,98 @@
-#include "Launcher.h"
+// Lynx launcher : fenêtre Raven (Vulkan), mêmes thèmes et widgets que l'éditeur.
+// L'interface (interface/launcher.xml) et celle de l'éditeur qu'elle réutilise
+// (src/editor/interface : widgets.xml, themes/, icônes, police) sont dans
+// l'exécutable (cmake/LynxEmbedFiles.cmake) : rien à livrer à côté.
 
-#include <imgui/imgui.h>
-#include <imgui/imgui_impl_glfw.h>
-#include <imgui/imgui_impl_opengl3.h>
-#include <glfw/glfw3.h>
+#include "Launcher.h"
+#include "../src/editor/raven/RavenUi.h"
+#include "../src/editor/EditorOptions.h"
+
+#include <Raven.h>
 
 #include <cstdio>
-#include <filesystem>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
+	#ifndef NOMINMAX
+		#define NOMINMAX
+	#endif
 	#include <windows.h>
 #endif
 
-namespace fs = std::filesystem;
+namespace ui = lynx::editor::ui;
 
 namespace
 {
-	fs::path ExecutableDirectory()
+	bool g_quit = false;
+
+	int OnCloseRequest(Rid, void*)
 	{
-#ifdef _WIN32
-		wchar_t buffer[MAX_PATH];
-		DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-		if (length > 0 && length < MAX_PATH)
-			return fs::path(buffer).parent_path();
-#endif
-		return fs::current_path();
+		g_quit = true;
+		return R_FALSE;   // détruite à la fin de main
 	}
 
-	void LoadFonts()
+	// Dossier de plugin ou .zip glissé sur la fenêtre : import (onglet Plugins).
+	int OnDropFiles(Rid, const RDropEvent* event, void* user)
 	{
-		// Même police que l'éditeur (normal-font.ttf à côté de l'exécutable),
-		// sinon une police système. ImGui 1.92 : les glyphes (accents compris)
-		// sont chargés à la demande, plus besoin de plages.
-		ImGuiIO& io = ImGui::GetIO();
-		const fs::path candidates[] = {
-			ExecutableDirectory() / "VCR-OSD-MONO-launcher.ttf",
-			fs::path("VCR-OSD-MONO-launcher.ttf"),
-			fs::path("C:/Windows/Fonts/segoeui.ttf"),
-		};
-		for (const fs::path& font : candidates)
-		{
-			std::error_code error;
-			if (fs::is_regular_file(font, error))   // AddFontFromFileTTF asserte sur un fichier absent
-			{
-				io.Fonts->AddFontFromFileTTF(font.string().c_str(), 24.0f);   // même taille que l'éditeur
-				return;
-			}
-		}
-		ImFontConfig config;
-		config.SizePixels = 22.0f;   // la police par défaut (13 px) est trop petite
-		io.Fonts->AddFontDefault(&config);
-	}
-
-	void ApplyStyle()
-	{
-		ImGuiStyle& style = ImGui::GetStyle();
-		ImGui::StyleColorsDark();
-		// Arrondis / bordures : on garde le style « pixel » du ImGui de third-party.
-		style.FramePadding = ImVec2(10, 6);
-		style.ItemSpacing = ImVec2(10, 8);
-		style.CellPadding = ImVec2(8, 6);
-		style.ScrollbarSize = 12;
-
-		ImVec4* c = style.Colors;
-		c[ImGuiCol_WindowBg]        = ImVec4(0.105f, 0.11f, 0.13f, 1);
-		c[ImGuiCol_ChildBg]         = ImVec4(0, 0, 0, 0);
-		c[ImGuiCol_Text]            = ImVec4(0.92f, 0.92f, 0.94f, 1);
-		c[ImGuiCol_Border]          = ImVec4(0.20f, 0.21f, 0.25f, 1);
-		c[ImGuiCol_Separator]       = ImVec4(0.20f, 0.21f, 0.25f, 1);
-		c[ImGuiCol_FrameBg]         = ImVec4(0.16f, 0.17f, 0.20f, 1);
-		c[ImGuiCol_FrameBgHovered]  = ImVec4(0.20f, 0.21f, 0.25f, 1);
-		c[ImGuiCol_FrameBgActive]   = ImVec4(0.24f, 0.25f, 0.29f, 1);
-		c[ImGuiCol_Button]          = ImVec4(0.19f, 0.20f, 0.24f, 1);
-		c[ImGuiCol_ButtonHovered]   = ImVec4(0.25f, 0.26f, 0.31f, 1);
-		c[ImGuiCol_ButtonActive]    = ImVec4(0.30f, 0.31f, 0.36f, 1);
-		c[ImGuiCol_CheckMark]       = ImVec4(0.96f, 0.56f, 0.20f, 1);
-		c[ImGuiCol_TableHeaderBg]   = ImVec4(0.13f, 0.14f, 0.16f, 1);
-		c[ImGuiCol_TableRowBg]      = ImVec4(0, 0, 0, 0);
-		c[ImGuiCol_TableRowBgAlt]   = ImVec4(1, 1, 1, 0.025f);
-		c[ImGuiCol_TableBorderLight]= ImVec4(0.18f, 0.19f, 0.22f, 1);
+		if (!event || event->path_count <= 0 || !event->paths)
+			return R_FALSE;
+		if (event->phase != R_DROP_DROPPED)
+			return R_TRUE;   // accepté au survol
+		std::vector<std::string> paths;
+		for (int i = 0; i < event->path_count; ++i)
+			if (event->paths[i])
+				paths.emplace_back(event->paths[i]);
+		static_cast<Launcher*>(user)->OnDrop(paths);
+		return R_TRUE;
 	}
 }
 
 int main(int, char**)
 {
-	glfwSetErrorCallback([](int code, const char* text) { std::fprintf(stderr, "GLFW %d: %s\n", code, text); });
-	if (!glfwInit())
-		return 1;
-
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	GLFWwindow* window = glfwCreateWindow(1440, 900, "Lynx launcher", nullptr, nullptr);
-	if (!window)
+	RInitDesc desc;
+	std::memset(&desc, 0, sizeof(desc));
+	desc.app_name = "Lynx Launcher";
+	if (!Rinit_ex(&desc))
 	{
-		glfwTerminate();
+#ifdef _WIN32
+		MessageBoxW(nullptr, L"Le launcher ne peut pas démarrer : Vulkan n'est pas disponible sur cet ordinateur "
+		                     L"(mets à jour le pilote de la carte graphique).", L"Lynx Launcher", MB_OK | MB_ICONERROR);
+#endif
+		std::fprintf(stderr, "[UI] Rinit failed (Vulkan)\n");
 		return 1;
 	}
-	glfwSetWindowSizeLimits(window, 1100, 700, GLFW_DONT_CARE, GLFW_DONT_CARE);
-	glfwMakeContextCurrent(window);
-	glfwSwapInterval(1);
 
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGui::GetIO().IniFilename = nullptr;
-	ApplyStyle();
-	LoadFonts();
-	ImGui_ImplGlfw_InitForOpenGL(window, true);
-	ImGui_ImplOpenGL3_Init("#version 330");
+	ui::Init();                          // fichiers intégrés, <Icon>, thèmes
+	lynx::editor::options::Init();       // thème et échelle choisis dans l'éditeur
 
+	const Rid window = ui::LoadWindow("launcher.xml");
+	if (window == R_INVALID_ID)
 	{
-		Launcher launcher;
-		// Glisser un dossier de plugin (ou un .zip) sur la fenêtre : import dans l'onglet Plugins
-		glfwSetWindowUserPointer(window, &launcher);
-		glfwSetDropCallback(window, [](GLFWwindow* w, int count, const char** paths) {
-			std::vector<std::string> list(paths, paths + count);
-			static_cast<Launcher*>(glfwGetWindowUserPointer(w))->OnDrop(list);
-		});
-		while (!glfwWindowShouldClose(window))
-		{
-			// Pas besoin de 60 i/s quand rien ne bouge, mais le journal et les
-			// barres de progression doivent se rafraîchir : on réveille 10x/s.
-			glfwWaitEventsTimeout(0.1);
-			// Pas d'appel OpenGL direct : la fenêtre ImGui couvre tout l'écran (fond opaque)
-			// et le backend OpenGL3 règle lui-même le viewport.
-
-			ImGui_ImplOpenGL3_NewFrame();
-			ImGui_ImplGlfw_NewFrame();
-			ImGui::NewFrame();
-			launcher.Draw();
-			ImGui::Render();
-
-			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-			glfwSwapBuffers(window);
-		}
+		ui::Shutdown();
+		Rshutdown();
+		return 1;
 	}
 
-	glfwSetDropCallback(window, nullptr);
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
-	ImGui::DestroyContext();
-	glfwDestroyWindow(window);
-	glfwTerminate();
+	{
+		Launcher launcher(window);
+		Rwindow_set_close_callback(window, OnCloseRequest, nullptr);
+		Rwindow_set_drop_callback(window, OnDropFiles, &launcher);
+		launcher.Tick();   // première page remplie avant d'afficher la fenêtre
+		Rwindow_show(window);
+
+		// Les barres de progression et le journal bougent pendant les tâches :
+		// on se réveille au moins 10 fois par seconde.
+		while (!g_quit && Rwait_frame(0.1))
+			launcher.Tick();
+
+		Rwindow_set_drop_callback(window, nullptr, nullptr);
+		Rwindow_set_close_callback(window, nullptr, nullptr);
+	}
+
+	Rwindow_destroy(window);
+	ui::Shutdown();
+	Rshutdown();
 	return 0;
 }
