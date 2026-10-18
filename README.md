@@ -8,7 +8,8 @@ Lynx is a game engine focused on 2D/pixel art and destructible voxel worlds. It 
 - **Themes**: several built-in themes (Pixel, Lynx, Glass...) and your own: any `.xml` theme file in `%APPDATA%\Lynx\themes` is applied as soon as it is saved (*Options > Interface > New theme*).
 - **Vulkan or OpenGL**: games run with Vulkan by default, OpenGL 3.3 is still available (*Options > Project > Game renderer*, or `--vulkan` / `--opengl`), with an automatic fallback to OpenGL on computers without Vulkan.
 - **Actor / Level / ECS system**: organizes game objects with components and manages levels.
-- **JavaScript scripting**: scripts attached to Actors, lifecycle functions (`BeginPlay`, `Update`, `EndPlay`), and access to objects, transforms, properties, and input.
+- **Blocks, like Scratch**: actor classes made of blocks (*Content Browser > New > Block Script*): events (game starts, every frame, touching, broadcasts), control (wait, repeat, forever, if), motion, character, looks, sound, sensing, operators, variables and your own blocks. Each save writes the matching JavaScript class next to the `.blocks` file, so the engine runs it like any other class.
+- **JavaScript scripting**: for everything else, scripts attached to Actors and classes, lifecycle functions (`BeginPlay`, `Update`, `EndPlay`), and access to objects, transforms, properties, and input.
 - **Input system**: configure actions and axes for keyboard, mouse, and gamepad.
 - **Voxel worlds**: configurable voxel types, colors, collisions, emissive effects, and destruction rules, with destruction also possible during gameplay.
 - **Animation**: animations, blend spaces, state transitions, frame events, parameters, and triggers.

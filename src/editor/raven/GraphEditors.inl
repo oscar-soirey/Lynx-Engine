@@ -3164,6 +3164,8 @@ namespace editor_ui::graphs
     {
         if (widgets::OwnsPanel(panel))
             return widgets::OnPanelClose(panel) ? R_TRUE : R_FALSE;
+        if (blocks::OwnsPanel(panel))
+            return blocks::OnPanelClose(panel) ? R_TRUE : R_FALSE;
         return OnPanelClose(panel) ? R_TRUE : R_FALSE;
     }
 

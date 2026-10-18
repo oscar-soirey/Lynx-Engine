@@ -429,6 +429,7 @@ namespace editor_ui
 #include "PanelConsole.inl"
 #include "PanelTools.inl"
 #include "WidgetEditor.inl"
+#include "BlockEditor.inl"
 #include "GraphEditors.inl"
 
 
@@ -558,6 +559,7 @@ namespace editor
         // Behavior Tree / Anim Graph editors, Widget Editor.
         graphs::Update();
         widgets::Update();
+        blocks::Update();
 
         // Commands (Scripts, Lynxie, Console, Reference, AI / MCP).
         lynx::editor::commands_window::UpdatePanel(IsPanelShown(g.commands));

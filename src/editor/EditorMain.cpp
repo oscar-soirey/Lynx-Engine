@@ -88,6 +88,7 @@
 #include "ParticleEditor.h"
 #include "ScriptEditors.h"
 #include "WidgetEditor.h"
+#include "BlockEditor.h"
 #include "GraphEditors.h"
 #include "VoxelTypeEditor.h"
 #include "FileIcons.h"
@@ -3980,6 +3981,7 @@ namespace editor
             lynx::editor::widget_editor::HasFocus() ||
             lynx::editor::graph_editors::HasFocus() ||
             lynx::editor::particle_editor::HasFocus() ||
+            lynx::editor::block_editor::HasFocus() ||
             lynx::editor::plugins::HasFocus();
 
 
