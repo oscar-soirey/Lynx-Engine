@@ -5,6 +5,7 @@
 #include "../core/Engine.h"
 #include "../core/VoxelPhysics.h"
 #include "../scripting/Private/ScriptSystem.h"
+#include "../vasm/VoxelAssembly.h"
 
 #include <algorithm>
 #include <cmath>
@@ -185,6 +186,7 @@ namespace lynx
 
 		OnJumped(jump_count_);
 		scripting::CallActorEvent(this, "OnJumped", nullptr);
+		vasm::OnActorEvent(this, "OnJumped", nullptr);
 		return true;
 	}
 
@@ -441,5 +443,6 @@ namespace lynx
 	{
 		OnLanded();
 		scripting::CallActorEvent(this, "OnLanded", nullptr);
+		vasm::OnActorEvent(this, "OnLanded", nullptr);
 	}
 }

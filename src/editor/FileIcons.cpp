@@ -35,7 +35,7 @@ namespace lynx::editor::file_icons
 
 		if (name == "voxels.json")
 			return Kind::Voxels;
-		if (extension == ".js" || extension == ".mjs" || extension == ".ts" || extension == ".blocks")
+		if (extension == ".js" || extension == ".mjs" || extension == ".ts" || extension == ".vasm")
 			return Kind::Script;
 		if (extension == ".py")
 			return Kind::Python;

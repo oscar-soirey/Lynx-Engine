@@ -5,6 +5,7 @@
 #include "../core/Engine.h"
 #include "../core/Voxels.h"
 #include "../scripting/Private/ScriptSystem.h"
+#include "../vasm/VoxelAssembly.h"
 
 #include <hrl/hrl.h>
 
@@ -201,6 +202,10 @@ namespace lynx
 			other = other_entity != kNoEntity ? ecs::GetActor(other_entity) : nullptr;
 			if (self)
 				scripting::CallActorHitEvent(self, other, normal);
+			self = ecs::GetActor(self_entity);
+			other = other_entity != kNoEntity ? ecs::GetActor(other_entity) : nullptr;
+			if (self)
+				vasm::OnActorHit(self, other, normal);
 		}
 	}
 
@@ -622,6 +627,10 @@ namespace lynx
 			other_actor = ecs::GetActor(entity);
 			if (self)
 				scripting::CallActorEvent(self, begin ? "OnBeginOverlap" : "OnEndOverlap", other_actor);
+			self = ecs::GetActor(self_entity);
+			other_actor = ecs::GetActor(entity);
+			if (self)
+				vasm::OnActorEvent(self, begin ? "OnBeginOverlap" : "OnEndOverlap", other_actor);
 		};
 
 		const std::vector<uint32_t> before = overlapping_;

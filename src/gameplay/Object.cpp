@@ -252,6 +252,11 @@ namespace lynx
 					if (auto* v = std::get_if<float>(&variant_val))
 						*ptr = static_cast<int>(*v);
 				}
+				// a text property keeps the text as written ("12" stays "12")
+				else if constexpr (std::is_same_v<T, std::string>)
+				{
+					*ptr = _val;
+				}
 }, it->second.property_member);
 	}
 

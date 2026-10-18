@@ -185,7 +185,7 @@ namespace editor_ui::shell
             lynx::editor::widget_editor::HasUnsavedChanges() ||
             lynx::editor::graph_editors::HasUnsavedChanges() ||
             lynx::editor::particle_editor::HasUnsavedChanges() ||
-            lynx::editor::block_editor::HasUnsavedChanges() ||
+            lynx::editor::vasm_editor::HasUnsavedChanges() ||
             lynx::editor::voxel_types::HasUnsavedChanges();
 
         std::string text;
@@ -228,7 +228,7 @@ namespace editor_ui::shell
                 lynx::editor::widget_editor::SaveAll();
                 lynx::editor::graph_editors::SaveAll();
                 lynx::editor::particle_editor::SaveAll();
-                lynx::editor::block_editor::SaveAll();
+                lynx::editor::vasm_editor::SaveAll();
             }
             editor_quit = true;
         });
@@ -325,7 +325,7 @@ namespace editor_ui::shell
                lynx::editor::widget_editor::HasFocus() ||
                lynx::editor::graph_editors::HasFocus() ||
                lynx::editor::particle_editor::HasFocus() ||
-               lynx::editor::block_editor::HasFocus() ||
+               lynx::editor::vasm_editor::HasFocus() ||
                lynx::editor::plugins::HasFocus();
     }
 
@@ -731,7 +731,7 @@ namespace editor_ui::shell
         lynx::editor::widget_editor::SaveAll();
         lynx::editor::graph_editors::SaveAll();
         lynx::editor::particle_editor::SaveAll();
-        lynx::editor::block_editor::SaveAll();
+        lynx::editor::vasm_editor::SaveAll();
     }
 
     static void ShowOptions(lynx::editor::options::Page page)

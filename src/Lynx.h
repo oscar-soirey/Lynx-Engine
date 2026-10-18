@@ -47,6 +47,7 @@
 #include "gameplay/AnimationSystem.h"
 
 #include "scripting/Scripting.h"
+#include "vasm/VoxelAssembly.h"
 
 #include "audio/AudioSource.h"
 #include "audio/AudioListener.h"

@@ -78,6 +78,10 @@ namespace lynx
         float value;
     } action_t;
 
+    /** Names of the actions / axes of input.json (sorted) : lists of the editor. */
+    LYNX_API std::vector<std::string> GetInputActionNames();
+    LYNX_API std::vector<std::string> GetInputAxisNames();
+
     class LYNX_API InputAxis1D {
     public:
         InputAxis1D(const char* name);

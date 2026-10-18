@@ -231,6 +231,24 @@ namespace lynx
         return it->second;
     }
 
+    std::vector<std::string> GetInputActionNames()
+    {
+        std::vector<std::string> names;
+        for (const auto& [name, keys] : action_mappings)
+            names.push_back(name);
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
+    std::vector<std::string> GetInputAxisNames()
+    {
+        std::vector<std::string> names;
+        for (const auto& [name, actions] : axis_mappings)
+            names.push_back(name);
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
     const std::vector<action_t>& GetAxisActions(const char* name)
     {
         static const std::vector<action_t> empty;

@@ -29,6 +29,7 @@
 #include "Private/SystemModule.h"
 #include "../gameplay/Private/ECS.h"
 #include "../scripting/Private/ScriptSystem.h"
+#include "../vasm/VoxelAssembly.h"
 
 
 namespace lynx
@@ -592,6 +593,8 @@ namespace lynx
 	{
 		// Classes JavaScript (tous les .js de assets/ qui declarent une classe) : dans la factory avant le chargement.
 		scripting::PrepareClasses();
+		// Voxel Assembly (every .vasm of assets/) : in the factory too.
+		vasm::PrepareClasses();
 
 		current_level_ = new Level();
 		current_level_->LoadFromFile(file_name, this);

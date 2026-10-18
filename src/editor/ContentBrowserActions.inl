@@ -36,7 +36,7 @@ namespace content_browser_actions
         AnimGraph,
         BehaviorTree,
         ParticleSystem,
-        Blocks,
+        VoxelAssembly,
         Count,
     };
 
@@ -57,7 +57,7 @@ namespace content_browser_actions
         { "Anim Graph (.animgraph, sprites)",    "NewAnimGraph", ".animgraph" },
         { "Behavior Tree (.bt, AI)",             "NewBehaviorTree", ".bt" },
         { "Particle System (.vfx)",              "NewParticles", ".vfx" },
-        { "Block Script (actor, Scratch-like)",  "NewActor",  ".blocks" },
+        { "Voxel Assembly (actor, blocks)",      "NewActor",  ".vasm" },
     };
 
     struct State
@@ -424,8 +424,8 @@ namespace content_browser_actions
         case NewFileKind::ParticleSystem:
             return lynx::editor::particle_editor::NewFileTemplate();
 
-        case NewFileKind::Blocks:
-            return lynx::editor::block_editor::NewFileTemplate(ToIdentifier(stem));
+        case NewFileKind::VoxelAssembly:
+            return lynx::editor::vasm_editor::NewFileTemplate(ToIdentifier(stem));
 
         default:
             return {};
@@ -518,8 +518,8 @@ namespace content_browser_actions
             OpenLevel(path);
         else if (lynx::editor::plugins::CanOpen(path) && lynx::editor::plugins::OpenFile(path))
             return;
-        else if (lynx::editor::block_editor::CanOpen(path))
-            lynx::editor::block_editor::Open(path);
+        else if (lynx::editor::vasm_editor::CanOpen(path))
+            lynx::editor::vasm_editor::Open(path);
         else if (lynx::editor::widget_editor::CanOpen(path))
             lynx::editor::widget_editor::Open(path);
         else if (lynx::editor::graph_editors::CanOpen(path))
@@ -611,7 +611,7 @@ namespace content_browser_actions
 
             lynx::editor::script_editors::PathMoved(state.rename_target, destination);
             lynx::editor::widget_editor::PathMoved(state.rename_target, destination);
-            lynx::editor::block_editor::PathMoved(state.rename_target, destination);
+            lynx::editor::vasm_editor::PathMoved(state.rename_target, destination);
             lynx::editor::graph_editors::PathMoved(state.rename_target, destination);
 
             if (content_browser_current_path == state.rename_target)
@@ -674,9 +674,9 @@ namespace content_browser_actions
             ScriptsChanged({ destination });
             lynx::editor::script_editors::Open(destination);
         }
-        else if (lynx::editor::block_editor::CanOpen(destination))
+        else if (lynx::editor::vasm_editor::CanOpen(destination))
         {
-            lynx::editor::block_editor::Open(destination);   // writes its class at once
+            lynx::editor::vasm_editor::Open(destination);
         }
         else if (lynx::editor::widget_editor::CanOpen(destination))
         {
@@ -722,9 +722,9 @@ namespace content_browser_actions
             if (IsJs(destination))
                 RenameJsClassInCopy(destination, source.stem().string(), ToIdentifier(destination.stem().string()));
 
-            // Blocks : a class of its own (its .js is written when it is opened).
-            if (lynx::editor::block_editor::CanOpen(destination))
-                lynx::editor::block_editor::RenameClassInCopy(destination, ToIdentifier(destination.stem().string()));
+            // Voxel Assembly : a class of its own.
+            if (lynx::editor::vasm_editor::CanOpen(destination))
+                lynx::editor::vasm_editor::RenameClassInCopy(destination, ToIdentifier(destination.stem().string()));
 
             created.push_back(destination);
         }
@@ -798,7 +798,7 @@ namespace content_browser_actions
 
             lynx::editor::script_editors::PathDeleted(target);
             lynx::editor::widget_editor::PathDeleted(target);
-            lynx::editor::block_editor::PathDeleted(target);
+            lynx::editor::vasm_editor::PathDeleted(target);
             lynx::editor::graph_editors::PathDeleted(target);
             lynx::editor::particle_editor::PathDeleted(target);
 
@@ -867,7 +867,7 @@ namespace content_browser_actions
                 {
                     lynx::editor::script_editors::PathMoved(source, destination);
                     lynx::editor::widget_editor::PathMoved(source, destination);
-                    lynx::editor::block_editor::PathMoved(source, destination);
+                    lynx::editor::vasm_editor::PathMoved(source, destination);
                     lynx::editor::graph_editors::PathMoved(source, destination);
                     lynx::editor::particle_editor::PathMoved(source, destination);
                 }
@@ -882,8 +882,8 @@ namespace content_browser_actions
                 if (!error && IsJs(destination) && destination.stem() != source.stem())
                     RenameJsClassInCopy(destination, source.stem().string(), ToIdentifier(destination.stem().string()));
 
-                if (!error && lynx::editor::block_editor::CanOpen(destination) && destination.stem() != source.stem())
-                    lynx::editor::block_editor::RenameClassInCopy(destination, ToIdentifier(destination.stem().string()));
+                if (!error && lynx::editor::vasm_editor::CanOpen(destination) && destination.stem() != source.stem())
+                    lynx::editor::vasm_editor::RenameClassInCopy(destination, ToIdentifier(destination.stem().string()));
             }
 
             if (error)
@@ -929,7 +929,7 @@ namespace content_browser_actions
     {
         switch (kind)
         {
-        case NewFileKind::Blocks:
+        case NewFileKind::VoxelAssembly:
         case NewFileKind::JavaScriptClass:
         case NewFileKind::JavaScriptScript: return "Scripting";
         case NewFileKind::Level:            return "World";
@@ -946,7 +946,7 @@ namespace content_browser_actions
         switch (kind)
         {
         case NewFileKind::Text:             return "Plain text file : notes, data.";
-        case NewFileKind::Blocks:           return "A new actor class made of blocks, like Scratch (no code to write).";
+        case NewFileKind::VoxelAssembly:    return "A new actor class made of blocks, graphs and functions (no code to write).";
         case NewFileKind::JavaScriptClass:  return "A new actor class (class X extends Actor).";
         case NewFileKind::JavaScriptScript: return "A behaviour to attach to any actor.";
         case NewFileKind::Level:            return "A level and its voxel world (.hrlv).";
@@ -974,7 +974,7 @@ namespace content_browser_actions
 
         // Order of the sections : World, Scripting, User Interface, Animation, AI, Effects, Data.
         const NewFileKind order[] = {
-            NewFileKind::Level, NewFileKind::Blocks, NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript, NewFileKind::Widget,
+            NewFileKind::Level, NewFileKind::VoxelAssembly, NewFileKind::JavaScriptClass, NewFileKind::JavaScriptScript, NewFileKind::Widget,
             NewFileKind::AnimGraph, NewFileKind::BehaviorTree, NewFileKind::ParticleSystem, NewFileKind::Json,
             NewFileKind::Text,
         };

@@ -93,6 +93,7 @@ add_library(Lynx SHARED
 		src/scripting/ComponentBindings.cpp
 		src/scripting/GameplayBindings.cpp
 		src/scripting/QueryBindings.cpp
+		src/vasm/VasmRuntime.cpp
 )
 
 target_compile_definitions(Lynx PRIVATE
