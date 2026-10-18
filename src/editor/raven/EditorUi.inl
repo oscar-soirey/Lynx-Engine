@@ -430,6 +430,7 @@ namespace editor_ui
 #include "PanelDetails.inl"
 #include "PanelPlaceActors.inl"
 #include "PanelContentBrowser.inl"
+#include "ContentDrawer.inl"
 #include "PanelPaint.inl"
 #include "PanelConsole.inl"
 #include "PanelTools.inl"
@@ -527,6 +528,7 @@ namespace editor
         details::Init();
         place_actors::Init();
         content_browser::Init();
+        content_drawer::Init();       // Left Ctrl + Space
         paint::Init();
         console::Init();
         tools::Init();
@@ -561,6 +563,7 @@ namespace editor
         details::Update();
         place_actors::Update();
         content_browser::Update();
+        content_drawer::Update(dt);
         paint::Update();
         tools::Update(dt);
         console::Update();

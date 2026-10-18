@@ -15,7 +15,7 @@
 -->
 <Window Title="Lynx" Width="1600" Height="900" MinWidth="960" MinHeight="600" CustomHeader="true" Hidden="true">
 	<VBox>
-		<HeaderBar Name="header" TitleAlign="Left">
+		<HeaderBar Name="header" TitleAlign="Center" TitleStyle="Notch">
 			<Image Name="header.icon" Width="18" Height="18" Stretch="Fit" Slot.VAlign="Center" Slot.Padding="6,0,0,0"/>
 			<MenuBar Name="menubar" Slot.VAlign="Center" Slot.Padding="4,0,0,0"/>
 			<Label Name="header.version" Text="" Class="dim" Slot.HAlign="Right" Slot.VAlign="Center" Slot.Padding="0,0,10,0"/>
@@ -23,6 +23,11 @@
 				<Image Name="header.lynxie.icon" Width="22" Height="19" Stretch="Fit" TintText="true"/>
 			</Button>
 		</HeaderBar>
+
+		<!-- Under the menus : the tabs and the status bar, and over them the Content Drawer
+		     (Left Ctrl + Space, raven/ContentDrawer.inl adds it to this overlay). -->
+		<Overlay Name="drawer.host" Slot.Fill="1">
+		<VBox>
 
 		<!-- Document tabs (as in Unreal) : the level, then one tab per open file (raven/Documents.inl) -->
 		<TabView Name="documents" Documents="true" Slot.Fill="1">
@@ -96,5 +101,8 @@
 				<Label Name="status.fps" Text="" Class="dim"/>
 			</HBox>
 		</Border>
+
+		</VBox>
+		</Overlay>
 	</VBox>
 </Window>

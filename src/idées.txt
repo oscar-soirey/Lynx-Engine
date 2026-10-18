@@ -22,6 +22,8 @@ afficher les sprites au dessus des voxels dans hrl
 
 revoir le template rpg il est completement bugué avec la camera (elle fait une rotation sur un axe noramlement pas utilisé en 2D, ducoup on voit le level sur le coté, fin c'est bizarre, et pareil dans l'autre top down
 
+dans quasiemnt tous les projets, le terrain peint en voxels disparait, mais a moitié, et il disparait vraiment, pas juste invisible, je sais pas pouruqoi.
+
 
 
 

@@ -1,0 +1,1 @@
+dans quasiemnt tous les projets, le terrain peint en voxels disparait, mais a moitié, et il disparait vraiment, pas juste invisible, je sais pas pouruqoi.

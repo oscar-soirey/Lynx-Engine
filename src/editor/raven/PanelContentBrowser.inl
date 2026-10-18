@@ -7,6 +7,9 @@
 //   right click : the operations of ContentBrowserActions.inl (rename, delete...)
 //   keys   : Del, F2, Ctrl+D / C / X / V / A, Enter, Backspace (parent folder),
 //            mouse back / forward buttons, Ctrl + wheel (tile size)
+// Several views of it : the panel of the level, and the Content Drawer
+// (ContentDrawer.inl, Left Ctrl + Space). They show the same folder and the
+// same selection ; each has its search, breadcrumbs and tiles (View).
 // (included by raven/EditorUi.inl)
 // =============================================================================
 
@@ -29,31 +32,40 @@ namespace editor_ui::content_browser
         lynx::editor::file_icons::Kind kind = lynx::editor::file_icons::Kind::File;
     };
 
-    static Rid g_tiles = R_INVALID_ID;
-    static Rid g_search = R_INVALID_ID;
-    static Rid g_crumbs = R_INVALID_ID;
-    static Rid g_count = R_INVALID_ID;
-    static Rid g_size = R_INVALID_ID;
-    static Rid g_back = R_INVALID_ID;
-    static Rid g_forward = R_INVALID_ID;
-    static Rid g_up = R_INVALID_ID;
+    // One view of the Content Browser : its widgets and what they show.
+    struct View
+    {
+        Rid root = R_INVALID_ID;
+        Rid tiles = R_INVALID_ID;
+        Rid search = R_INVALID_ID;
+        Rid crumbs = R_INVALID_ID;
+        Rid count = R_INVALID_ID;
+        Rid size = R_INVALID_ID;
+        Rid back = R_INVALID_ID;
+        Rid forward = R_INVALID_ID;
+        Rid up = R_INVALID_ID;
+        Rid root_button = R_INVALID_ID;
 
+        std::vector<Tile> shown;
+        stdfs::path shown_folder;
+        std::string shown_search = "\x01";
+        stdfs::path crumbs_folder = "\x01";
+        std::vector<stdfs::path> shown_selection;
+    };
+
+    static std::vector<std::unique_ptr<View>> g_views;
     static AsyncFolderList g_list;
-    static std::vector<Tile> g_shown;
-    static stdfs::path g_shown_folder;
-    static std::string g_shown_search = "\x01";
-    static stdfs::path g_crumbs_folder = "\x01";
     static bool g_refresh_now = true;
-    static std::vector<stdfs::path> g_shown_selection;
     static std::unique_ptr<eui::Menu> g_menu;
 
     // ---- tiles -------------------------------------------------------------------
 
-    static void TileItem(Rid, int index, RTileItem* item, void*)
+    static void TileItem(Rid, int index, RTileItem* item, void* user)
     {
-        if (index < 0 || index >= static_cast<int>(g_shown.size()))
+        const View& v = *static_cast<const View*>(user);
+        if (index < 0 || index >= static_cast<int>(v.shown.size()))
             return;
-        const Tile& tile = g_shown[static_cast<size_t>(index)];
+        const Tile& tile = v.shown[static_cast<size_t>(index)];
         item->text = tile.name.c_str();
         // Images : the picture itself (loaded in the background) ; else the icon of the type.
         if (tile.kind == lynx::editor::file_icons::Kind::Image)
@@ -72,32 +84,38 @@ namespace editor_ui::content_browser
         eui::FileIconRegion(tile.kind, item->uv);
     }
 
+    // The size of the tiles, in every view (and their sliders).
     static void ApplyTileSize()
     {
         const float scale = content_browser_thumb_scale;
         const float width = std::floor(128.f * scale * 0.75f);
         const float image = std::floor(92.f * scale * 0.75f);
-        Rtile_view_set_tile_size(g_tiles, width, image + 30.f, image);
+        for (auto& v : g_views)
+        {
+            Rtile_view_set_tile_size(v->tiles, width, image + 30.f, image);
+            if (std::fabs(Rslider_get_value(v->size) - scale * 100.f) > 0.5f)
+                Rslider_set_value(v->size, scale * 100.f);
+        }
     }
 
     // The selection of ContentBrowserActions shown on the tiles.
-    static void ShowSelection()
+    static void ShowSelection(View& v)
     {
-        if (cba::state.selection == g_shown_selection)
+        if (cba::state.selection == v.shown_selection)
             return;
-        g_shown_selection = cba::state.selection;
-        Rtile_view_clear_selection(g_tiles);
-        for (size_t i = 0; i < g_shown.size(); ++i)
-            if (cba::IsSelected(g_shown[i].path))
-                Rtile_view_set_selected(g_tiles, static_cast<int>(i), R_TRUE);
+        v.shown_selection = cba::state.selection;
+        Rtile_view_clear_selection(v.tiles);
+        for (size_t i = 0; i < v.shown.size(); ++i)
+            if (cba::IsSelected(v.shown[i].path))
+                Rtile_view_set_selected(v.tiles, static_cast<int>(i), R_TRUE);
     }
 
-    static void Refill(const std::vector<stdfs::directory_entry>& entries)
+    static void Refill(View& v, const std::vector<stdfs::directory_entry>& entries)
     {
-        const char* text = Rtext_input_get_text(g_search);
+        const char* text = Rtext_input_get_text(v.search);
         const std::string needle = Lower(text ? text : "");
-        g_shown.clear();
-        g_shown.reserve(entries.size());
+        v.shown.clear();
+        v.shown.reserve(entries.size());
         for (const auto& entry : entries)
         {
             Tile tile;
@@ -110,40 +128,40 @@ namespace editor_ui::content_browser
             std::error_code error;
             tile.is_directory = entry.is_directory(error);
             tile.kind = lynx::editor::file_icons::ForFile(tile.path, tile.is_directory);
-            g_shown.push_back(std::move(tile));
+            v.shown.push_back(std::move(tile));
         }
-        Rtile_view_set_items(g_tiles, static_cast<int>(g_shown.size()), TileItem, nullptr);
-        g_shown_selection.clear();
-        g_shown_selection.push_back("\x01");   // shown again
-        ShowSelection();
+        Rtile_view_set_items(v.tiles, static_cast<int>(v.shown.size()), TileItem, &v);
+        v.shown_selection.clear();
+        v.shown_selection.push_back("\x01");   // shown again
+        ShowSelection(v);
 
-        const size_t n = g_shown.size();
-        eui::SetText(g_count, std::to_string(n) + (n == 1 ? " item" : " items"));
+        const size_t n = v.shown.size();
+        eui::SetText(v.count, std::to_string(n) + (n == 1 ? " item" : " items"));
         if (entries.empty())
-            Rwidget_set_tooltip(g_tiles, "");
+            Rwidget_set_tooltip(v.tiles, "");
     }
 
-    static std::vector<stdfs::path> SelectedPaths()
+    static std::vector<stdfs::path> SelectedPaths(const View& v)
     {
         std::vector<stdfs::path> out;
-        const int count = Rtile_view_get_selection_count(g_tiles);
+        const int count = Rtile_view_get_selection_count(v.tiles);
         for (int i = 0; i < count; ++i)
         {
-            const int index = Rtile_view_get_selection(g_tiles, i);
-            if (index >= 0 && index < static_cast<int>(g_shown.size()))
-                out.push_back(g_shown[static_cast<size_t>(index)].path);
+            const int index = Rtile_view_get_selection(v.tiles, i);
+            if (index >= 0 && index < static_cast<int>(v.shown.size()))
+                out.push_back(v.shown[static_cast<size_t>(index)].path);
         }
         return out;
     }
 
     // ---- header ------------------------------------------------------------------
 
-    static void Breadcrumbs()
+    static void Breadcrumbs(View& v)
     {
-        if (g_crumbs_folder == content_browser_current_path)
+        if (v.crumbs_folder == content_browser_current_path)
             return;
-        g_crumbs_folder = content_browser_current_path;
-        Rwidget_clear_children(g_crumbs);
+        v.crumbs_folder = content_browser_current_path;
+        Rwidget_clear_children(v.crumbs);
 
         std::error_code error;
         stdfs::path relative;
@@ -157,16 +175,16 @@ namespace editor_ui::content_browser
             at /= part;
             Rid slash = Rlabel_create("/");
             Rwidget_add_class(slash, "dim");
-            Rwidget_add_child(g_crumbs, slash);
+            Rwidget_add_child(v.crumbs, slash);
             Rid button = Rbutton_create(part.string().c_str());
             Rwidget_add_class(button, "tool");
             Rwidget_set_focusable(button, R_FALSE);
-            Rwidget_add_child(g_crumbs, button);
+            Rwidget_add_child(v.crumbs, button);
             const stdfs::path target = content_browser_root / at;
             eui::OnClick(button, [target]() { content_browser_current_path = target; });
             // Files dropped on a part of the path : moved there.
         }
-        eui::SetTooltip(eui::Find(g.window, "cb.root"), content_browser_root.generic_string());
+        eui::SetTooltip(v.root_button, content_browser_root.generic_string());
     }
 
     // ---- "+ New" ---------------------------------------------------------------------
@@ -246,11 +264,11 @@ namespace editor_ui::content_browser
 
     // ---- menus -----------------------------------------------------------------------
 
-    static void ItemMenu(int index)
+    static void ItemMenu(const View& v, int index)
     {
-        if (index < 0 || index >= static_cast<int>(g_shown.size()))
+        if (index < 0 || index >= static_cast<int>(v.shown.size()))
             return;
-        const Tile tile = g_shown[static_cast<size_t>(index)];
+        const Tile tile = v.shown[static_cast<size_t>(index)];
         const stdfs::path path = tile.path;
 
         // Right click on an item of the selection keeps the whole selection.
@@ -336,17 +354,17 @@ namespace editor_ui::content_browser
 
     // ---- keys --------------------------------------------------------------------------
 
-    static bool OnKey(const REvent& event)
+    static bool OnKey(View& v, const REvent& event)
     {
         if (event.type == R_EVENT_MOUSE_WHEEL && (event.modifiers & R_MOD_CTRL))
         {
             content_browser_thumb_scale = std::clamp(
                 content_browser_thumb_scale * (event.wheel_y > 0.f ? 1.1f : 1.f / 1.1f), 0.5f, 2.5f);
-            Rslider_set_value(g_size, content_browser_thumb_scale * 100.f);
             ApplyTileSize();
             SaveContentBrowserThumbScale();
             return true;
         }
+        (void)v;
         if (event.type != R_EVENT_KEY_DOWN || ein::WantTextInput())
             return false;
 
@@ -383,22 +401,23 @@ namespace editor_ui::content_browser
 
     // Files dragged from Explorer : copied into the folder under the pointer
     // (a folder tile) or the current one.
-    static int OnDrop(Rid, const RDropEvent* drop, void*)
+    static int OnDrop(Rid, const RDropEvent* drop, void* user)
     {
+        View& v = *static_cast<View*>(user);
         if (drop->drag_type)
             return R_FALSE;   // a drag of the editor : not a copy
         if (drop->path_count <= 0)
             return R_FALSE;
-        const int index = Rtile_view_get_item_at(g_tiles, drop->local_x, drop->local_y);
-        const bool on_folder = index >= 0 && index < static_cast<int>(g_shown.size()) && g_shown[static_cast<size_t>(index)].is_directory;
+        const int index = Rtile_view_get_item_at(v.tiles, drop->local_x, drop->local_y);
+        const bool on_folder = index >= 0 && index < static_cast<int>(v.shown.size()) && v.shown[static_cast<size_t>(index)].is_directory;
         if (drop->phase != R_DROP_DROPPED)
         {
-            Rtile_view_set_drop_highlight(g_tiles, on_folder && drop->phase != R_DROP_LEAVE ? index : -1);
+            Rtile_view_set_drop_highlight(v.tiles, on_folder && drop->phase != R_DROP_LEAVE ? index : -1);
             return R_TRUE;
         }
-        Rtile_view_set_drop_highlight(g_tiles, -1);
+        Rtile_view_set_drop_highlight(v.tiles, -1);
 
-        const stdfs::path folder = on_folder ? g_shown[static_cast<size_t>(index)].path : content_browser_current_path;
+        const stdfs::path folder = on_folder ? v.shown[static_cast<size_t>(index)].path : content_browser_current_path;
         const stdfs::path keep = content_browser_current_path;
         content_browser_current_path = folder;
         pending_explorer_drop.paths.clear();
@@ -479,46 +498,56 @@ namespace editor_ui::content_browser
 
     // ---- binding -------------------------------------------------------------------------
 
-    static void Init()
+    // A view of the Content Browser on the widgets of panels/content_browser.xml under `root`.
+    static View* AddView(Rid root)
     {
-        g_tiles = eui::Find(g.window, "cb.tiles");
-        g_search = eui::Find(g.window, "cb.search");
-        g_crumbs = eui::Find(g.window, "cb.breadcrumbs");
-        g_count = eui::Find(g.window, "cb.count");
-        g_size = eui::Find(g.window, "cb.size");
-        g_back = eui::Find(g.window, "cb.back");
-        g_forward = eui::Find(g.window, "cb.forward");
-        g_up = eui::Find(g.window, "cb.up");
+        auto view = std::make_unique<View>();
+        View* v = view.get();
+        auto find = [root](const char* name) { return eui::Find(root, name); };
+        v->root = root;
+        v->tiles = find("cb.tiles");
+        v->search = find("cb.search");
+        v->crumbs = find("cb.breadcrumbs");
+        v->count = find("cb.count");
+        v->size = find("cb.size");
+        v->back = find("cb.back");
+        v->forward = find("cb.forward");
+        v->up = find("cb.up");
+        v->root_button = find("cb.root");
+        g_views.push_back(std::move(view));
 
-        Rimage_set_texture(eui::Find(g.window, "cb.lynxie.icon"), eui::Texture("icons/lynxie.png"));
-        eui::OnClick(eui::Find(g.window, "cb.lynxie"), []() { ShowLynxie(); });
-        eui::OnClick(eui::Find(g.window, "cb.root"), []() { content_browser_current_path = content_browser_root; });
-        eui::OnClick(g_back, []() { ContentBrowserGo(-1); });
-        eui::OnClick(g_forward, []() { ContentBrowserGo(+1); });
-        eui::OnClick(g_up, []()
+        Rimage_set_texture(find("cb.lynxie.icon"), eui::Texture("icons/lynxie.png"));
+        eui::OnClick(find("cb.lynxie"), []() { ShowLynxie(); });
+        eui::OnClick(v->root_button, []() { content_browser_current_path = content_browser_root; });
+        eui::OnClick(v->back, []() { ContentBrowserGo(-1); });
+        eui::OnClick(v->forward, []() { ContentBrowserGo(+1); });
+        eui::OnClick(v->up, []()
         {
             const stdfs::path parent = content_browser_current_path.parent_path();
             if (content_browser_current_path != content_browser_root && IsPathInside(parent, content_browser_root))
                 content_browser_current_path = parent;
         });
-        eui::OnClick(eui::Find(g.window, "cb.new"), []() { NewDialog(content_browser_current_path); });
+        eui::OnClick(find("cb.new"), []() { NewDialog(content_browser_current_path); });
 
         if (!content_browser_thumb_loaded)
             LoadContentBrowserThumbScale();
-        Rslider_set_value(g_size, content_browser_thumb_scale * 100.f);
-        eui::OnValue(g_size, [](double v)
+        Rslider_set_value(v->size, content_browser_thumb_scale * 100.f);
+        eui::OnValue(v->size, [](double value)
         {
-            content_browser_thumb_scale = std::clamp(static_cast<float>(v) / 100.f, 0.5f, 2.5f);
+            const float scale = std::clamp(static_cast<float>(value) / 100.f, 0.5f, 2.5f);
+            if (std::fabs(scale - content_browser_thumb_scale) < 0.004f)
+                return;
+            content_browser_thumb_scale = scale;
             ApplyTileSize();
             SaveContentBrowserThumbScale();
         });
         ApplyTileSize();
 
-        Rtile_view_set_drag_type(g_tiles, eui::kDragAsset);
-        eui::OnTileDragData(g_tiles, []()
+        Rtile_view_set_drag_type(v->tiles, eui::kDragAsset);
+        eui::OnTileDragData(v->tiles, [v]()
         {
             std::string data;
-            for (const stdfs::path& path : SelectedPaths())
+            for (const stdfs::path& path : SelectedPaths(*v))
             {
                 std::error_code error;
                 if (stdfs::is_directory(path, error))
@@ -529,35 +558,35 @@ namespace editor_ui::content_browser
             }
             return data;
         });
-        eui::OnTileSelect(g_tiles, [](int index)
+        eui::OnTileSelect(v->tiles, [v](int index)
         {
-            std::vector<stdfs::path> paths = SelectedPaths();
-            const stdfs::path primary = index >= 0 && index < static_cast<int>(g_shown.size())
-                ? g_shown[static_cast<size_t>(index)].path
+            std::vector<stdfs::path> paths = SelectedPaths(*v);
+            const stdfs::path primary = index >= 0 && index < static_cast<int>(v->shown.size())
+                ? v->shown[static_cast<size_t>(index)].path
                 : (paths.empty() ? stdfs::path() : paths.back());
             if (paths.empty())
                 cba::ClearSelection();
             else
                 cba::SetSelection(paths, primary);
-            g_shown_selection = cba::state.selection;
+            v->shown_selection = cba::state.selection;
         });
-        eui::OnTileActivate(g_tiles, [](int index)
+        eui::OnTileActivate(v->tiles, [v](int index)
         {
-            if (index >= 0 && index < static_cast<int>(g_shown.size()))
-                cba::OpenEntry(g_shown[static_cast<size_t>(index)].path);
+            if (index >= 0 && index < static_cast<int>(v->shown.size()))
+                cba::OpenEntry(v->shown[static_cast<size_t>(index)].path);
         });
-        eui::OnTileContext(g_tiles, [](int index, float, float)
+        eui::OnTileContext(v->tiles, [v](int index, float, float)
         {
             if (index >= 0)
-                ItemMenu(index);
+                ItemMenu(*v, index);
             else
                 BackgroundMenu();
         });
-        eui::OnEvent(g_tiles, OnKey);
-        Rwidget_set_drop_callback(g_tiles, OnDrop, nullptr);
+        eui::OnEvent(v->tiles, [v](const REvent& event) { return OnKey(*v, event); });
+        Rwidget_set_drop_callback(v->tiles, OnDrop, v);
 
-        // Back / forward buttons of the mouse anywhere over the panel.
-        eui::OnEvent(g.content_browser, [](const REvent& event)
+        // Back / forward buttons of the mouse anywhere over the view.
+        eui::OnEvent(root, [](const REvent& event)
         {
             if (event.type != R_EVENT_MOUSE_DOWN)
                 return false;
@@ -565,24 +594,27 @@ namespace editor_ui::content_browser
             if (event.button == R_MOUSE_X2) { ContentBrowserGo(+1); return true; }
             return false;
         });
-        eui::OnText(g_search, [](const std::string&) { g_refresh_now = true; });
+        eui::OnText(v->search, [](const std::string&) { g_refresh_now = true; });
+        g_refresh_now = true;
+        return v;
     }
 
-    static void Update()
+    static void Init()
     {
-        ContentBrowserTrackHistory();
-        Breadcrumbs();
-        eui::SetEnabled(g_back, !content_browser_back.empty());
-        eui::SetEnabled(g_forward, !content_browser_forward.empty());
-        eui::SetEnabled(g_up, content_browser_current_path != content_browser_root);
+        AddView(g.content_browser);
+    }
 
-        const char* text = Rtext_input_get_text(g_search);
+    static void UpdateView(View& v, const std::vector<stdfs::directory_entry>& entries)
+    {
+        Breadcrumbs(v);
+        eui::SetEnabled(v.back, !content_browser_back.empty());
+        eui::SetEnabled(v.forward, !content_browser_forward.empty());
+        eui::SetEnabled(v.up, content_browser_current_path != content_browser_root);
+
+        const char* text = Rtext_input_get_text(v.search);
         const std::string search = text ? text : "";
 
-        // Listed when the folder changes or after an action, refreshed twice a
-        // second in the background (AsyncFolderList).
-        const auto& entries = g_list.Get(content_browser_current_path, glfwGetTime(), 0.5, g_refresh_now);
-        bool differ = g_refresh_now || g_shown_folder != content_browser_current_path || search != g_shown_search;
+        bool differ = g_refresh_now || v.shown_folder != content_browser_current_path || search != v.shown_search;
         if (!differ)
         {
             // A background listing : the same files ?
@@ -595,26 +627,41 @@ namespace editor_ui::content_browser
                     continue;
                 if (!needle.empty() && Lower(name).find(needle) == std::string::npos)
                     continue;
-                if (k >= g_shown.size() || g_shown[k].path != entry.path())
+                if (k >= v.shown.size() || v.shown[k].path != entry.path())
                 {
                     differ = true;
                     break;
                 }
                 ++k;
             }
-            differ = differ || k != g_shown.size();
+            differ = differ || k != v.shown.size();
         }
         if (differ)
         {
-            if (g_shown_folder != content_browser_current_path)
-                cba::ClearSelection();
-            g_refresh_now = false;
-            g_shown_folder = content_browser_current_path;
-            g_shown_search = search;
-            Refill(entries);
+            v.shown_folder = content_browser_current_path;
+            v.shown_search = search;
+            Refill(v, entries);
         }
+        ShowSelection(v);
+    }
 
-        ShowSelection();
+    static void Update()
+    {
+        ContentBrowserTrackHistory();
+
+        // Listed when the folder changes or after an action, refreshed twice a
+        // second in the background (AsyncFolderList) ; every view shows it.
+        static stdfs::path listed_folder = "\x01";
+        const auto& entries = g_list.Get(content_browser_current_path, glfwGetTime(), 0.5, g_refresh_now);
+        if (listed_folder != content_browser_current_path)
+        {
+            if (!listed_folder.empty() && listed_folder != "\x01")
+                cba::ClearSelection();
+            listed_folder = content_browser_current_path;
+        }
+        for (auto& v : g_views)
+            UpdateView(*v, entries);
+        g_refresh_now = false;
         Dialogs();
     }
 }
