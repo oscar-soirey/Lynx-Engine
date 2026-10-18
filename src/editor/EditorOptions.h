@@ -36,7 +36,7 @@ namespace lynx::editor::options
 	/** The Interface page of the Options panel (panels/options.xml). */
 	void BindPanel(Rid panel);
 
-	enum class Page { Interface = 0, Project, Plugins };
+	enum class Page { Interface = 0, Project, Plugins, Keyboard };
 
 	/** Shows this page of the panel (the editor shows the panel itself). */
 	void OpenPage(Page page);

@@ -193,6 +193,7 @@ add_executable(LynxEditor src/editor_icon.rc
 		src/editor/OutputConsole.cpp
 		src/editor/CommandPalette.cpp
 		src/editor/EditorOptions.cpp
+		src/editor/Keymap.cpp
 		src/editor/ExternalIde.cpp
 		src/editor/ShellIntegration.cpp
 		src/editor/ProjectTemplates.cpp

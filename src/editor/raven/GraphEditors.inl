@@ -3162,6 +3162,8 @@ namespace editor_ui::graphs
     // The dock area asks before a panel closes (the graph editors may have changes).
     static int OnDockClose(Rid, Rid panel, void*)
     {
+        if (widgets::OwnsPanel(panel))
+            return widgets::OnPanelClose(panel) ? R_TRUE : R_FALSE;
         return OnPanelClose(panel) ? R_TRUE : R_FALSE;
     }
 

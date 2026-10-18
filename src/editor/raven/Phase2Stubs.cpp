@@ -5,8 +5,8 @@
 // phases of the port :
 //   phase 2 : Git, Input Settings, code editors, Profiler,
 //             Ship Game, Sprite -> voxels ;
-//   phase 3 : Widget Editor, Particle Editor, the
-//             editor modules of the plugins (new Raven API).
+//   phase 3 : Particle Editor, the editor modules of the plugins
+//             (new Raven API). The Widget Editor is in Raven (WidgetEditor.inl).
 // Until then the editor keeps working without them : the files they would
 // open are opened with the program Windows associates with them, and their
 // menu entries say that the window is not available yet.
@@ -20,14 +20,11 @@
 #include "../ScriptEditors.h"
 #include "../ShipGame.h"
 #include "../SpriteVoxelizer.h"
-#include "../WidgetEditor.h"
 
 // The templates of the new files are the ones of the real editors.
 #include "../../core/Particles.h"
 #include "../../gameplay/AnimGraph.h"
 #include "../../gameplay/BehaviorTree.h"
-#include "../../widgets/Panels.h"
-#include "../../widgets/UserWidget.h"
 
 #include <algorithm>
 #include <cctype>
@@ -95,27 +92,7 @@ namespace lynx::editor::script_editors
 }
 
 
-// ---- Widget Editor --------------------------------------------------------------
-namespace lynx::editor::widget_editor
-{
-    bool CanOpen(const std::filesystem::path&) { return false; }
-    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
-    void DrawAll(unsigned int) {}
-    bool HasFocus() { return false; }
-    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
-    void PathDeleted(const std::filesystem::path&) {}
-    bool HasUnsavedChanges() { return false; }
-    void SaveAll() {}
-    std::string NewFileTemplate()
-    {
-        lynx::UserWidget widget;
-        auto root = std::make_unique<lynx::CanvasPanel>();
-        root->SetName("Root");
-        widget.SetRoot(std::move(root));
-        return widget.SaveToString();
-    }
-    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
-}
+// ---- Widget Editor : raven/WidgetEditor.inl (Raven) ------------------------------
 
 
 // ---- Anim Graph / Behavior Tree : raven/GraphEditors.inl (Raven NodeGraph) ------------

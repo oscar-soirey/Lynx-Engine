@@ -31,6 +31,8 @@ namespace lynx::editor::voxel_types
 		Rid g_palette = R_INVALID_ID;
 		Rid g_hint = R_INVALID_ID;
 		std::string g_palette_key;     // what the swatches show (rebuilt when it changes)
+		std::vector<Rid> g_swatches;   // swatches of the palette (repainted when a texture arrives)
+		bool g_texture_pending = false;
 		std::unique_ptr<ui::Menu> g_menu;
 
 		// Editor
@@ -47,6 +49,30 @@ namespace lynx::editor::voxel_types
 			Rid drag_row, drag, drag_value, buoyancy_row, buoyancy, buoyancy_value, friction_row, friction, friction_value;
 			Rid bounciness_row, bounciness, bounciness_value, damage, damage_value, contact, duplicate, remove, message;
 		} w{};
+
+		// What a voxel of this type looks like : its texture (assets/<texture>)
+		// multiplied by its color, as the renderer draws it (a textured type is
+		// usually white : the texture alone), else the plain color.
+		void PaintType(RPainter* p, float x, float y, float w, float h, const voxels::VoxelType& t)
+		{
+			if (!t.texture.empty())
+			{
+				std::error_code ec;
+				const Rid texture = ui::FileTexture(std::filesystem::current_path(ec) / "assets" / t.texture);
+				if (texture != R_INVALID_ID)
+				{
+					int tw = 0, th = 0;
+					Rtexture_get_size(texture, &tw, &th);
+					if (tw > 0 && th > 0)
+					{
+						Rdraw_image(p, texture, x, y, w, h, t.color[0], t.color[1], t.color[2], 1.f);
+						return;
+					}
+					g_texture_pending = true;   // still loading : painted again by Update
+				}
+			}
+			Rdraw_rect(p, x, y, w, h, 0.f, t.color[0], t.color[1], t.color[2], 1.f);
+		}
 
 		int Selected()
 		{
@@ -144,9 +170,10 @@ namespace lynx::editor::voxel_types
 			for (int type = 1; type <= voxels::GetTypeCount(); ++type)
 				if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type)))
 				{
-					std::snprintf(part, sizeof(part), "%d:%.3f,%.3f,%.3f,%d,%u;", type, t->color[0], t->color[1], t->color[2],
+					std::snprintf(part, sizeof(part), "%d:%.3f,%.3f,%.3f,%d,%u,", type, t->color[0], t->color[1], t->color[2],
 					              t->emissive ? 1 : 0, (t->flags & voxels::GetCollisionMask()) ? 1u : 0u);
 					key += part;
+					key += t->texture + ";";
 				}
 			return key;
 		}
@@ -207,7 +234,7 @@ namespace lynx::editor::voxel_types
 				}
 				else if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(type)))
 				{
-					Rdraw_rect(p, inset, inset, width - inset * 2.f, height - inset * 2.f, 0.f, t->color[0], t->color[1], t->color[2], 1.f);
+					PaintType(p, inset, inset, width - inset * 2.f, height - inset * 2.f, *t);
 					Rdraw_rect_outline(p, inset, inset, width - inset * 2.f, height - inset * 2.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.6f);
 					if (t->emissive)
 						Rdraw_circle(p, width - inset - 6.f, inset + 6.f, 3.5f, 1.f, 0.96f, 0.63f, 1.f);
@@ -243,9 +270,10 @@ namespace lynx::editor::voxel_types
 		void RebuildPalette()
 		{
 			Rwidget_clear_children(g_palette);
+			g_swatches.clear();
 			for (int type = 0; type <= voxels::GetTypeCount(); ++type)
 				if (type == 0 || voxels::GetType(static_cast<uint8_t>(type)))
-					Rwidget_add_child(g_palette, MakeSwatch(type));
+					g_swatches.push_back(Rwidget_add_child(g_palette, MakeSwatch(type)));
 
 			const Rid add = Rbutton_create("+");
 			Rwidget_set_size(add, kSwatch, kSwatch);
@@ -333,7 +361,7 @@ namespace lynx::editor::voxel_types
 				{
 					if (const voxels::VoxelType* t = voxels::GetType(static_cast<uint8_t>(other)))
 					{
-						Rdraw_rect(p, 0.f, 0.f, width, height, 0.f, t->color[0], t->color[1], t->color[2], 1.f);
+						PaintType(p, 0.f, 0.f, width, height, *t);
 						Rdraw_rect_outline(p, 0.f, 0.f, width, height, 0.f, 1.f, 0.f, 0.f, 0.f, 0.6f);
 					}
 				});
@@ -724,8 +752,19 @@ namespace lynx::editor::voxel_types
 				if (!same_types)
 					RebuildPalette();
 				else
-					Rwidget_invalidate(g_palette);
+					for (Rid swatch : g_swatches)
+						Rwidget_invalidate(swatch);   // the selection outline
 				g_palette_key = key;
+			}
+			// Textures of the types : painted once loaded (FileTexture is asynchronous).
+			static double last_texture_check = 0.0;
+			if (g_texture_pending && Rget_time() - last_texture_check > 0.25)
+			{
+				last_texture_check = Rget_time();
+				g_texture_pending = false;
+				for (Rid swatch : g_swatches)
+					if (Rwidget_is_valid(swatch))
+						Rwidget_invalidate(swatch);
 			}
 		}
 

@@ -2,8 +2,9 @@
 <!--
   Lynx editor - the main window.
 
-  Header (title of the project, engine version), toolbar (every button has a
-  shortcut that keeps working), the docked panels, the status bar.
+  Header (menus File / Edit / Window / Game / Tools / Help, title of the
+  project, engine version), toolbar (the actions used all the time), the
+  docked panels, the status bar. The menus are filled by raven/PanelShell.inl.
   The panels are named : their arrangement is saved per project
   (editor_layout.txt) and Windows shows / hides them (editor_windows.txt).
 
@@ -15,6 +16,7 @@
 	<VBox>
 		<HeaderBar Name="header" TitleAlign="Left">
 			<Image Name="header.icon" Width="18" Height="18" Stretch="Fit" Slot.VAlign="Center" Slot.Padding="6,0,0,0"/>
+			<MenuBar Name="menubar" Slot.VAlign="Center" Slot.Padding="4,0,0,0"/>
 			<Label Name="header.version" Text="" Class="dim" Slot.HAlign="Right" Slot.VAlign="Center" Slot.Padding="0,0,10,0"/>
 			<Button Name="header.lynxie" Class="tool" Slot.HAlign="Right" Tooltip="Lynxie : ask a question about the engine, or what to change in the level" Focusable="false">
 				<Image Name="header.lynxie.icon" Width="22" Height="19" Stretch="Fit" TintText="true"/>
@@ -24,14 +26,6 @@
 		<!-- Toolbar -->
 		<Border Name="toolbar" Class="toolbar" Padding="6,4">
 			<HBox Spacing="10">
-				<ToolGroup>
-					<ToolButton Name="tb.project" Glyph="Project" Text="Project" Tip="Project : open another one, code editors, Ship Game"/>
-					<ToolArrow Name="tb.project.menu" Tip="Project menu"/>
-					<Button Name="tb.ide" Class="tool" Focusable="false" Tooltip="Open the game folder in the code editor">
-						<Image Name="tb.ide.icon" Width="16" Height="16" Stretch="Fit"/>
-					</Button>
-				</ToolGroup>
-
 				<ToolGroup>
 					<Overlay>
 						<ToolButton Name="tb.save" Glyph="Save" Tip="Save the level (Ctrl+S)"/>
@@ -66,8 +60,6 @@
 					<Button Name="tb.view" Class="tool" Focusable="false" Tooltip="Editor camera speed and master volume">
 						<Label Name="tb.view.text" Text="Speed 50  Vol 50%"/>
 					</Button>
-					<ToolButton Name="tb.windows" Glyph="Windows" Text="Windows" Tip="Show or hide editor windows"/>
-					<ToolButton Name="tb.options" Glyph="Settings" Text="Options" Tip="Options : interface, project settings, plugins"/>
 				</ToolGroup>
 			</HBox>
 		</Border>

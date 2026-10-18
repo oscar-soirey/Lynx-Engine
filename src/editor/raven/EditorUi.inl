@@ -428,6 +428,7 @@ namespace editor_ui
 #include "PanelPaint.inl"
 #include "PanelConsole.inl"
 #include "PanelTools.inl"
+#include "WidgetEditor.inl"
 #include "GraphEditors.inl"
 
 
@@ -453,6 +454,7 @@ static bool StartInterface()
 
     eui::Init();                         // embedded files, <Icon>, themes
     lynx::editor::options::Init();       // theme and scale of the user
+    lynx::editor::keymap::Load();        // shortcuts of the user (Options > Keyboard)
     return true;
 }
 
@@ -553,8 +555,9 @@ namespace editor
         tools::Update(dt);
         console::Update();
 
-        // Behavior Tree / Anim Graph editors.
+        // Behavior Tree / Anim Graph editors, Widget Editor.
         graphs::Update();
+        widgets::Update();
 
         // Commands (Scripts, Lynxie, Console, Reference, AI / MCP).
         lynx::editor::commands_window::UpdatePanel(IsPanelShown(g.commands));

@@ -68,9 +68,32 @@
 	</ScrollBox>
 
 	<ScrollBox Slot.Title="Plugins">
-		<VBox Name="plugins.page" Spacing="6" Slot.Padding="10">
-			<Label Text="Plugins of the engine and of the project (plugins.json)." Class="dim" Wrap="true"/>
-			<VBox Name="plugins.list" Spacing="4"/>
+		<VBox Name="plugins.page" Spacing="8" Slot.Padding="12">
+			<HBox Spacing="8">
+				<VBox Spacing="2" Slot.Fill="1">
+					<Label Text="Plugins" Class="dialog-title"/>
+					<Label Name="plugins.summary" Text="" Class="dim" Wrap="true"/>
+				</VBox>
+				<Button Name="plugins.folder" Text="Project plugins folder" Slot.VAlign="Center" Tooltip="&lt;project&gt;/plugins : a folder per plugin (plugin.json + bin/)"/>
+			</HBox>
+			<HBox Spacing="6">
+				<TextInput Name="plugins.search" Placeholder="Search (name, author, description)" Slot.Fill="1"/>
+				<ComboBox Name="plugins.filter" Items="All|Enabled|Disabled|Engine|Project" Width="130"/>
+			</HBox>
+			<Label Name="plugins.restart" Text="Saved in plugins.json : restart the editor to load or unload the plugins you changed." Class="warning" Wrap="true" Visibility="Collapsed"/>
+			<VBox Name="plugins.list" Spacing="8"/>
+			<Label Text="More plugins : the Lynx launcher (Plugins tab) installs them into an engine version." Class="dim" Wrap="true" Slot.Padding="0,6,0,0"/>
+		</VBox>
+	</ScrollBox>
+
+	<ScrollBox Slot.Title="Keyboard">
+		<VBox Spacing="4" Slot.Padding="10">
+			<Label Text="Shortcuts of the editor, the same for every project. Click a shortcut, then press the new keys (Ctrl / Shift / Alt + a key). Escape cancels." Class="dim" Wrap="true"/>
+			<Label Name="keys.hint" Text="" Class="warning"/>
+			<VBox Name="keys.list" Spacing="2"/>
+			<Separator Slot.Padding="0,8"/>
+			<Button Name="keys.reset_all" Text="Reset every shortcut" Slot.HAlign="Left"/>
+			<Label Text="The editors in tabs (Widget Editor, Behavior Tree, Anim Graph) keep Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+D, Delete while they have the keyboard." Class="dim" Wrap="true"/>
 		</VBox>
 	</ScrollBox>
 </TabView>

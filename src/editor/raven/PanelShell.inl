@@ -13,12 +13,12 @@ namespace editor_ui::shell
 
     struct Toolbar
     {
-        Rid project = R_INVALID_ID, project_menu = R_INVALID_ID, ide = R_INVALID_ID, ide_icon = R_INVALID_ID;
+        Rid menubar = R_INVALID_ID;
         Rid save = R_INVALID_ID, save_dirty = R_INVALID_ID, undo = R_INVALID_ID;
         Rid translate = R_INVALID_ID, rotate = R_INVALID_ID, scale = R_INVALID_ID;
         Rid play = R_INVALID_ID, simulate = R_INVALID_ID, simulating = R_INVALID_ID;
         Rid compile = R_INVALID_ID, game_menu = R_INVALID_ID, status = R_INVALID_ID, status_text = R_INVALID_ID;
-        Rid view = R_INVALID_ID, view_text = R_INVALID_ID, windows = R_INVALID_ID, options = R_INVALID_ID;
+        Rid view = R_INVALID_ID, view_text = R_INVALID_ID;
         Rid header = R_INVALID_ID, version = R_INVALID_ID, lynxie = R_INVALID_ID;
         Rid st_level = R_INVALID_ID, st_mode = R_INVALID_ID, st_hint = R_INVALID_ID, st_fps = R_INVALID_ID;
     };
@@ -26,7 +26,6 @@ namespace editor_ui::shell
     static Toolbar t;
     static std::unique_ptr<eui::Menu> g_menu;          // the menu of the toolbar being shown
     static double g_fps = 0.0;
-    static int g_ide_icon_of = -1;                      // ide::Ide shown on tb.ide
     static std::vector<Rid> g_ide_textures;             // Raven textures of the code editors
     static bool g_was_playing = false;
     static bool g_close_dialog_open = false;
@@ -85,57 +84,6 @@ namespace editor_ui::shell
         menu.Open(x, y + h + 2.f);
     }
 
-    static void ProjectMenu(Rid under)
-    {
-        eui::Menu& menu = NewMenu();
-
-        std::error_code relative_error;
-        const std::filesystem::path module_relative =
-            std::filesystem::relative(currentProject.module_path, currentProject.root, relative_error);
-
-        menu.Title(currentProject.name);
-        menu.Title(currentProject.root.string());
-        menu.Title("Game DLL : " + (currentProject.script_only
-                                         ? std::string("none (JavaScript only)")
-                                         : (relative_error ? currentProject.module_path : module_relative).generic_string()));
-        menu.Separator();
-        menu.Item("Open another project...", []()
-        {
-            switch_project_requested = true;
-            show_close_confirmation = true;
-        }, !isPlaying);
-        menu.Item("Ship Game...", []() { lynx::editor::ship_game::Open(); },
-                  !isPlaying && !lynx::editor::ship_game::IsBusy());
-        menu.Item("Project settings...", []()
-        {
-            ShowPanel(g.options);
-            lynx::editor::options::OpenPage(lynx::editor::options::Page::Project);
-        });
-
-        menu.Separator();
-        menu.Title("Open the game folder with");
-        const bool searching = !ide::DetectionDone();
-        const ide::Ide last = ide::LastUsed();
-        for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
-        {
-            const auto which = static_cast<ide::Ide>(i);
-            const bool missing = !searching && !ide::IsInstalled(which);
-            const std::string text = std::string(ide::Name(which)) + (missing ? "  (not found)" : "") +
-                                     (which == last ? "   (last used)" : "");
-            menu.Item(text, [which]() { OpenIn(which); }, !missing);
-        }
-        menu.Item("Show in Explorer", []()
-        {
-#ifdef _WIN32
-            ShellExecuteW(nullptr, L"open", GameFolder().wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#endif
-        });
-        if (searching)
-            menu.Title("Searching the code editors...");
-
-        OpenUnder(menu, under);
-    }
-
     static void RequestReload()
     {
         module_changed_notice = false;
@@ -177,35 +125,6 @@ namespace editor_ui::shell
         menu.Separator();
         menu.Item("Ship Game...", []() { lynx::editor::ship_game::Open(); },
                   !isPlaying && !lynx::editor::ship_game::IsBusy());
-        OpenUnder(menu, under);
-    }
-
-    static void WindowsMenu(Rid under)
-    {
-        eui::Menu& menu = NewMenu();
-        menu.Title("Editor windows");
-        menu.Separator();
-        for (const PanelEntry& e : PanelEntries())
-        {
-            if (*e.panel == g.build || *e.panel == g.options || *e.panel == R_INVALID_ID)
-                continue;
-            const Rid panel = *e.panel;
-            const bool open = IsPanelOpen(panel) != 0;
-            Rid item = menu.Check(e.label, open, [panel, open]()
-            {
-                if (open)
-                    HidePanel(panel);
-                else
-                    ShowPanel(panel);
-            }, panel != g.viewport_panel);
-            eui::SetMenuIcon(item, e.icon);
-        }
-        // Their Raven windows come with the next versions of the editor.
-        menu.Separator();
-        eui::SetMenuIcon(menu.Item("Input Settings", []() { lynx::editor::input_settings::Show(); }), lynx::editor::icons::Icon::Input);
-        eui::SetMenuIcon(menu.Item("Git", []() { git_window::Show(); }), lynx::editor::icons::Icon::Git);
-        eui::SetMenuIcon(menu.Item("Profiler", []() { lynx::editor::profiler_window::Show(); }), lynx::editor::icons::Icon::Profiler);
-        menu.Separator();
         OpenUnder(menu, under);
     }
 
@@ -407,30 +326,37 @@ namespace editor_ui::shell
                lynx::editor::plugins::HasFocus();
     }
 
+    // The selected actors (or the one in Details).
+    static void DeleteSelection()
+    {
+        if (!editing_actor || isPlaying)
+            return;
+        PruneActorSelection();
+        std::vector<lynx::Actor*> to_delete = selected_actors;
+        if (to_delete.empty())
+            to_delete.push_back(editing_actor);
+        DeleteActors(to_delete);
+    }
+
     static void Shortcuts()
     {
         if (isPlaying || Rwindow_has_popup(g.window) || ein::WantTextInput())
             return;
 
         // Command palette : Ctrl+P (everything), Ctrl+Shift+P (commands).
-        if (ein::Ctrl() && ein::KeyPressed(GLFW_KEY_P) && !lynx::editor::command_palette::IsOpen() &&
+        namespace km = lynx::editor::keymap;
+        if (km::Pressed(km::Action::CommandPalette) && !lynx::editor::command_palette::IsOpen() &&
             !lynx::editor::input_settings::BlocksEditorShortcuts())
             OpenCommandPalette(ein::Shift() ? ">" : "");
 
         // Undo.
-        if (ein::Ctrl() && ein::KeyPressed(GLFW_KEY_Z) && !OtherEditorHasFocus() && !brushPainting)
+        if (km::Pressed(km::Action::Undo) && !OtherEditorHasFocus() && !brushPainting)
             UndoLastEditorAction();
 
         // Delete : the selected actors (the Content Browser deletes its files).
         content_browser_focused = HasFocus(g.content_browser);
-        if (ein::KeyPressed(GLFW_KEY_DELETE) && editing_actor && !content_browser_focused && !OtherEditorHasFocus())
-        {
-            PruneActorSelection();
-            std::vector<lynx::Actor*> to_delete = selected_actors;
-            if (to_delete.empty())
-                to_delete.push_back(editing_actor);
-            DeleteActors(to_delete);
-        }
+        if (km::Pressed(km::Action::DeleteSelection) && editing_actor && !content_browser_focused && !OtherEditorHasFocus())
+            DeleteSelection();
     }
 
     // Messages of the editor : one dialog at a time.
@@ -534,50 +460,477 @@ namespace editor_ui::shell
         eui::Every(0.5, [show]() { if (IsPanelShown(g.options)) show(); });
     }
 
-    static void BindPluginsPage()
+    // ---- Options > Plugins : a card per plugin, search, filter -------------------------
+
+    static bool g_plugins_changed = false;   // toggled this session : restart banner
+
+    static const char kPluginCard[] =
+        "<Border Class='toolgroup' BorderWidth='1' Padding='12,10'>"
+        "  <VBox Spacing='6'>"
+        "    <HBox Spacing='10'>"
+        "      <Custom Name='avatar' Width='40' Height='40' Slot.VAlign='Center'/>"
+        "      <VBox Spacing='1' Slot.Fill='1' Slot.VAlign='Center'>"
+        "        <HBox Spacing='8'>"
+        "          <Label Name='name' Class='dialog-title'/>"
+        "          <Label Name='version' Class='dim' Slot.VAlign='Center'/>"
+        "        </HBox>"
+        "        <Label Name='info' Class='dim'/>"
+        "      </VBox>"
+        "      <Checkbox Name='enabled' Text='Enabled' Style='Switch' Slot.VAlign='Center'/>"
+        "    </HBox>"
+        "    <HBox Name='badges' Spacing='10'>"
+        "      <Label Name='source' Class='section'/>"
+        "      <Label Name='category' Class='dim'/>"
+        "      <Label Name='state'/>"
+        "      <Label Name='editor' Text='Editor module' Class='dim' Visibility='Collapsed' Tooltip='Its editor module (windows, menus) needs the new plugin API of the editor (coming) : the runtime part works.'/>"
+        "    </HBox>"
+        "    <Label Name='older' Class='warning' Wrap='true' Visibility='Collapsed'/>"
+        "    <Label Name='desc' Wrap='true'/>"
+        "    <Label Name='error' Class='error' Wrap='true' Visibility='Collapsed'/>"
+        "    <HBox Spacing='6'>"
+        "      <Label Name='note' Class='warning' Slot.Fill='1' Slot.VAlign='Center'/>"
+        "      <Button Name='folder' Text='Open Folder' Class='tool'/>"
+        "    </HBox>"
+        "  </VBox>"
+        "</Border>";
+
+    static void PaintPluginAvatar(RPainter* p, float w, float h, const std::string& name)
+    {
+        uint32_t hash = 2166136261u;
+        for (unsigned char c : name)
+            hash = (hash ^ c) * 16777619u;
+        float r = 0.5f, gr = 0.5f, b = 0.5f;
+        Rcolor_hsv_to_rgb(static_cast<float>(hash % 360u) / 360.f, 0.55f, 0.78f, &r, &gr, &b);
+        Rdraw_rect(p, 0.f, 0.f, w, h, 8.f, r, gr, b, 1.f);
+        const std::string letter = name.empty() ? std::string("?")
+            : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(name[0]))));
+        float tw = 0.f, th = 0.f;
+        Rfont_measure_text(R_INVALID_ID, 22.f, letter.c_str(), &tw, &th);
+        if (th <= 0.f)
+            th = 22.f;
+        Rdraw_text(p, R_INVALID_ID, 22.f, (w - tw) * 0.5f, (h - th) * 0.5f, letter.c_str(), 1.f, 1.f, 1.f, 1.f);
+    }
+
+    static void FillPluginsPage()
     {
         Rid list = eui::Find(g.window, "plugins.list");
+        Rid search = eui::Find(g.window, "plugins.search");
+        Rid filter = eui::Find(g.window, "plugins.filter");
         Rwidget_clear_children(list);
+        eui::SetVisible(eui::Find(g.window, "plugins.restart"), g_plugins_changed);
+
         auto& plugins = lynx::plugins::GetPlugins();
-        if (plugins.empty())
+        int enabled = 0, loaded = 0;
+        for (const auto& info : plugins)
         {
-            Rid none = Rlabel_create("No plugin : <editor>/plugins and <project>/plugins hold the plugins (plugin.json).");
-            Rwidget_add_class(none, "dim");
-            Rlabel_set_wrap(none, R_TRUE);
-            Rwidget_add_child(list, none);
-            return;
+            enabled += info.enabled;
+            loaded += info.loaded;
         }
+        eui::SetText(eui::Find(g.window, "plugins.summary"), plugins.empty()
+            ? std::string("No plugin : <editor>/plugins and <project>/plugins hold the plugins (a folder with plugin.json).")
+            : std::to_string(plugins.size()) + " plugins  |  " + std::to_string(enabled) + " enabled for this project  |  " +
+              std::to_string(loaded) + " loaded");
+
+        const char* text = Rtext_input_get_text(search);
+        const std::string needle = Lower(text ? text : "");
+        const int mode = std::max(0, Rcombo_box_get_selected(filter));   // All, Enabled, Disabled, Engine, Project
+
+        int shown = 0;
         for (const lynx::plugins::PluginInfo& info : plugins)
         {
+            if ((mode == 1 && !info.enabled) || (mode == 2 && info.enabled) ||
+                (mode == 3 && !info.engine_plugin) || (mode == 4 && info.engine_plugin))
+                continue;
+            if (!needle.empty() && Lower(info.name).find(needle) == std::string::npos &&
+                Lower(info.description).find(needle) == std::string::npos &&
+                Lower(info.author).find(needle) == std::string::npos &&
+                Lower(info.category).find(needle) == std::string::npos)
+                continue;
+
+            Rid card = Rwidget_create_from_xml(kPluginCard, sizeof(kPluginCard) - 1);
+            if (card == R_INVALID_ID)
+                continue;
+            Rwidget_add_child(list, card);
+            ++shown;
+            auto find = [card](const char* n) { return Rwidget_find(card, n); };
             const std::string name = info.name;
-            Rid box = Rwidget_create(R_WIDGET_VBOX);
-            Rid check = Rcheckbox_create((info.name + (info.version.empty() ? "" : "  " + info.version) +
-                                          (info.engine_plugin ? "   (engine)" : "   (project)")).c_str());
-            Rcheckbox_set_checked(check, info.enabled ? R_TRUE : R_FALSE);
-            Rwidget_add_child(box, check);
-            if (!info.description.empty())
-            {
-                Rid description = Rlabel_create(info.description.c_str());
-                Rwidget_add_class(description, "dim");
-                Rlabel_set_wrap(description, R_TRUE);
-                Rwidget_add_child(box, description);
-            }
-            std::string state = info.loaded ? "Loaded." : info.enabled ? "Not loaded." : "Disabled.";
+
+            eui::OnPaint(find("avatar"), [name](RPainter* p, float w, float h) { PaintPluginAvatar(p, w, h, name); });
+            eui::SetText(find("name"), info.name);
+            eui::SetText(find("version"), info.version.empty() ? std::string() : "v" + info.version);
+            eui::SetText(find("info"), info.author.empty() ? std::string("Unknown author") : "by " + info.author);
+            eui::SetText(find("source"), info.engine_plugin ? "ENGINE" : "PROJECT");
+            eui::SetTooltip(find("source"), info.engine_plugin ? "Shipped with Lynx (<editor>/plugins)" : "In this project (<project>/plugins)");
+            eui::SetText(find("category"), info.category);
+
+            const Rid state = find("state");
             if (!info.error.empty())
-                state += " " + info.error;
-            if (!info.editor_dll.empty())
-                state += "  Its editor module needs the new plugin API of the editor (coming).";
-            Rid status = Rlabel_create(state.c_str());
-            Rwidget_add_class(status, info.error.empty() ? "dim" : "error");
-            Rlabel_set_wrap(status, R_TRUE);
-            Rwidget_add_child(box, status);
-            Rwidget_add_child(list, box);
-            eui::OnToggle(check, [name, status](bool on)
             {
-                lynx::plugins::SetEnabled(name, on);
-                lynx::plugins::SaveSettings();
-                eui::SetText(status, "Saved in plugins.json : restart the editor to load / unload it.");
+                eui::SetText(state, "Error");
+                Rwidget_add_class(state, "error");
+            }
+            else if (info.loaded)
+            {
+                eui::SetText(state, "Loaded");
+                Rwidget_add_class(state, "success");
+            }
+            else
+            {
+                eui::SetText(state, info.enabled ? "Enabled, not loaded yet" : "Disabled");
+                Rwidget_add_class(state, "dim");
+            }
+            eui::SetVisible(find("editor"), !info.editor_dll.empty());
+
+            const bool older = !info.engine_min.empty() &&
+                               lynx::plugins::CompareVersions(info.engine_min, lynx::GetEngineVersion()) < 0;
+            if (older)
+            {
+                eui::SetText(find("older"), "Made for Lynx " + info.engine_min + " (this editor : " + lynx::GetEngineVersion() + ").");
+                eui::SetVisible(find("older"), true);
+            }
+            eui::SetText(find("desc"), info.description.empty() ? std::string("No description.") : info.description);
+            if (!info.description.empty())
+                Rlabel_set_markdown(find("desc"), R_TRUE);
+            if (!info.error.empty())
+            {
+                eui::SetText(find("error"), info.error);
+                eui::SetVisible(find("error"), true);
+            }
+
+            const Rid check = find("enabled");
+            const Rid note = find("note");
+            eui::SetChecked(check, info.enabled);
+            const std::filesystem::path folder = info.folder;
+            eui::OnClick(find("folder"), [folder]()
+            {
+#ifdef _WIN32
+                ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
             });
+
+            const std::string engine_min = info.engine_min;
+            eui::OnToggle(check, [name, note, check, older, engine_min](bool on)
+            {
+                if (const auto* plugin = lynx::plugins::FindPlugin(name); plugin && plugin->enabled == on)
+                    return;   // set back by the code (Cancel)
+                auto apply = [name, note](bool value)
+                {
+                    lynx::plugins::SetEnabled(name, value);
+                    lynx::plugins::SaveSettings();
+                    g_plugins_changed = true;
+                    eui::SetText(note, "Restart the editor to " + std::string(value ? "load" : "unload") + " it.");
+                    eui::SetVisible(eui::Find(g.window, "plugins.restart"), true);
+                };
+                if (on && older)
+                {
+                    eui::Ask(g.window, "Older plugin", name + " was made for Lynx " + engine_min +
+                             ". It may not work with this version (" + lynx::GetEngineVersion() + "). Enable it anyway ?",
+                             { "Enable", "Cancel" }, [apply, check](int choice)
+                    {
+                        if (choice == 0)
+                            apply(true);
+                        else
+                            eui::SetChecked(check, false);
+                    });
+                    return;
+                }
+                apply(on);
+            });
+        }
+
+        if (!plugins.empty() && shown == 0)
+        {
+            Rid none = Rwidget_add_child(list, Rlabel_create("No plugin matches the search."));
+            Rwidget_add_class(none, "dim");
+        }
+    }
+
+    static void BindPluginsPage()
+    {
+        eui::OnText(eui::Find(g.window, "plugins.search"), [](const std::string&) { eui::Later([]() { FillPluginsPage(); }); });
+        eui::OnSelect(eui::Find(g.window, "plugins.filter"), [](int) { eui::Later([]() { FillPluginsPage(); }); });
+        eui::OnClick(eui::Find(g.window, "plugins.folder"), []()
+        {
+            const std::filesystem::path folder = GameFolder() / "plugins";
+            std::error_code ec;
+            std::filesystem::create_directories(folder, ec);
+#ifdef _WIN32
+            ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+        });
+        FillPluginsPage();
+    }
+
+    // ---- menu bar of the header (File, Edit, Window, Game, Tools, Help) --------------
+    // Built once ; enabled / checked states, shortcuts (Options > Keyboard) and the
+    // texts that change follow the editor at every frame (UpdateMenuBar).
+
+    namespace km = lynx::editor::keymap;
+
+    struct MenuEntry
+    {
+        Rid item = R_INVALID_ID;
+        std::function<bool()> enabled;            // empty : always
+        std::function<bool()> checked;            // empty : not checkable
+        std::function<std::string()> text;        // empty : fixed text
+        int action = -1;                          // km::Action shown as shortcut
+        std::string shown_shortcut = "\x01";
+        std::string shown_text;
+        int shown_checked = -1;
+    };
+
+    static std::vector<MenuEntry> g_menu_entries;
+
+    static Rid MenuAdd(Rid menu, const std::string& text, std::function<void()> fn,
+                       std::function<bool()> enabled = {}, int action = -1, std::function<bool()> checked = {})
+    {
+        const Rid item = Rmenu_add_item(menu, text.c_str());
+        if (fn)
+            eui::OnMenuItem(item, std::move(fn));
+        if (checked)
+            Rmenu_item_set_checkable(item, R_TRUE);
+        MenuEntry e;
+        e.item = item;
+        e.enabled = std::move(enabled);
+        e.checked = std::move(checked);
+        e.action = action;
+        e.shown_text = text;
+        g_menu_entries.push_back(std::move(e));
+        return item;
+    }
+
+    static void MenuText(Rid item, std::function<std::string()> text)
+    {
+        for (MenuEntry& e : g_menu_entries)
+            if (e.item == item)
+                e.text = std::move(text);
+    }
+
+    static int KeyOf(km::Action a) { return static_cast<int>(a); }
+
+    static void OpenUrl(const char* url)
+    {
+#ifdef _WIN32
+        ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+#else
+        (void)url;
+#endif
+    }
+
+    static void SaveAll()
+    {
+        if (isPlaying)
+            return;
+        if (editor_dirty)
+            SaveEditor();
+        lynx::editor::voxel_types::Save();
+        lynx::editor::script_editors::SaveAll();
+        lynx::editor::widget_editor::SaveAll();
+        lynx::editor::graph_editors::SaveAll();
+        lynx::editor::particle_editor::SaveAll();
+    }
+
+    static void ShowOptions(lynx::editor::options::Page page)
+    {
+        ShowPanel(g.options);
+        lynx::editor::options::OpenPage(page);
+    }
+
+    static void BuildMenuBar()
+    {
+        const Rid bar = t.menubar;
+        if (bar == R_INVALID_ID)
+            return;
+        using Icon = lynx::editor::icons::Icon;
+        auto editing = []() { return !isPlaying; };
+
+        // File
+        {
+            const Rid m = Rmenu_add_menu(bar, "File");
+            MenuAdd(m, "Save Level", []() { if (!isPlaying) SaveEditor(); }, editing, KeyOf(km::Action::Save));
+            MenuAdd(m, "Save All", []() { SaveAll(); }, editing);
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Open Project...", []()
+            {
+                switch_project_requested = true;
+                show_close_confirmation = true;
+            }, editing);
+            MenuAdd(m, "Project Settings...", []() { ShowOptions(lynx::editor::options::Page::Project); });
+            MenuAdd(m, "Ship Game...", []() { lynx::editor::ship_game::Open(); },
+                    []() { return !isPlaying && !lynx::editor::ship_game::IsBusy(); });
+            Rmenu_add_separator(m);
+            const Rid open_ide = MenuAdd(m, "Open in the Code Editor", []() { OpenIn(ide::LastUsed()); });
+            MenuText(open_ide, []() { return std::string("Open in ") + ide::Name(ide::LastUsed()); });
+            const Rid with = Rmenu_add_menu(m, "Open the Game Folder with");
+            for (int i = 0; i < static_cast<int>(ide::Ide::Count); ++i)
+            {
+                const auto which = static_cast<ide::Ide>(i);
+                const Rid item = MenuAdd(with, ide::Name(which), [which]() { OpenIn(which); },
+                                         [which]() { return !ide::DetectionDone() || ide::IsInstalled(which); });
+                MenuText(item, [which]()
+                {
+                    std::string text = ide::Name(which);
+                    if (ide::DetectionDone() && !ide::IsInstalled(which))
+                        text += "  (not found)";
+                    return text;
+                });
+            }
+            MenuAdd(m, "Show in Explorer", []()
+            {
+#ifdef _WIN32
+                ShellExecuteW(nullptr, L"open", GameFolder().wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+            });
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Quit", []() { show_close_confirmation = true; });
+        }
+
+        // Edit
+        {
+            const Rid m = Rmenu_add_menu(bar, "Edit");
+            MenuAdd(m, "Undo", []() { if (!isPlaying && !brushPainting) UndoLastEditorAction(); },
+                    []() { return !isPlaying && !brushPainting; }, KeyOf(km::Action::Undo));
+            MenuAdd(m, "Delete", []() { DeleteSelection(); },
+                    []() { return !isPlaying && editing_actor != nullptr; }, KeyOf(km::Action::DeleteSelection));
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Command Palette...", []() { OpenCommandPalette(""); }, {}, KeyOf(km::Action::CommandPalette));
+            Rmenu_add_separator(m);
+            eui::SetMenuIcon(MenuAdd(m, "Options...", []() { ShowOptions(lynx::editor::options::Page::Interface); }), Icon::Settings);
+            MenuAdd(m, "Keyboard Shortcuts...", []() { ShowOptions(lynx::editor::options::Page::Keyboard); });
+            MenuAdd(m, "Plugins...", []() { ShowOptions(lynx::editor::options::Page::Plugins); });
+        }
+
+        // Window
+        {
+            const Rid m = Rmenu_add_menu(bar, "Window");
+            for (const PanelEntry& e : PanelEntries())
+            {
+                if (*e.panel == g.build || *e.panel == g.options || *e.panel == R_INVALID_ID)
+                    continue;
+                const Rid panel = *e.panel;
+                const Rid item = MenuAdd(m, e.label, [panel]()
+                {
+                    if (IsPanelOpen(panel))
+                        HidePanel(panel);
+                    else
+                        ShowPanel(panel);
+                }, [panel]() { return panel != g.viewport_panel; }, -1, [panel]() { return IsPanelOpen(panel) != 0; });
+                eui::SetMenuIcon(item, e.icon);
+            }
+            Rmenu_add_separator(m);
+            eui::SetMenuIcon(MenuAdd(m, "Input Settings", []() { lynx::editor::input_settings::Show(); }), Icon::Input);
+            eui::SetMenuIcon(MenuAdd(m, "Git", []() { git_window::Show(); }), Icon::Git);
+            eui::SetMenuIcon(MenuAdd(m, "Profiler", []() { lynx::editor::profiler_window::Show(); }), Icon::Profiler);
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Camera Speed and Volume...", []() { ViewDialog(); });
+        }
+
+        // Game
+        {
+            const Rid m = Rmenu_add_menu(bar, "Game");
+            const Rid play = MenuAdd(m, "Play", []() { TogglePlayMode(); }, {}, KeyOf(km::Action::Play));
+            MenuText(play, []() { return std::string(isPlaying ? "Stop" : "Play"); });
+            MenuAdd(m, "Simulate", []() { TogglePlayMode(true); }, {}, KeyOf(km::Action::Simulate));
+            Rmenu_add_separator(m);
+            if (!currentProject.script_only)
+                MenuAdd(m, "Compile", []() { lynx::editor::game_build::Start(); },
+                        []() { return !lynx::editor::game_build::IsRunning(); });
+            MenuAdd(m, "Reload Game", []() { RequestReload(); });
+            if (!currentProject.script_only)
+            {
+                MenuAdd(m, "Build Output", []()
+                {
+                    if (g_build_panel_open)
+                        HidePanel(g.build);
+                    else
+                        ShowPanel(g.build);
+                }, {}, -1, []() { return g_build_panel_open; });
+                Rmenu_add_separator(m);
+                MenuAdd(m, "Reload after Compile", []()
+                {
+                    appSettings.reloadAfterBuild = !appSettings.reloadAfterBuild;
+                    SaveSettings();
+                }, {}, -1, []() { return appSettings.reloadAfterBuild; });
+                MenuAdd(m, "Reload when the DLL is rebuilt", []()
+                {
+                    appSettings.autoReloadOnChange = !appSettings.autoReloadOnChange;
+                    SaveSettings();
+                }, {}, -1, []() { return appSettings.autoReloadOnChange; });
+            }
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Show Collisions", []()
+            {
+                show_collision_debug = !show_collision_debug;
+                ApplyCollisionDebugToGame();
+            }, {}, KeyOf(km::Action::CollisionDebug), []() { return show_collision_debug; });
+        }
+
+        // Tools
+        {
+            const Rid m = Rmenu_add_menu(bar, "Tools");
+            MenuAdd(m, "Paint Mode", []() { brushPaintEnabled = true; }, editing, -1, []() { return brushPaintEnabled; });
+            MenuAdd(m, "Select Mode", []() { brushPaintEnabled = false; }, editing, -1, []() { return !brushPaintEnabled; });
+            MenuAdd(m, "Switch Paint / Select", []() { brushPaintEnabled = !brushPaintEnabled; }, editing, KeyOf(km::Action::TogglePaint));
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Translate", []() { SetGizmoModeIndex(0); }, editing, -1, []() { return gizmoModeIndex == 0; });
+            MenuAdd(m, "Rotate", []() { SetGizmoModeIndex(1); }, editing, -1, []() { return gizmoModeIndex == 1; });
+            MenuAdd(m, "Scale", []() { SetGizmoModeIndex(2); }, editing, -1, []() { return gizmoModeIndex == 2; });
+            MenuAdd(m, "Next Gizmo Mode", []() { CycleGizmoMode(); }, editing, KeyOf(km::Action::CycleGizmo));
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Ask Lynxie...", []() { ShowLynxie(); });
+        }
+
+        // Help
+        {
+            const Rid m = Rmenu_add_menu(bar, "Help");
+            MenuAdd(m, "Keyboard Shortcuts", []() { ShowOptions(lynx::editor::options::Page::Keyboard); });
+            MenuAdd(m, "Lynx on GitHub", []() { OpenUrl("https://github.com/oscar-soirey/Lynx-Engine"); });
+            MenuAdd(m, "Report a Bug", []() { OpenUrl("https://github.com/oscar-soirey/Lynx-Engine/issues"); });
+            Rmenu_add_separator(m);
+            MenuAdd(m, "Support Lynx (GitHub Sponsors)", []() { OpenUrl("https://github.com/sponsors/oscar-soirey"); });
+            MenuAdd(m, "About Lynx", []()
+            {
+                eui::Message(g.window, "About Lynx",
+                             "Lynx " + lynx::GetEngineVersion() + "\n\n"
+                             "Game engine for 2D, pixel art and destructible voxel worlds.\n"
+                             "Made by Oscar Soirey. Free and open source (Apache License 2.0).");
+            });
+        }
+    }
+
+    static void UpdateMenuBar()
+    {
+        for (MenuEntry& e : g_menu_entries)
+        {
+            if (e.enabled)
+                eui::SetEnabled(e.item, e.enabled());
+            if (e.checked)
+            {
+                const int checked = e.checked() ? 1 : 0;
+                if (checked != e.shown_checked)
+                {
+                    e.shown_checked = checked;
+                    Rmenu_item_set_checked(e.item, checked ? R_TRUE : R_FALSE);
+                }
+            }
+            if (e.text)
+            {
+                const std::string text = e.text();
+                if (text != e.shown_text)
+                {
+                    e.shown_text = text;
+                    Rmenu_item_set_text(e.item, text.c_str());
+                }
+            }
+            if (e.action >= 0)
+            {
+                const std::string shortcut = km::Text(static_cast<km::Action>(e.action));
+                if (shortcut != e.shown_shortcut)
+                {
+                    e.shown_shortcut = shortcut;
+                    Rwidget_set_attribute(e.item, "Shortcut", shortcut.c_str());
+                }
+            }
         }
     }
 
@@ -599,10 +952,7 @@ namespace editor_ui::shell
         eui::SetText(t.version, "Lynx " + lynx::GetEngineVersion());
         eui::OnClick(t.lynxie, []() { ShowLynxie(); });
 
-        t.project = find("tb.project");
-        t.project_menu = find("tb.project.menu");
-        t.ide = find("tb.ide");
-        t.ide_icon = find("tb.ide.icon");
+        t.menubar = find("menubar");
         t.save = find("tb.save");
         t.save_dirty = find("tb.save.dirty");
         t.undo = find("tb.undo");
@@ -618,20 +968,11 @@ namespace editor_ui::shell
         t.status_text = find("tb.status.text");
         t.view = find("tb.view");
         t.view_text = find("tb.view.text");
-        t.windows = find("tb.windows");
-        t.options = find("tb.options");
         t.st_level = find("status.level");
         t.st_mode = find("status.mode");
         t.st_hint = find("status.hint");
         t.st_fps = find("status.fps");
 
-        // The name of the project on its button.
-        if (Rid label = Rwidget_find(t.project, "label"); label != R_INVALID_ID)
-            eui::SetText(label, currentProject.name.empty() ? std::string("Project") : currentProject.name);
-
-        eui::OnClick(t.project, []() { ProjectMenu(t.project); });
-        eui::OnClick(t.project_menu, []() { ProjectMenu(t.project); });
-        eui::OnClick(t.ide, []() { OpenIn(ide::LastUsed()); });
         eui::OnClick(t.save, []() { if (!isPlaying) SaveEditor(); });
         eui::OnClick(t.undo, []() { if (!isPlaying && !brushPainting) UndoLastEditorAction(); });
         eui::OnClick(t.translate, []() { SetGizmoModeIndex(0); });
@@ -655,14 +996,6 @@ namespace editor_ui::shell
                 RequestReload();
         });
         eui::OnClick(t.view, []() { ViewDialog(); });
-        eui::OnClick(t.windows, []() { WindowsMenu(t.windows); });
-        eui::OnClick(t.options, []()
-        {
-            if (IsPanelShown(g.options))
-                HidePanel(g.options);
-            else
-                ShowPanel(g.options);
-        });
 
         if (currentProject.script_only)
         {
@@ -673,6 +1006,8 @@ namespace editor_ui::shell
         }
 
         lynx::editor::options::BindPanel(g.options);
+        lynx::editor::keymap::BindPage(g.window);
+        BuildMenuBar();
         BindProjectPage();
         BindPluginsPage();
     }
@@ -681,30 +1016,10 @@ namespace editor_ui::shell
     {
         const bool building = lynx::editor::game_build::IsRunning();
 
-        // Code editor of the IDE button.
-        const ide::Ide last = ide::LastUsed();
-        if (static_cast<int>(last) != g_ide_icon_of && ide::DetectionDone())
-        {
-            g_ide_icon_of = static_cast<int>(last);
-            const Rid texture = IdeTexture(last);
-            if (texture != R_INVALID_ID)
-            {
-                Rimage_set_texture(t.ide_icon, texture);
-                Rimage_set_region(t.ide_icon, 0.f, 0.f, 1.f, 1.f);
-            }
-            else
-            {
-                float uv[4];
-                eui::IconRegion(lynx::editor::icons::Icon::FileCode, uv);
-                Rimage_set_texture(t.ide_icon, eui::IconTexture());
-                Rimage_set_region(t.ide_icon, uv[0], uv[1], uv[2], uv[3]);
-            }
-            eui::SetTooltip(t.ide, std::string("Open the game folder in ") + ide::Name(last) +
-                                   "\n(Project menu : another code editor)");
-        }
-
         eui::SetVisible(t.save_dirty, editor_dirty && !isPlaying);
-        eui::SetTooltip(t.save, editor_dirty ? "Save the level (Ctrl+S)\nThere are unsaved changes." : "Save the level (Ctrl+S)");
+        const std::string save_tip = "Save the level (" + km::Text(km::Action::Save) + ")";
+        eui::SetTooltip(t.save, editor_dirty ? save_tip + "\nThere are unsaved changes." : save_tip);
+        eui::SetTooltip(t.undo, "Undo (" + km::Text(km::Action::Undo) + ")");
         for (Rid w : { t.save, t.undo, t.translate, t.rotate, t.scale })
             eui::SetEnabled(w, !isPlaying);
         eui::SetClass(t.translate, "active", gizmoModeIndex == 0);
@@ -725,10 +1040,12 @@ namespace editor_ui::shell
         }
         eui::SetClass(t.play, "play", !isPlaying);
         eui::SetClass(t.play, "stop", isPlaying);
+        const std::string play_key = km::Text(km::Action::Play);
+        const std::string simulate_key = km::Text(km::Action::Simulate);
         eui::SetTooltip(t.play, isPlaying
-            ? (isSimulating ? "Stop the simulation, back to the editor (F3 / Alt+S)"
-                            : "Stop the game, back to the editor (F3)")
-            : "Play the game in the editor (F3)");
+            ? (isSimulating ? "Stop the simulation, back to the editor (" + play_key + " / " + simulate_key + ")"
+                            : "Stop the game, back to the editor (" + play_key + ")")
+            : "Play the game in the editor (" + play_key + ")");
         eui::SetVisible(t.simulate, !isPlaying);
         eui::SetVisible(t.simulating, isPlaying && isSimulating);
 
@@ -766,7 +1083,7 @@ namespace editor_ui::shell
         std::snprintf(view, sizeof(view), "Speed %.0f  Vol %d%%", cameraSpeed,
                       static_cast<int>(std::lround(appSettings.masterVolume * 100.f)));
         eui::SetText(t.view_text, view);
-        eui::SetClass(t.options, "active", IsPanelShown(g.options) != 0);
+        UpdateMenuBar();
     }
 
     static void UpdateStatusBar()
@@ -774,20 +1091,22 @@ namespace editor_ui::shell
         eui::SetText(t.st_level, current_level_file + (editor_dirty ? " *" : ""));
 
         std::string mode;
+        const std::string toggle_key = km::Text(km::Action::TogglePaint);
         if (isPlaying)
-            mode = isSimulating ? "Simulating  (Alt+S : stop)" : "Playing  (F3 : stop, Shift : mouse to the editor)";
+            mode = isSimulating ? "Simulating  (" + km::Text(km::Action::Simulate) + " : stop)"
+                                : "Playing  (" + km::Text(km::Action::Play) + " : stop, Shift : mouse to the editor)";
         else if (actor_drag_active)
             mode = "Placing " + actor_drag_type;
         else if (brushPaintEnabled)
-            mode = "Paint  (Tab : select)";
+            mode = "Paint  (" + toggle_key + " : select)";
         else
-            mode = "Select  (Tab : paint)";
+            mode = "Select  (" + toggle_key + " : paint)";
         eui::SetText(t.st_mode, mode);
         eui::SetClass(t.st_mode, "mode-on", isPlaying);
 
         eui::SetText(t.st_hint, cameraMode == EditorCameraMode::Mode3D
             ? "3D : right mouse to look, WASD to fly, Q / E down / up"
-            : "2D : WASD to move, wheel for the height, Ctrl+P : everything");
+            : "2D : WASD to move, wheel for the height, " + km::Text(km::Action::CommandPalette) + " : everything");
         char fps[32];
         std::snprintf(fps, sizeof(fps), "%.0f fps", g_fps);
         eui::SetText(t.st_fps, fps);

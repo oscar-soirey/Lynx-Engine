@@ -71,6 +71,7 @@
 #include "ProjectBrowser.h"
 #include "StartupBuild.h"
 #include "SplashScreen.h"
+#include "Keymap.h"
 #include "commands/CommandRegistry.h"
 #include "commands/CommandServer.h"
 #include "commands/CommandUtils.h"
@@ -3876,7 +3877,7 @@ namespace editor
         // conversion independently from the editor viewport conversion.
         static bool c_was_down = false;
         const bool c_down =
-            lynx::editor::input::Key(GLFW_KEY_C);
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::PickVoxel);
 
         if (c_down &&
             !c_was_down &&
@@ -3943,7 +3944,7 @@ namespace editor
         // --------------------------------------------------------
 
         const bool f4_down =
-            lynx::editor::input::Key(GLFW_KEY_F4);
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::CollisionDebug);
 
 
         if (f4_down && !f4_was_down)
@@ -3969,13 +3970,9 @@ namespace editor
             lynx::editor::input::Key(GLFW_KEY_RIGHT_CONTROL);
 
 
-        const bool s_down =
-            lynx::editor::input::Key(GLFW_KEY_S);
-
-
+        // Ctrl+S by default (Options > Keyboard).
         const bool ctrl_s =
-            ctrl_down &&
-            s_down;
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::Save);
 
 
         const bool javascript_editor_handles_shortcuts =
@@ -4037,12 +4034,13 @@ namespace editor
                 };
                 const float up[3] = { 0.f, 1.f, 0.f };
 
-                if (lynx::editor::input::Key(GLFW_KEY_W)) add(front, 1.f);
-                if (lynx::editor::input::Key(GLFW_KEY_S)) add(front, -1.f);
-                if (lynx::editor::input::Key(GLFW_KEY_D)) add(right, 1.f);
-                if (lynx::editor::input::Key(GLFW_KEY_A)) add(right, -1.f);
-                if (lynx::editor::input::Key(GLFW_KEY_E)) add(up, 1.f);
-                if (lynx::editor::input::Key(GLFW_KEY_Q)) add(up, -1.f);
+                using lynx::editor::keymap::Action;
+                if (lynx::editor::keymap::Down(Action::CameraForward)) add(front, 1.f);
+                if (lynx::editor::keymap::Down(Action::CameraBack)) add(front, -1.f);
+                if (lynx::editor::keymap::Down(Action::CameraRight)) add(right, 1.f);
+                if (lynx::editor::keymap::Down(Action::CameraLeft)) add(right, -1.f);
+                if (lynx::editor::keymap::Down(Action::CameraUp)) add(up, 1.f);
+                if (lynx::editor::keymap::Down(Action::CameraDown)) add(up, -1.f);
 
                 const float speed = cameraSpeed * 2.f * (io.KeyShift ? 3.f : 1.f) * dt;
                 camX += move[0] * speed;
@@ -4061,17 +4059,17 @@ namespace editor
             // Speed depends on the camera height : slow when close, fast when far.
             const float moveSpeed = GetCameraSpeedForHeight();
 
-            if (lynx::editor::input::Key(GLFW_KEY_W))
+            if (lynx::editor::keymap::Down(lynx::editor::keymap::Action::CameraForward))
                 camY += moveSpeed * dt;
 
             if (!ctrl_down &&
-                lynx::editor::input::Key(GLFW_KEY_S))
+                lynx::editor::keymap::Down(lynx::editor::keymap::Action::CameraBack))
                 camY -= moveSpeed * dt;
 
-            if (lynx::editor::input::Key(GLFW_KEY_D))
+            if (lynx::editor::keymap::Down(lynx::editor::keymap::Action::CameraRight))
                 camX += moveSpeed * dt;
 
-            if (lynx::editor::input::Key(GLFW_KEY_A))
+            if (lynx::editor::keymap::Down(lynx::editor::keymap::Action::CameraLeft))
                 camX -= moveSpeed * dt;
 
             camZ = ClampCameraZ(camZ);
@@ -4486,7 +4484,7 @@ namespace editor
         static bool tab_was_down = false;
 
         const bool tab_down =
-            lynx::editor::input::Key(GLFW_KEY_TAB);
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::TogglePaint);
 
         if (tab_down &&
             !tab_was_down &&
@@ -4540,7 +4538,7 @@ namespace editor
         static bool space_was_down = false;
 
         const bool space_down =
-            lynx::editor::input::Key(GLFW_KEY_SPACE);
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::CycleGizmo);
 
         if (space_down &&
             !space_was_down &&
@@ -4559,7 +4557,7 @@ namespace editor
         // ------------------------------------------------------------
 
         const bool f3_down =
-            lynx::editor::input::Key(GLFW_KEY_F3);
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::Play);
 
         if (f3_down && !f3_was_down)
             TogglePlayMode();
@@ -4578,9 +4576,9 @@ namespace editor
             lynx::editor::input::Key(GLFW_KEY_LEFT_ALT) ||
             lynx::editor::input::Key(GLFW_KEY_RIGHT_ALT);
 
+        (void)alt_down;
         const bool alt_s_down =
-            alt_down &&
-            lynx::editor::input::Key(GLFW_KEY_S) &&
+            lynx::editor::keymap::Down(lynx::editor::keymap::Action::Simulate) &&
             !io.WantTextInput;
 
         if (alt_s_down && !alt_s_was_down)
