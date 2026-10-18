@@ -2798,7 +2798,7 @@ namespace editor_ui::graphs
 
     static const char kPanelXml[] =
         "<HBox Spacing='0'>"
-        "  <ScrollBox Width='240'><VBox Name='ge.left' Spacing='4' Slot.Padding='6'/></ScrollBox>"
+        "  <ScrollBox><VBox Name='ge.left' Spacing='4' Slot.Padding='6'/></ScrollBox>"
         "  <VBox Spacing='4' Slot.Fill='1' Slot.Padding='4'>"
         "    <HBox Spacing='6'>"
         "      <HBox Name='ge.crumbs' Spacing='2' Slot.VAlign='Center'/>"
@@ -2813,8 +2813,10 @@ namespace editor_ui::graphs
         "    <NodeGraph Name='ge.graph' Slot.Fill='1'/>"
         "    <Label Name='ge.status' Text='' Class='dim' Wrap='true'/>"
         "  </VBox>"
-        "  <ScrollBox Width='330'><VBox Name='ge.details' Spacing='5' Slot.Padding='8'/></ScrollBox>"
+        "  <ScrollBox><VBox Name='ge.details' Spacing='5' Slot.Padding='8'/></ScrollBox>"
         "</HBox>";
+
+    static bool OnPanelClose(Rid panel);
 
     static void BuildPanel(Doc& doc)
     {
@@ -2849,6 +2851,16 @@ namespace editor_ui::graphs
         eui::OnClick(find("ge.frame"), [d]() { Rnode_graph_frame_all(d->graph); });
         eui::OnSelect(doc.pick, [d](int index) { d->debug_index = std::max(0, index); d->debug_time = 0.0; });
 
+        // A tab of its own (Documents.inl) : its parts are panels of the dock area of the tab.
+        {
+            const std::string title = doc.path.filename().string();
+            auto page = std::make_shared<Rid>(R_INVALID_ID);
+            doc.panel = documents::OpenSplit(doc.panel, title, doc.kind == Kind::Tree ? lynx::editor::file_icons::Kind::BehaviorTree : lynx::editor::file_icons::Kind::AnimGraph, { "My Graph", "Graph", "Details" },
+                                             [page]() { if (OnPanelClose(*page)) documents::Close(*page); });
+            *page = doc.panel;
+            doc.shown_title = title;
+        }
+
         // Shortcuts of the editor (the level editor waits : HasFocus).
         eui::OnEvent(doc.panel, [d](const REvent& e)
         {
@@ -2871,13 +2883,6 @@ namespace editor_ui::graphs
             return false;
         });
 
-        const std::string title = doc.path.filename().string();
-        Rdock_area_add_panel(g.dock, doc.panel, title.c_str(), R_DOCK_TAB, g.viewport_panel, 0.f);
-        float uv[4];
-        eui::FileIconRegion(doc.kind == Kind::Tree ? lynx::editor::file_icons::Kind::BehaviorTree : lynx::editor::file_icons::Kind::AnimGraph, uv);
-        Rdock_area_set_panel_icon(g.dock, doc.panel, eui::FileIconTexture(), uv[0], uv[1], uv[2], uv[3], R_FALSE);
-        doc.shown_title = title;
-        Rdock_area_show_panel(g.dock, doc.panel);
     }
 
     static void CloseDoc(Doc* doc)
@@ -2888,7 +2893,7 @@ namespace editor_ui::graphs
         const Rid panel = doc->panel;
         g_docs.erase(it);   // (the callbacks of the graph find no document any more)
         if (panel != R_INVALID_ID && Rwidget_is_valid(panel))
-            Rdock_area_close_panel(g.dock, panel);
+            documents::Close(panel);
     }
 
     // The x of the tab : asks first when there are changes.
@@ -2987,7 +2992,7 @@ namespace editor_ui::graphs
         if (title != doc.shown_title)
         {
             doc.shown_title = title;
-            Rdock_area_set_panel_title(g.dock, doc.panel, title.c_str());
+            documents::SetTitle(doc.panel, title);
         }
         if (Rget_time() - doc.status_time > 6.0 && doc.status_time > 0.0)
         {
@@ -3025,8 +3030,7 @@ namespace lynx::editor::graph_editors
         for (auto& doc : eg::g_docs)
             if (doc->path == absolute || std::filesystem::equivalent(doc->path, absolute, ec))
             {
-                Rdock_area_open_panel(editor_ui::g.dock, doc->panel);
-                Rdock_area_show_panel(editor_ui::g.dock, doc->panel);
+                editor_ui::documents::Show(doc->panel);
                 return;
             }
         if (editor_ui::g.dock == R_INVALID_ID)

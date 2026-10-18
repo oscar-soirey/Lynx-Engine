@@ -314,14 +314,19 @@ namespace editor_ui::shell
             return;
         g_was_playing = isPlaying;
         if (isPlaying)
+        {
+            if (g.documents != R_INVALID_ID && g.level_page != R_INVALID_ID && Rwidget_is_valid(g.documents))
+                Rtab_view_show_tab(g.documents, g.level_page);   // the game is in the level tab
             Rwidget_focus(g.viewport);
+        }
     }
 
     // ---- shortcuts of the level editor (ImGui used to poll them) ----------------------
 
     static bool OtherEditorHasFocus()
     {
-        return lynx::editor::input_settings::BlocksEditorShortcuts() ||
+        return !lynx::editor::documents::LevelTabActive() ||   // another tab is in front
+               lynx::editor::input_settings::BlocksEditorShortcuts() ||
                lynx::editor::widget_editor::HasFocus() ||
                lynx::editor::graph_editors::HasFocus() ||
                lynx::editor::particle_editor::HasFocus() ||

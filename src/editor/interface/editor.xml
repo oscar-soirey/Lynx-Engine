@@ -4,7 +4,8 @@
 
   Header (menus File / Edit / Window / Game / Tools / Help, title of the
   project, engine version), toolbar (the actions used all the time), the
-  docked panels, the status bar. The menus are filled by raven/PanelShell.inl.
+  docked panels, the status bar. The toolbar and the panels of the level are
+  the first tab of "documents" ; the files open in tabs next to it. The menus are filled by raven/PanelShell.inl.
   The panels are named : their arrangement is saved per project
   (editor_layout.txt) and Windows shows / hides them (editor_windows.txt).
 
@@ -22,6 +23,10 @@
 				<Image Name="header.lynxie.icon" Width="22" Height="19" Stretch="Fit" TintText="true"/>
 			</Button>
 		</HeaderBar>
+
+		<!-- Document tabs (as in Unreal) : the level, then one tab per open file (raven/Documents.inl) -->
+		<TabView Name="documents" Documents="true" Slot.Fill="1">
+		<VBox Name="doc.level">
 
 		<!-- Toolbar -->
 		<Border Name="toolbar" Class="toolbar" Padding="6,4">
@@ -77,6 +82,9 @@
 			<Include Source="panels/build.xml"/>
 			<Include Source="panels/commands.xml"/>
 		</DockArea>
+
+		</VBox>
+		</TabView>
 
 		<!-- Status bar -->
 		<Border Name="statusbar" Class="statusbar" Padding="8,2">

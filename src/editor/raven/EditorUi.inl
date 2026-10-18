@@ -25,6 +25,8 @@ namespace editor_ui
     {
         Rid window = R_INVALID_ID;
         Rid dock = R_INVALID_ID;
+        Rid documents = R_INVALID_ID;     // the tabs : the level, then the open files (Documents.inl)
+        Rid level_page = R_INVALID_ID;    // the tab of the level (toolbar + dock)
 
         Rid viewport_panel = R_INVALID_ID;
         Rid viewport = R_INVALID_ID;
@@ -138,6 +140,9 @@ namespace editor_ui
         }
         if (g.dock != R_INVALID_ID)
             Rdock_area_show_panel(g.dock, panel);
+        // a panel of the level : its tab in front
+        if (g.documents != R_INVALID_ID && g.level_page != R_INVALID_ID && Rwidget_is_valid(g.documents))
+            Rtab_view_show_tab(g.documents, g.level_page);
     }
 
     static void ClosePanel(Rid panel)
@@ -428,6 +433,7 @@ namespace editor_ui
 #include "PanelPaint.inl"
 #include "PanelConsole.inl"
 #include "PanelTools.inl"
+#include "Documents.inl"
 #include "WidgetEditor.inl"
 #include "VoxelAssembly.inl"
 #include "GraphEditors.inl"
@@ -526,7 +532,10 @@ namespace editor
         tools::Init();
         lynx::editor::commands_window::BindPanel(g.commands);
 
-        // Behavior Tree / Anim Graph editors : tabs of the dock (they ask before closing).
+        // Document tabs : the level, then the files (Widget, Voxel Assembly, graphs).
+        documents::Init();
+
+        // Behavior Tree / Anim Graph editors : they ask before closing.
         graphs::Init();
 
         // Icons of the tabs (the ImGui windows had them in their title).
@@ -556,7 +565,8 @@ namespace editor
         tools::Update(dt);
         console::Update();
 
-        // Behavior Tree / Anim Graph editors, Widget Editor.
+        // Document tabs, Behavior Tree / Anim Graph editors, Widget Editor, Voxel Assembly.
+        documents::Update();
         graphs::Update();
         widgets::Update();
         vasm_ed::Update();

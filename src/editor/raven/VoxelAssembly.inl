@@ -1141,7 +1141,7 @@ namespace editor_ui::vasm_ed
 
     static const char kPanelXml[] =
         "<HBox Spacing='0'>"
-        "  <VBox Width='250' Spacing='4' Slot.Padding='6'>"
+        "  <VBox Spacing='4' Slot.Padding='6'>"
         "    <HBox Spacing='6'><Label Text='Class' Width='56' Slot.VAlign='Center'/><TextInput Name='va.class' Slot.Fill='1' Tooltip='Name of the actor class (Place Actors, spawn)'/></HBox>"
         "    <HBox Spacing='6'><Label Text='Extends' Width='56' Slot.VAlign='Center'/><ComboBox Name='va.parent' Slot.Fill='1' Tooltip='Humanoid : walks, jumps and falls (Character blocks)'/></HBox>"
         "    <HBox Spacing='4' Slot.Padding='0,8,0,0'><Label Text='GRAPHS' Class='section' Slot.Fill='1' Slot.VAlign='Center'/><Button Name='va.addgraph' Text='+' Class='tool' Tooltip='New event graph'/></HBox>"
@@ -1149,8 +1149,7 @@ namespace editor_ui::vasm_ed
         "    <HBox Spacing='4'><Label Text='FUNCTIONS' Class='section' Slot.Fill='1' Slot.VAlign='Center'/><Button Name='va.addfn' Text='+' Class='tool' Tooltip='New function (with its own graph)'/></HBox>"
         "    <ListView Name='va.funcs' Height='100'/>"
         "    <HBox Spacing='4'><Label Text='VARIABLES' Class='section' Slot.Fill='1' Slot.VAlign='Center'/><Button Name='va.addvar' Text='+' Class='tool' Tooltip='New variable'/></HBox>"
-        "    <ListView Name='va.vars' Height='120'/>"
-        "    <ScrollBox Slot.Fill='1' Slot.Padding='0,8,0,0'><VBox Name='va.details' Spacing='5'/></ScrollBox>"
+        "    <ListView Name='va.vars' Slot.Fill='1'/>"
         "  </VBox>"
         "  <VBox Spacing='4' Slot.Fill='1' Slot.Padding='4'>"
         "    <HBox Spacing='6'>"
@@ -1167,6 +1166,7 @@ namespace editor_ui::vasm_ed
         "    </HBox>"
         "    <BlockEditor Name='va.blocks' Slot.Fill='1'/>"
         "  </VBox>"
+        "  <ScrollBox><VBox Name='va.details' Spacing='5' Slot.Padding='8'/></ScrollBox>"
         "</HBox>";
 
     static void SyncHeader(Doc& doc)
@@ -1272,6 +1272,8 @@ namespace editor_ui::vasm_ed
         used = false;
     }
 
+    static bool OnPanelClose(Rid panel);
+
     static void BuildPanel(Doc& doc)
     {
         doc.panel = Rwidget_create_from_xml(kPanelXml, sizeof(kPanelXml) - 1);
@@ -1366,6 +1368,16 @@ namespace editor_ui::vasm_ed
         eui::OnClick(find("va.reload"), [d]() { DocLater(d, [](Doc& x) { LoadDoc(x); SyncHeader(x); Status(x, "Reloaded"); }); });
         eui::OnClick(find("va.keep"), [d]() { d->changed_on_disk = false; });
 
+        // A tab of its own (Documents.inl) : its parts are panels of the dock area of the tab.
+        {
+            const std::string title = doc.path.filename().string();
+            auto page = std::make_shared<Rid>(R_INVALID_ID);
+            doc.panel = documents::OpenSplit(doc.panel, title, lynx::editor::file_icons::Kind::Script, { "My Blueprint", "Graph", "Details" },
+                                             [page]() { if (OnPanelClose(*page)) documents::Close(*page); });
+            *page = doc.panel;
+            doc.shown_title = title;
+        }
+
         eui::OnEvent(doc.panel, [d](const REvent& e)
         {
             if (e.type != R_EVENT_KEY_DOWN)
@@ -1375,13 +1387,6 @@ namespace editor_ui::vasm_ed
             return used;
         });
 
-        const std::string title = doc.path.filename().string();
-        Rdock_area_add_panel(g.dock, doc.panel, title.c_str(), R_DOCK_TAB, g.viewport_panel, 0.f);
-        float uv[4];
-        eui::FileIconRegion(lynx::editor::file_icons::Kind::Script, uv);
-        Rdock_area_set_panel_icon(g.dock, doc.panel, eui::FileIconTexture(), uv[0], uv[1], uv[2], uv[3], R_FALSE);
-        doc.shown_title = title;
-        Rdock_area_show_panel(g.dock, doc.panel);
     }
 
     static void CloseDoc(Doc* doc)
@@ -1392,7 +1397,7 @@ namespace editor_ui::vasm_ed
         const Rid panel = doc->panel;
         g_docs.erase(it);
         if (panel != R_INVALID_ID && Rwidget_is_valid(panel))
-            Rdock_area_close_panel(g.dock, panel);
+            documents::Close(panel);
     }
 
     static bool OwnsPanel(Rid panel)
@@ -1477,7 +1482,7 @@ namespace editor_ui::vasm_ed
         if (title != doc.shown_title)
         {
             doc.shown_title = title;
-            Rdock_area_set_panel_title(g.dock, doc.panel, title.c_str());
+            documents::SetTitle(doc.panel, title);
         }
         if (doc.status_time > 0.0 && Rget_time() - doc.status_time > 6.0)
         {
@@ -1516,8 +1521,7 @@ namespace lynx::editor::vasm_editor
         for (auto& doc : ev::g_docs)
             if (doc->path == absolute || std::filesystem::equivalent(doc->path, absolute, ec))
             {
-                Rdock_area_open_panel(editor_ui::g.dock, doc->panel);
-                Rdock_area_show_panel(editor_ui::g.dock, doc->panel);
+                editor_ui::documents::Show(doc->panel);
                 return;
             }
         if (editor_ui::g.dock == R_INVALID_ID)

@@ -1925,7 +1925,7 @@ namespace editor_ui::widgets
 
     static const char kPanelXml[] =
         "<HBox Spacing='0'>"
-        "  <VBox Width='250' Spacing='4' Slot.Padding='6'>"
+        "  <VBox Spacing='4' Slot.Padding='6'>"
         "    <Label Text='PALETTE' Class='section'/>"
         "    <TextInput Name='we.filter' Placeholder='Search widgets...'/>"
         "    <TreeView Name='we.palette' Height='250' Tooltip='Drag onto the Designer or the Hierarchy (double-click : into the selected panel)'/>"
@@ -1952,7 +1952,7 @@ namespace editor_ui::widgets
         "    </HBox>"
         "    <Custom Name='we.designer' Slot.Fill='1' Focusable='true'/>"
         "  </VBox>"
-        "  <ScrollBox Width='340'><VBox Name='we.details' Spacing='5' Slot.Padding='8'/></ScrollBox>"
+        "  <ScrollBox><VBox Name='we.details' Spacing='5' Slot.Padding='8'/></ScrollBox>"
         "</HBox>";
 
     static void Shortcut(Doc& doc, const REvent& e, bool& used)
@@ -1997,6 +1997,8 @@ namespace editor_ui::widgets
         }
         used = false;
     }
+
+    static bool OnPanelClose(Rid panel);
 
     static void BuildPanel(Doc& doc)
     {
@@ -2103,6 +2105,16 @@ namespace editor_ui::widgets
         eui::OnClick(find("we.reload"), [d]() { DocLater(d, [](Doc& x) { LoadDoc(x); Status(x, "Reloaded"); }); });
         eui::OnClick(find("we.keep"), [d]() { d->changed_on_disk = false; });
 
+        // A tab of its own (Documents.inl) : its parts are panels of the dock area of the tab.
+        {
+            const std::string title = doc.path.filename().string();
+            auto page = std::make_shared<Rid>(R_INVALID_ID);
+            doc.panel = documents::OpenSplit(doc.panel, title, lynx::editor::file_icons::Kind::Widget, { "Palette & Hierarchy", "Designer", "Details" },
+                                             [page]() { if (OnPanelClose(*page)) documents::Close(*page); });
+            *page = doc.panel;
+            doc.shown_title = title;
+        }
+
         // Shortcuts of the editor (the level editor waits : HasFocus).
         eui::OnEvent(doc.panel, [d](const REvent& e)
         {
@@ -2113,13 +2125,6 @@ namespace editor_ui::widgets
             return used;
         });
 
-        const std::string title = doc.path.filename().string();
-        Rdock_area_add_panel(g.dock, doc.panel, title.c_str(), R_DOCK_TAB, g.viewport_panel, 0.f);
-        float uv[4];
-        eui::FileIconRegion(lynx::editor::file_icons::Kind::Widget, uv);
-        Rdock_area_set_panel_icon(g.dock, doc.panel, eui::FileIconTexture(), uv[0], uv[1], uv[2], uv[3], R_FALSE);
-        doc.shown_title = title;
-        Rdock_area_show_panel(g.dock, doc.panel);
     }
 
     static void CloseDoc(Doc* doc)
@@ -2130,7 +2135,7 @@ namespace editor_ui::widgets
         const Rid panel = doc->panel;
         g_docs.erase(it);
         if (panel != R_INVALID_ID && Rwidget_is_valid(panel))
-            Rdock_area_close_panel(g.dock, panel);
+            documents::Close(panel);
     }
 
     static bool OwnsPanel(Rid panel)
@@ -2245,7 +2250,7 @@ namespace editor_ui::widgets
         if (title != doc.shown_title)
         {
             doc.shown_title = title;
-            Rdock_area_set_panel_title(g.dock, doc.panel, title.c_str());
+            documents::SetTitle(doc.panel, title);
         }
         if (doc.status_time > 0.0 && Rget_time() - doc.status_time > 5.0)
         {
@@ -2287,8 +2292,7 @@ namespace lynx::editor::widget_editor
         for (auto& doc : ew::g_docs)
             if (doc->path == absolute || std::filesystem::equivalent(doc->path, absolute, ec))
             {
-                Rdock_area_open_panel(editor_ui::g.dock, doc->panel);
-                Rdock_area_show_panel(editor_ui::g.dock, doc->panel);
+                editor_ui::documents::Show(doc->panel);
                 return;
             }
         if (editor_ui::g.dock == R_INVALID_ID)

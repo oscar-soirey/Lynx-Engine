@@ -89,6 +89,7 @@
 #include "ScriptEditors.h"
 #include "WidgetEditor.h"
 #include "VoxelAssemblyEditor.h"
+#include "Documents.h"
 #include "GraphEditors.h"
 #include "VoxelTypeEditor.h"
 #include "FileIcons.h"
@@ -3977,6 +3978,7 @@ namespace editor
 
 
         const bool javascript_editor_handles_shortcuts =
+            !lynx::editor::documents::LevelTabActive() ||
             lynx::editor::script_editors::HasKeyboardFocus() ||
             lynx::editor::widget_editor::HasFocus() ||
             lynx::editor::graph_editors::HasFocus() ||
