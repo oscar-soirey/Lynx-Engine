@@ -5,8 +5,9 @@
 // phases of the port :
 //   phase 2 : Git, Input Settings, code editors, Profiler,
 //             Ship Game, Sprite -> voxels ;
-//   phase 3 : Particle Editor, the editor modules of the plugins
-//             (new Raven API). The Widget Editor is in Raven (WidgetEditor.inl).
+//   phase 3 : the editor modules of the plugins (new Raven API).
+// The Widget Editor (WidgetEditor.inl) and the Particle Editor
+// (ParticleEditor.inl) are in Raven.
 // Until then the editor keeps working without them : the files they would
 // open are opened with the program Windows associates with them, and their
 // menu entries say that the window is not available yet.
@@ -98,21 +99,7 @@ namespace lynx::editor::script_editors
 // ---- Anim Graph / Behavior Tree : raven/GraphEditors.inl (Raven NodeGraph) ------------
 
 
-// ---- Particle Editor --------------------------------------------------------------
-namespace lynx::editor::particle_editor
-{
-    bool CanOpen(const std::filesystem::path&) { return false; }
-    void Open(const std::filesystem::path& path) { OpenWithSystem(path); }
-    void DrawAll(unsigned int) {}
-    bool HasFocus() { return false; }
-    void PathMoved(const std::filesystem::path&, const std::filesystem::path&) {}
-    void PathDeleted(const std::filesystem::path&) {}
-    bool HasUnsavedChanges() { return false; }
-    void SaveAll() {}
-    std::string NewFileTemplate() { return lynx::particles::NewTemplate(); }
-    void SetAssetFieldDrawer(std::function<bool(std::string&)>) {}
-    void Shutdown() {}
-}
+// ---- Particle Editor : raven/ParticleEditor.inl (Raven) ------------------------------
 
 
 // ---- Editor modules of the plugins (new Raven API : phase 3) ----------------------

@@ -103,8 +103,8 @@ target_compile_definitions(Lynx PRIVATE
 # Engine version (Engine::GetVersion, editor title bar, SDK package version)
 set(LYNX_VERSION_YEAR  27)
 set(LYNX_VERSION_MAJOR 0)
-set(LYNX_VERSION_MINOR 0)
-set(LYNX_VERSION "${LYNX_VERSION_YEAR}.${LYNX_VERSION_MAJOR}.${LYNX_VERSION_MINOR}")
+set(LYNX_VERSION_MINOR 1)
+set(LYNX_VERSION "${LYNX_VERSION_YEAR}.${LYNX_VERSION_MAJOR}.${LYNX_VERSION_MINOR} PRE RELEASE")
 
 target_compile_definitions(Lynx
 		PRIVATE

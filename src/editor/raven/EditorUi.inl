@@ -438,6 +438,7 @@ namespace editor_ui
 #include "WidgetEditor.inl"
 #include "VoxelAssembly.inl"
 #include "GraphEditors.inl"
+#include "ParticleEditor.inl"
 
 
 // =============================================================================
@@ -568,11 +569,12 @@ namespace editor
         tools::Update(dt);
         console::Update();
 
-        // Document tabs, Behavior Tree / Anim Graph editors, Widget Editor, Voxel Assembly.
+        // Document tabs, Behavior Tree / Anim Graph editors, Widget Editor, Voxel Assembly, Particle Editor.
         documents::Update();
         graphs::Update();
         widgets::Update();
         vasm_ed::Update();
+        particles::Update();
 
         // Commands (Scripts, Lynxie, Console, Reference, AI / MCP).
         lynx::editor::commands_window::UpdatePanel(IsPanelShown(g.commands));

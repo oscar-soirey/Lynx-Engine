@@ -1,5 +1,7 @@
 obligé:
 
+ajouter des blocs les recherchant apres un clic droit
+
 actions github pour compiler et tout
 
 ameliorer le zorder entre les sprites

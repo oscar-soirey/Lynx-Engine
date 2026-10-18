@@ -3409,11 +3409,6 @@ namespace editor
             lynx::editor::plugins::LoadEditorModules();
         }
 
-        // At every start : Commands is shown, on the Lynxie tab (whatever
-        // was open / focused when the editor was closed).
-        editorWindows.commands = true;
-        lynx::editor::commands_window::ShowLynxie(5);
-
         // Console : "Fix with Lynxie" sends an error (stack, script, line) to Lynxie.
         lynx::editor::output_console::SetFixHandler([](const std::string& prompt, const std::string& display)
         {
