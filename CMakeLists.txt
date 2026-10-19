@@ -150,22 +150,29 @@ target_compile_features(Lynx INTERFACE cxx_std_20)
 
 ## Lynx Editor (engine executable : opens a game project, see src/editor/README.md)
 #
-# The interface is Raven (C11, Vulkan), a folder next to Lynx
-# (S:/Horizon/Raven beside S:/Horizon/Lynx), or RAVEN_DIR. The XML files of the
-# interface (src/editor/interface) are embedded in the executable ; set the
-# environment variable LYNX_UI_DIR=<Lynx>/src/editor/interface to edit them
-# while the editor runs (live reload).
+# The interface is Raven (C11, Vulkan), linked from a prebuilt static library :
+# third-party/raven/lib/libraven.a and its headers in third-party/raven/include
+# (MinGW-w64, static, without the web pages). To update it, build Raven and copy
+# libraven.a and include/ there. The XML files of the interface
+# (src/editor/interface) are embedded in the executable ; set the environment
+# variable LYNX_UI_DIR=<Lynx>/src/editor/interface to edit them while the
+# editor runs (live reload).
 
-set(RAVEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Raven" CACHE PATH "Raven (interface of the editor)")
-if(NOT EXISTS "${RAVEN_DIR}/CMakeLists.txt")
-	message(FATAL_ERROR "Raven not found in ${RAVEN_DIR} : clone it next to Lynx, or set RAVEN_DIR.")
+set(RAVEN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third-party/raven")
+if(NOT EXISTS "${RAVEN_ROOT}/lib/libraven.a" OR NOT EXISTS "${RAVEN_ROOT}/include/Raven.h")
+	message(FATAL_ERROR "Raven not found : third-party/raven/lib/libraven.a and third-party/raven/include/Raven.h are needed.")
 endif()
-set(RAVEN_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(RAVEN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(RAVEN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(RAVEN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(RAVEN_BUILD_WEB OFF CACHE BOOL "" FORCE)
-add_subdirectory("${RAVEN_DIR}" "${CMAKE_BINARY_DIR}/raven" EXCLUDE_FROM_ALL)
+add_library(raven::raven STATIC IMPORTED GLOBAL)
+set_target_properties(raven::raven PROPERTIES
+	IMPORTED_LOCATION "${RAVEN_ROOT}/lib/libraven.a"
+	INTERFACE_INCLUDE_DIRECTORIES "${RAVEN_ROOT}/include")
+# What the static library needs from the system (RAVEN_LIBRARIES of Raven)
+if(WIN32)
+	set_property(TARGET raven::raven PROPERTY INTERFACE_LINK_LIBRARIES winhttp user32 gdi32 shell32 comdlg32 ole32)
+else()
+	find_package(Threads REQUIRED)
+	set_property(TARGET raven::raven PROPERTY INTERFACE_LINK_LIBRARIES Threads::Threads m ${CMAKE_DL_LIBS})
+endif()
 
 # Interface of the editor, embedded : the XML files, the icon atlases, the font.
 include(cmake/LynxEmbedFiles.cmake)
